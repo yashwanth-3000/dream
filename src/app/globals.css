@@ -2,7 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
   --color-background: var(--background);
@@ -83,44 +83,330 @@
 }
 
 .dark {
-  --background: oklch(0.22 0.03 264);
-  --foreground: oklch(0.97 0.01 84);
-  --card: oklch(0.27 0.04 264);
-  --card-foreground: oklch(0.97 0.01 84);
-  --popover: oklch(0.27 0.04 264);
-  --popover-foreground: oklch(0.97 0.01 84);
+  --background: oklch(0.14 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.16 0 0);
+  --popover-foreground: oklch(0.96 0 0);
   --primary: oklch(0.76 0.16 42);
-  --primary-foreground: oklch(0.2 0.03 264);
-  --secondary: oklch(0.35 0.03 264);
-  --secondary-foreground: oklch(0.97 0.01 84);
-  --muted: oklch(0.35 0.03 264);
-  --muted-foreground: oklch(0.78 0.02 84);
-  --accent: oklch(0.44 0.07 120);
-  --accent-foreground: oklch(0.97 0.01 84);
+  --primary-foreground: oklch(0.16 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.94 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.75 0 0);
+  --accent: oklch(0.27 0 0);
+  --accent-foreground: oklch(0.95 0 0);
   --destructive: oklch(0.68 0.19 28);
-  --border: oklch(0.98 0 0 / 14%);
-  --input: oklch(0.98 0 0 / 16%);
+  --border: oklch(0.92 0 0 / 12%);
+  --input: oklch(0.92 0 0 / 15%);
   --ring: oklch(0.76 0.16 42);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.7 0.16 42);
+  --chart-2: oklch(0.65 0.12 178);
+  --chart-3: oklch(0.72 0.11 250);
+  --chart-4: oklch(0.8 0.14 95);
+  --chart-5: oklch(0.72 0.14 22);
+  --sidebar: oklch(0.16 0 0);
+  --sidebar-foreground: oklch(0.96 0 0);
+  --sidebar-primary: oklch(0.76 0.16 42);
+  --sidebar-primary-foreground: oklch(0.14 0 0);
+  --sidebar-accent: oklch(0.22 0 0);
+  --sidebar-accent-foreground: oklch(0.95 0 0);
+  --sidebar-border: oklch(0.92 0 0 / 10%);
+  --sidebar-ring: oklch(0.8 0.12 42);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scroll-behavior: smooth;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@keyframes fade-up-soft {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes fade-in-soft {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Ambient orbs (Apple Vision Pro mood) ────────────────────────── */
+
+@keyframes ambient-drift-1 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+    opacity: 0.45;
+  }
+  25% {
+    transform: translate(4%, -7%) scale(1.12);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translate(-3%, 4%) scale(0.92);
+    opacity: 0.35;
+  }
+  75% {
+    transform: translate(6%, 2%) scale(1.06);
+    opacity: 0.52;
+  }
+}
+
+@keyframes ambient-drift-2 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+    opacity: 0.3;
+  }
+  30% {
+    transform: translate(-5%, 3%) scale(0.94);
+    opacity: 0.48;
+  }
+  60% {
+    transform: translate(3%, -5%) scale(1.1);
+    opacity: 0.22;
+  }
+}
+
+@keyframes ambient-drift-3 {
+  0%,
+  100% {
+    transform: translate(0%, 0%) scale(1);
+    opacity: 0.22;
+  }
+  35% {
+    transform: translate(6%, 4%) scale(1.08);
+    opacity: 0.38;
+  }
+  70% {
+    transform: translate(-4%, -3%) scale(0.93);
+    opacity: 0.18;
+  }
+}
+
+@keyframes ambient-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes immersive-float {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes page-sheen-sweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-80%);
+  }
+  40% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(90%);
+  }
+}
+
+@layer utilities {
+  .animate-in-view {
+    animation: fade-up-soft 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .animate-in-view-delay-1 {
+    animation-delay: 70ms;
+  }
+
+  .animate-in-view-delay-2 {
+    animation-delay: 140ms;
+  }
+
+  .animate-in-view-delay-3 {
+    animation-delay: 210ms;
+  }
+
+  .animate-fade-soft {
+    animation: fade-in-soft 420ms ease both;
+  }
+
+  .micro-card {
+    transition:
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 260ms ease,
+      background-color 260ms ease;
+    will-change: transform;
+  }
+
+  .micro-card:hover {
+    transform: translate3d(0, -4px, 0);
+  }
+
+  .micro-btn {
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      filter 180ms ease,
+      background-color 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .micro-btn:hover {
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .micro-btn:active {
+    transform: scale(0.98);
+  }
+
+  /* Ambient orb utilities */
+  .ambient-orb-1 {
+    animation: ambient-drift-1 22s ease-in-out infinite;
+  }
+
+  .ambient-orb-2 {
+    animation: ambient-drift-2 28s ease-in-out infinite;
+  }
+
+  .ambient-orb-3 {
+    animation: ambient-drift-3 19s ease-in-out infinite;
+  }
+
+  .ambient-star {
+    animation: ambient-pulse 4s ease-in-out infinite;
+  }
+
+  .immersive-book-float {
+    animation: immersive-float 5.8s ease-in-out infinite;
+  }
+
+  .page-sheen-sweep {
+    animation: page-sheen-sweep 720ms ease-out both;
+  }
+
+  /* Dashboard dark-mode normalization for legacy white/black utility classes */
+  .dark .dashboard-page .bg-white {
+    background-color: #141414 !important;
+  }
+
+  .dark .dashboard-page .bg-white\/80 {
+    background-color: rgb(16 16 16 / 0.94) !important;
+  }
+
+  .dark .dashboard-page .bg-white\/90 {
+    background-color: rgb(18 18 18 / 0.94) !important;
+  }
+
+  .dark .dashboard-page .bg-white\/95 {
+    background-color: rgb(20 20 20 / 0.96) !important;
+  }
+
+  .dark .dashboard-page .bg-muted\/40 {
+    background-color: rgb(255 255 255 / 0.04) !important;
+  }
+
+  .dark .dashboard-page .bg-amber-50 {
+    background-color: #1b1711 !important;
+  }
+
+  .dark .dashboard-page .bg-yellow-100 {
+    background-color: rgb(250 204 21 / 0.12) !important;
+  }
+
+  .dark .dashboard-page .bg-yellow-200\/60 {
+    background-color: rgb(250 204 21 / 0.16) !important;
+  }
+
+  .dark .dashboard-page .bg-emerald-50 {
+    background-color: rgb(16 185 129 / 0.14) !important;
+  }
+
+  .dark .dashboard-page .border-black {
+    border-color: rgb(255 255 255 / 0.22) !important;
+  }
+
+  .dark .dashboard-page .border-black\/80 {
+    border-color: rgb(255 255 255 / 0.2) !important;
+  }
+
+  .dark .dashboard-page .border-black\/70 {
+    border-color: rgb(255 255 255 / 0.17) !important;
+  }
+
+  .dark .dashboard-page .border-black\/60 {
+    border-color: rgb(255 255 255 / 0.14) !important;
+  }
+
+  .dark .dashboard-page .border-black\/20 {
+    border-color: rgb(255 255 255 / 0.1) !important;
+  }
+
+  .dark .dashboard-page .text-black {
+    color: rgb(242 242 242) !important;
+  }
+
+  .dark .dashboard-page .text-black\/80 {
+    color: rgb(214 214 214) !important;
+  }
+
+  .dark .dashboard-page .text-black\/70 {
+    color: rgb(194 194 194) !important;
+  }
+
+  .dark .dashboard-page .text-black\/60 {
+    color: rgb(166 166 166) !important;
+  }
+
+  .dark .dashboard-page .text-black\/50 {
+    color: rgb(140 140 140) !important;
+  }
+
+  .dark .dashboard-page .hover\:bg-muted:hover {
+    background-color: rgb(255 255 255 / 0.06) !important;
+  }
+
+  .dark .dashboard-page .hover\:bg-muted\/30:hover {
+    background-color: rgb(255 255 255 / 0.05) !important;
+  }
+
+  .dark .dashboard-page .hover\:bg-pink-100:hover {
+    background-color: rgb(255 255 255 / 0.06) !important;
+  }
+
+  .dark .dashboard-page .hover\:bg-amber-100:hover {
+    background-color: #262016 !important;
+  }
+
+  .dark .dashboard-page .ring-black\/20 {
+    --tw-ring-color: rgb(255 255 255 / 0.14) !important;
   }
 }

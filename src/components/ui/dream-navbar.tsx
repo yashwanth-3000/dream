@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo } from "react";
 import { Sparkles } from "lucide-react";
 
@@ -45,10 +46,13 @@ export default function DreamNavbar() {
           className="mx-2"
         />
 
-        <button className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.16em] text-foreground/80 transition-colors hover:text-foreground md:text-sm">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-[0.16em] text-foreground/80 transition-colors hover:text-foreground md:text-sm"
+        >
           <Sparkles className="size-3.5 md:size-4" />
           Start
-        </button>
+        </Link>
       </nav>
     </header>
   );
