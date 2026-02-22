@@ -141,7 +141,7 @@ export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
       id={sectionId}
       ref={sectionRef}
       className={cn(
-        "relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-[linear-gradient(180deg,#fff4df_0%,#fff9ef_45%,#eef6ff_100%)] px-4 text-center",
+        "relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-[linear-gradient(180deg,#fff4df_0%,#fff9ef_45%,#eef6ff_100%)] px-4 text-center dark:bg-[linear-gradient(180deg,#0f131a_0%,#141925_45%,#101827_100%)]",
         className
       )}
     >
@@ -151,7 +151,7 @@ export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
             initial="hidden"
             animate="show"
             variants={FADE_IN_ANIMATION_VARIANTS}
-            className="mb-4 inline-block rounded-full border border-primary/25 bg-white/80 px-4 py-1.5 text-sm font-medium text-foreground backdrop-blur-sm"
+            className="mb-4 inline-block rounded-full border border-primary/25 bg-white/80 px-4 py-1.5 text-sm font-medium text-foreground backdrop-blur-sm dark:border-white/12 dark:bg-white/8 dark:text-white/90"
           >
             {tagline}
           </motion.div>

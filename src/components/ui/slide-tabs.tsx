@@ -135,7 +135,7 @@ const Tab = React.forwardRef<HTMLLIElement, TabProps>(
             opacity: 1,
           });
         }}
-        className="relative z-10 block cursor-pointer py-2 text-xs font-semibold uppercase tracking-[0.18em] text-foreground/70 transition-colors hover:text-foreground md:text-sm"
+        className="relative z-10 block cursor-pointer py-2 text-xs font-semibold uppercase tracking-[0.18em] text-foreground/75 transition-colors hover:text-foreground dark:text-white/75 dark:hover:text-white md:text-sm"
       >
         {children}
       </li>
@@ -150,7 +150,7 @@ const Cursor = ({ position }: { position: CursorPosition }) => {
     <motion.li
       animate={{ ...position }}
       transition={{ type: "spring", stiffness: 420, damping: 36, mass: 0.7 }}
-      className="absolute bottom-0 z-0 h-[2px] bg-foreground"
+      className="absolute bottom-0 z-0 h-[2px] bg-foreground dark:bg-white"
     />
   );
 };

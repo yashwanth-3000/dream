@@ -81,7 +81,7 @@ export default function GalleryDemo() {
         className="h-screen w-full overflow-hidden"
       />
       <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-center px-3 mix-blend-exclusion text-white">
-        <h1 className="font-serif text-4xl tracking-tight md:text-7xl">
+        <h1 className="font-serif text-2xl tracking-tight md:text-5xl">
           <span className="italic">Dream big.</span> Build magical stories and videos.
         </h1>
       </div>
