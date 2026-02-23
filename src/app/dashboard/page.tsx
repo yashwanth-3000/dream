@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, Clock3, XCircle } from "lucide-react";
 
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";
 import { dashboardJobs, formatRelativeTime } from "@/lib/dashboard-data";
+import styles from "./dashboard.module.css";
 
 function previewItemsForJob(job: (typeof dashboardJobs)[number]) {
   const urls = Array.isArray(job.files) ? job.files.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -13,69 +14,67 @@ function previewItemsForJob(job: (typeof dashboardJobs)[number]) {
   }));
 }
 
+const QUICK_LINKS = [
+  {
+    href: "/dashboard/create",
+    kicker: "Launch",
+    title: "New Dream",
+    body: "Create a fresh story or short video from one prompt.",
+    cta: "Open Create",
+  },
+  {
+    href: "/dashboard/stories",
+    kicker: "Library",
+    title: "Stories",
+    body: "Open, remix, and manage kid-safe story outputs.",
+    cta: "Open Stories",
+  },
+  {
+    href: "/dashboard/videos",
+    kicker: "Studio",
+    title: "Videos",
+    body: "Review generated scenes and kid-friendly video moments.",
+    cta: "Open Videos",
+  },
+  {
+    href: "/dashboard/characters",
+    kicker: "Vault",
+    title: "Characters",
+    body: "Reuse saved character styles across new generations.",
+    cta: "Open Characters",
+  },
+];
+
 export default function DashboardOverviewPage() {
   const recent = [...dashboardJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
 
   return (
-    <div className="space-y-5 animate-fade-soft">
+    <div className="space-y-5">
+      {/* ── Quick-access cards ── */}
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Link
-          href="/dashboard/create"
-          className="group rounded-3xl border border-border/60 bg-white/80 dark:border-white/10 dark:bg-[#111111]/95 p-5 shadow-sm transition hover:shadow-md micro-card animate-in-view"
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Launch</p>
-          <h3 className="mt-2 text-xl font-black text-foreground">New Dream</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Create a fresh story or short video from one prompt.</p>
-          <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            Open Create
-            <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-          </div>
-        </Link>
-
-        <Link
-          href="/dashboard/stories"
-          className="group rounded-3xl border border-border/60 bg-white/80 dark:border-white/10 dark:bg-[#111111]/95 p-5 shadow-sm transition hover:shadow-md micro-card animate-in-view animate-in-view-delay-1"
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Library</p>
-          <h3 className="mt-2 text-xl font-black text-foreground">Stories</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Open, remix, and manage kid-safe story outputs.</p>
-          <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            Open Stories
-            <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-          </div>
-        </Link>
-
-        <Link
-          href="/dashboard/videos"
-          className="group rounded-3xl border border-border/60 bg-white/80 dark:border-white/10 dark:bg-[#111111]/95 p-5 shadow-sm transition hover:shadow-md micro-card animate-in-view animate-in-view-delay-2"
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Studio</p>
-          <h3 className="mt-2 text-xl font-black text-foreground">Videos</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Review generated scenes and kid-friendly video moments.</p>
-          <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            Open Videos
-            <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-          </div>
-        </Link>
-
-        <Link
-          href="/dashboard/characters"
-          className="group rounded-3xl border border-border/60 bg-white/80 dark:border-white/10 dark:bg-[#111111]/95 p-5 shadow-sm transition hover:shadow-md micro-card animate-in-view animate-in-view-delay-3"
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vault</p>
-          <h3 className="mt-2 text-xl font-black text-foreground">Characters</h3>
-          <p className="mt-2 text-sm text-muted-foreground">Reuse saved character styles across new generations.</p>
-          <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-primary">
-            Open Characters
-            <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
-          </div>
-        </Link>
+        {QUICK_LINKS.map((item) => (
+          <Link key={item.href} href={item.href} className={`group ${styles.quickCard}`}>
+            <p style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9a7a65" }}>
+              {item.kicker}
+            </p>
+            <h3 className={`${styles.halant} mt-2 text-xl`}>{item.title}</h3>
+            <p className="mt-2 text-sm" style={{ color: "#9a7a65" }}>{item.body}</p>
+            <div className="mt-4 inline-flex items-center gap-1 text-sm font-semibold" style={{ color: "#8b5e3c" }}>
+              {item.cta}
+              <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
+            </div>
+          </Link>
+        ))}
       </section>
 
-      <section className="rounded-3xl border border-border/60 bg-white/80 dark:border-white/10 dark:bg-[#111111]/95 p-4 shadow-sm backdrop-blur md:p-5 animate-in-view animate-in-view-delay-1">
+      {/* ── Recent jobs ── */}
+      <section
+        className="rounded-3xl p-4 shadow-sm md:p-5"
+        style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
+      >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-lg font-black text-foreground">Recent Jobs</h3>
-          <Link href="/dashboard/jobs" className="text-sm font-semibold text-primary">
+          <h3 className={`${styles.halant} text-lg`}>Recent Jobs</h3>
+          <Link href="/dashboard/jobs" className="text-sm font-semibold" style={{ color: "#8b5e3c" }}>
             View all
           </Link>
         </div>
@@ -93,16 +92,17 @@ export default function DashboardOverviewPage() {
               );
 
             return (
-              <Link
-                key={job.id}
-                href={`/dashboard/jobs/${job.id}`}
-                className="flex items-center justify-between rounded-2xl border border-border/70 bg-white dark:border-white/10 dark:bg-[#151515] p-3 transition hover:bg-muted/30 micro-card"
-              >
+              <Link key={job.id} href={`/dashboard/jobs/${job.id}`} className={styles.jobRow}>
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="inline-flex size-8 items-center justify-center rounded-full bg-muted">{icon}</span>
+                  <span
+                    className="inline-flex size-8 items-center justify-center rounded-full"
+                    style={{ background: "#ede7dd" }}
+                  >
+                    {icon}
+                  </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{job.productName}</p>
-                    <p className="text-xs text-muted-foreground">{formatRelativeTime(job.createdAt)}</p>
+                    <p className="truncate text-sm font-semibold" style={{ color: "#2b180a" }}>{job.productName}</p>
+                    <p className="text-xs" style={{ color: "#9a7a65" }}>{formatRelativeTime(job.createdAt)}</p>
                   </div>
                 </div>
                 <div className="hidden sm:block">{preview.length ? <AnimatedTooltip items={preview} /> : null}</div>

@@ -25,6 +25,7 @@ const AnimatedHeroDemo = () => {
       }
       description="Type one idea and Dream builds kid-safe text-to-story adventures, animated text-to-video moments, and playful learning scenes your child can revisit anytime."
       ctaText="Create with Dream"
+      ctaHref="/chat"
       images={DEMO_IMAGES}
       className="shrink-0"
       sectionId="home-section"

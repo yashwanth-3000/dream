@@ -24,21 +24,21 @@ import {
 } from "@/lib/custom-characters";
 import { dashboardCharacters } from "@/lib/dashboard-data";
 import { cn } from "@/lib/utils";
+import styles from "../dashboard.module.css";
 
 type CharacterRecord = (typeof dashboardCharacters)[number] | StoredCharacter;
 
 const AGE_TABS = ["All", "4-7", "5-8", "5-10", "6-9"] as const;
+const easing = [0.22, 1, 0.36, 1] as const;
 
 export default function DashboardCharactersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [selectedCharacter, setSelectedCharacter] =
-    useState<CharacterRecord | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterRecord | null>(null);
   const [copiedId, setCopiedId] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const prefersReducedMotion = useReducedMotion();
-  const easing = [0.22, 1, 0.36, 1] as const;
 
   const customCharacters = useSyncExternalStore(
     subscribeStoredCharacters,
@@ -87,42 +87,47 @@ export default function DashboardCharactersPage() {
             : { duration: 0.4, ease: easing }
         }
       >
-        {/* ── Header ──────────────────────────────────────────────── */}
+        {/* ── Header ── */}
         <div className="flex items-end justify-between">
           <div>
-            <h2 className="text-2xl font-black tracking-tight text-foreground">
-              Characters
-            </h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <h2 className={`${styles.halant} text-2xl`}>Characters</h2>
+            <p className="mt-0.5 text-sm" style={{ color: "#9a7a65" }}>
               {allCharacters.length} in your vault
             </p>
           </div>
 
           <Link
             href="/dashboard/characters/new-character"
-            className="group inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:brightness-95 micro-btn md:text-sm"
+            className="group inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition md:text-sm"
+            style={{ background: "#2b180a", color: "#f5e6d5" }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
           >
             <Plus className="size-4 transition-transform group-hover:rotate-90" />
             New Character
           </Link>
         </div>
 
-        {/* ── Toolbar ─────────────────────────────────────────────── */}
+        {/* ── Toolbar ── */}
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
+            <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2" style={{ color: "#9a7a65" }} />
             <input
               ref={searchRef}
               placeholder="Search characters..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-44 rounded-full border border-border/80 bg-white/80 py-2 pl-9 pr-3 text-xs font-medium text-foreground outline-none transition-all placeholder:text-muted-foreground/50 focus:w-60 focus:border-primary/40 focus:bg-white focus:shadow-sm dark:bg-white/5 dark:focus:bg-white/10 sm:w-52"
+              className="w-44 rounded-full py-2 pl-9 pr-3 text-xs font-medium outline-none transition-all focus:w-60 focus:shadow-sm sm:w-52"
+              style={{ background: "#fdf8f3", border: "1px solid #dbc9b7", color: "#2b180a" }}
             />
           </div>
 
-          <div className="h-5 w-px bg-border/60 dark:bg-white/10" />
+          <div className="h-5 w-px" style={{ background: "#dbc9b7" }} />
 
-          <div className="flex items-center gap-0.5 rounded-full border border-border/60 bg-white/60 p-0.5 dark:bg-white/5">
+          <div
+            className="flex items-center gap-0.5 rounded-full p-0.5"
+            style={{ border: "1px solid #dbc9b7", background: "rgb(253 248 243 / 0.6)" }}
+          >
             {AGE_TABS.map((tab) => {
               const isActive = activeTab === tab;
 
@@ -131,17 +136,14 @@ export default function DashboardCharactersPage() {
                   key={tab}
                   type="button"
                   onClick={() => setActiveTab(tab)}
-                  className={cn(
-                    "relative overflow-hidden rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-                    isActive
-                      ? "text-background"
-                      : "text-muted-foreground/70 hover:text-foreground",
-                  )}
+                  className="relative overflow-hidden rounded-full px-3 py-1 text-xs font-semibold transition-colors"
+                  style={{ color: isActive ? "#fdf8f3" : "#9a7a65" }}
                 >
                   {isActive && (
                     <motion.span
                       layoutId="character-age-pill"
-                      className="absolute inset-0 rounded-full bg-foreground shadow-sm"
+                      className="absolute inset-0 rounded-full"
+                      style={{ background: "#2b180a" }}
                       transition={
                         prefersReducedMotion
                           ? { duration: 0 }
@@ -156,7 +158,7 @@ export default function DashboardCharactersPage() {
           </div>
         </div>
 
-        {/* ── Session badge ───────────────────────────────────────── */}
+        {/* ── Session badge ── */}
         {customCharacters.length > 0 && (
           <motion.div
             initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
@@ -164,7 +166,8 @@ export default function DashboardCharactersPage() {
             transition={
               prefersReducedMotion ? { duration: 0 } : { duration: 0.32, ease: easing }
             }
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold text-primary"
+            className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold"
+            style={{ background: "#f0e8dc", color: "#8b5e3c" }}
           >
             <motion.span
               animate={
@@ -178,7 +181,7 @@ export default function DashboardCharactersPage() {
           </motion.div>
         )}
 
-        {/* ── Character Grid ──────────────────────────────────────── */}
+        {/* ── Character Grid ── */}
         <div className="mt-6">
           <motion.div
             layout
@@ -218,11 +221,12 @@ export default function DashboardCharactersPage() {
                   >
                     <div
                       className={cn(
-                        "relative aspect-[3/4] overflow-hidden rounded-2xl bg-muted/40 shadow-sm transition-all duration-300",
+                        "relative aspect-[3/4] overflow-hidden rounded-2xl shadow-sm transition-all duration-300",
                         isHovered
-                          ? "shadow-xl shadow-black/15 ring-2 ring-primary/50 ring-offset-2 ring-offset-background"
+                          ? "shadow-xl ring-2 ring-[#c9924e]/50 ring-offset-2"
                           : "hover:shadow-lg",
                       )}
+                      style={{ background: "#ede7dd" }}
                     >
                       <img
                         src={char.avatar}
@@ -230,7 +234,6 @@ export default function DashboardCharactersPage() {
                         className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.08]"
                       />
 
-                      {/* Gradient overlay */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
                       <motion.div
                         aria-hidden="true"
@@ -238,16 +241,12 @@ export default function DashboardCharactersPage() {
                         animate={
                           prefersReducedMotion
                             ? { opacity: 0 }
-                            : {
-                                opacity: isHovered ? 1 : 0,
-                                x: isHovered ? 0 : -8,
-                              }
+                            : { opacity: isHovered ? 1 : 0, x: isHovered ? 0 : -8 }
                         }
                         transition={{ duration: 0.24, ease: easing }}
-                        className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-primary/30 via-transparent to-white/30 mix-blend-screen"
+                        className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-[#c9924e]/30 via-transparent to-white/30 mix-blend-screen"
                       />
 
-                      {/* New badge */}
                       {isLocal && (
                         <motion.span
                           initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.86, y: -4 }}
@@ -257,39 +256,35 @@ export default function DashboardCharactersPage() {
                               ? { duration: 0 }
                               : { duration: 0.24, ease: easing, delay: 0.05 }
                           }
-                          className="absolute left-2.5 top-2.5 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground shadow-sm"
+                          className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm"
+                          style={{ background: "#2b180a", color: "#f5e6d5" }}
                         >
                           New
                         </motion.span>
                       )}
 
-                      {/* Hover heart */}
                       <motion.button
                         type="button"
                         initial={false}
                         animate={
                           prefersReducedMotion
                             ? { opacity: isHovered ? 1 : 0 }
-                            : {
-                                opacity: isHovered ? 1 : 0,
-                                scale: isHovered ? 1 : 0.82,
-                                y: isHovered ? 0 : -4,
-                              }
+                            : { opacity: isHovered ? 1 : 0, scale: isHovered ? 1 : 0.82, y: isHovered ? 0 : -4 }
                         }
                         whileHover={prefersReducedMotion ? undefined : { scale: 1.08 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.94 }}
                         transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.16, ease: easing }}
                         onClick={(e) => e.stopPropagation()}
                         className={cn(
-                          "absolute right-2.5 top-2.5 flex size-8 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-md transition hover:bg-primary hover:text-primary-foreground",
+                          "absolute right-2.5 top-2.5 flex size-8 items-center justify-center rounded-full text-white backdrop-blur-md transition",
                           !isHovered && "pointer-events-none",
                         )}
+                        style={{ background: "rgba(0,0,0,0.3)" }}
                         aria-label="Favorite"
                       >
                         <Heart className="size-3.5" />
                       </motion.button>
 
-                      {/* Bottom info */}
                       <motion.div
                         className="absolute inset-x-0 bottom-0 p-3"
                         initial={false}
@@ -325,23 +320,22 @@ export default function DashboardCharactersPage() {
           </motion.div>
         </div>
 
-        {/* ── Empty state ─────────────────────────────────────────── */}
+        {/* ── Empty state ── */}
         {filtered.length === 0 && (
           <div className="mt-10 flex flex-col items-center py-16 text-center">
-            <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-muted/60">
-              <User className="size-5 text-muted-foreground/50" />
+            <div
+              className="mb-3 flex size-12 items-center justify-center rounded-full"
+              style={{ background: "#ede7dd" }}
+            >
+              <User className="size-5" style={{ color: "#9a7a65" }} />
             </div>
-            <p className="text-sm font-semibold text-muted-foreground">
-              No characters found
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/60">
-              Try adjusting your search or filters
-            </p>
+            <p className="text-sm font-semibold" style={{ color: "#9a7a65" }}>No characters found</p>
+            <p className="mt-1 text-xs" style={{ color: "#c4a88e" }}>Try adjusting your search or filters</p>
           </div>
         )}
       </motion.div>
 
-      {/* ── Detail Modal (portalled to body) ──────────────────────── */}
+      {/* ── Detail Modal ── */}
       {typeof document !== "undefined" &&
         createPortal(
           <AnimatePresence>
@@ -352,7 +346,8 @@ export default function DashboardCharactersPage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
-                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-md"
+                className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+                style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)" }}
                 onClick={() => setSelectedCharacter(null)}
               >
                 <motion.div
@@ -360,12 +355,9 @@ export default function DashboardCharactersPage() {
                   initial={{ opacity: 0, scale: 0.95, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  transition={
-                    prefersReducedMotion
-                      ? { duration: 0 }
-                      : { duration: 0.3, ease: easing }
-                  }
-                  className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-white shadow-2xl dark:bg-[#111111]"
+                  transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3, ease: easing }}
+                  className="relative w-full max-w-lg overflow-hidden rounded-3xl shadow-2xl"
+                  style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Hero banner */}
@@ -373,16 +365,22 @@ export default function DashboardCharactersPage() {
                     <img
                       src={selectedCharacter.avatar}
                       alt=""
-                      className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
+                      className="h-full w-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-white via-white/30 to-transparent dark:from-[#111111] dark:via-[#111111]/30" />
+                    <div
+                      className="absolute inset-0"
+                      style={{ background: "linear-gradient(to top, #fdf8f3 0%, rgba(253,248,243,0.3) 40%, transparent 100%)" }}
+                    />
 
                     <motion.button
                       type="button"
                       onClick={() => setSelectedCharacter(null)}
                       whileHover={prefersReducedMotion ? undefined : { scale: 1.06 }}
                       whileTap={prefersReducedMotion ? undefined : { scale: 0.94 }}
-                      className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-md transition hover:bg-black/50"
+                      className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-full text-white backdrop-blur-md transition"
+                      style={{ background: "rgba(0,0,0,0.3)" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.5)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.3)")}
                     >
                       <X className="size-4" />
                     </motion.button>
@@ -393,26 +391,21 @@ export default function DashboardCharactersPage() {
                     className="relative -mt-12 px-6 pb-6"
                     initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={
-                      prefersReducedMotion
-                        ? { duration: 0 }
-                        : { duration: 0.28, delay: 0.05, ease: easing }
-                    }
+                    transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.28, delay: 0.05, ease: easing }}
                   >
                     {/* Avatar + name */}
                     <div className="flex items-end gap-4">
-                      <div className="size-20 shrink-0 overflow-hidden rounded-2xl border-4 border-white shadow-lg dark:border-[#111111]">
-                        <img
-                          src={selectedCharacter.avatar}
-                          alt={selectedCharacter.name}
-                          className="h-full w-full object-cover"
-                        />
+                      <div
+                        className="size-20 shrink-0 overflow-hidden rounded-2xl shadow-lg"
+                        style={{ border: "4px solid #fdf8f3" }}
+                      >
+                        <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="h-full w-full object-cover" />
                       </div>
                       <div className="min-w-0 pb-1">
-                        <h2 className="truncate text-lg font-black tracking-tight text-foreground">
+                        <h2 className="truncate text-lg font-black tracking-tight" style={{ color: "#2b180a" }}>
                           {selectedCharacter.name}
                         </h2>
-                        <p className="text-sm font-semibold text-primary">
+                        <p className="text-sm font-semibold" style={{ color: "#8b5e3c" }}>
                           {selectedCharacter.role}
                         </p>
                       </div>
@@ -420,13 +413,19 @@ export default function DashboardCharactersPage() {
 
                     {/* Meta pills */}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <span className="rounded-full border border-border/60 bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground dark:bg-white/[0.06]">
-                        Ages {selectedCharacter.ageBand}
-                      </span>
-                      <span className="rounded-full border border-border/60 bg-muted/50 px-3 py-1.5 text-xs font-medium text-foreground dark:bg-white/[0.06]">
-                        {selectedCharacter.mood}
-                      </span>
-                      <span className="flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/50 px-3 py-1.5 dark:bg-white/[0.06]">
+                      {[`Ages ${selectedCharacter.ageBand}`, selectedCharacter.mood].map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-full px-3 py-1.5 text-xs font-medium"
+                          style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                      <span
+                        className="flex items-center gap-1.5 rounded-full px-3 py-1.5"
+                        style={{ border: "1px solid #dbc9b7", background: "#f0e8dc" }}
+                      >
                         {selectedCharacter.palette.map((color) => (
                           <span
                             key={color}
@@ -437,12 +436,11 @@ export default function DashboardCharactersPage() {
                       </span>
                     </div>
 
-                    {"description" in selectedCharacter &&
-                      selectedCharacter.description && (
-                        <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-                          {selectedCharacter.description}
-                        </p>
-                      )}
+                    {"description" in selectedCharacter && selectedCharacter.description && (
+                      <p className="mt-4 text-sm leading-relaxed" style={{ color: "#6f5a4a" }}>
+                        {selectedCharacter.description}
+                      </p>
+                    )}
 
                     {/* Actions */}
                     <div className="mt-5 flex flex-wrap gap-2">
@@ -450,7 +448,10 @@ export default function DashboardCharactersPage() {
                         type="button"
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
-                        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition hover:brightness-95 micro-btn"
+                        className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition"
+                        style={{ background: "#2b180a", color: "#f5e6d5" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+                        onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                       >
                         <Sparkles className="size-4" />
                         Use in Story
@@ -459,7 +460,10 @@ export default function DashboardCharactersPage() {
                         type="button"
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
-                        className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-white px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted micro-btn dark:bg-white/5 dark:hover:bg-white/10"
+                        className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-sm transition"
+                        style={{ background: "#fdf8f3", border: "1px solid #dbc9b7", color: "#2b180a" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "#fdf8f3")}
                       >
                         <Heart className="size-4" />
                         Favorite
@@ -469,10 +473,13 @@ export default function DashboardCharactersPage() {
                         onClick={handleCopyId}
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
-                        className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-white px-4 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-muted micro-btn dark:bg-white/5 dark:hover:bg-white/10"
+                        className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-sm transition"
+                        style={{ background: "#fdf8f3", border: "1px solid #dbc9b7", color: "#2b180a" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "#fdf8f3")}
                       >
                         {copiedId ? (
-                          <Check className="size-4 text-green-500" />
+                          <Check className="size-4 text-green-600" />
                         ) : (
                           <Copy className="size-4" />
                         )}

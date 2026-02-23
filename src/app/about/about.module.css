@@ -1,0 +1,393 @@
+/* ── Design tokens ─────────────────────────────────────────── */
+.page {
+  --cream-0: #fcf6ef;
+  --cream-1: #f6f0e9;
+  --cream-2: #efe7dd;
+  --ink: #2b180a;
+  --ink-soft: #6f5a4a;
+  --line: #e6dbcf;
+  --ease: cubic-bezier(0.44, 0, 0.56, 1);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), sans-serif;
+  background: var(--cream-0);
+}
+
+/* ── Article column ─────────────────────────────────────────── */
+.article {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 160px 24px 100px;
+}
+
+/* ── Opening kicker ─────────────────────────────────────────── */
+.openKicker {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8a6d57;
+  margin-bottom: 18px;
+}
+
+/* ── Main title ─────────────────────────────────────────────── */
+.mainTitle {
+  margin: 0 0 28px;
+  font-family: var(--font-halant), serif;
+  font-size: clamp(3rem, 7vw, 5.8rem);
+  font-weight: 400;
+  line-height: 0.95;
+  letter-spacing: -0.08em;
+  color: var(--ink);
+}
+
+.titleWord {
+  display: inline-block;
+  padding-right: 0.15em;
+}
+
+.titleAccent {
+  color: #c87b3a;
+}
+
+/* ── Lead paragraph ─────────────────────────────────────────── */
+.lead {
+  margin: 0 0 64px;
+  font-size: 17px;
+  line-height: 1.68;
+  letter-spacing: -0.035em;
+  font-weight: 500;
+  color: #4d3422;
+  border-left: 3px solid #dbc6b0;
+  padding-left: 18px;
+}
+
+/* ── Section divider ─────────────────────────────────────────── */
+.divider {
+  border: none;
+  border-top: 1px solid #e4d5c6;
+  margin: 60px 0;
+}
+
+/* ── Chapter header ─────────────────────────────────────────── */
+.chapterKicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9a7a65;
+  margin: 0 0 10px;
+}
+
+.chapterTitle {
+  margin: 0 0 24px;
+  font-family: var(--font-halant), serif;
+  font-size: clamp(1.9rem, 4vw, 2.9rem);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.065em;
+}
+
+.chapterWord {
+  display: inline-block;
+  padding-right: 0.16em;
+}
+
+/* ── Body prose ─────────────────────────────────────────────── */
+.prose {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 36px;
+}
+
+.prose p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: -0.03em;
+  color: #4a3424;
+}
+
+/* ── Pull quote ─────────────────────────────────────────────── */
+.pullQuote {
+  margin: 40px 0;
+  padding: 0 0 0 22px;
+  border-left: 3px solid #c9924e;
+}
+
+.pullQuoteText {
+  margin: 0 0 10px;
+  font-family: var(--font-halant), serif;
+  font-size: clamp(1.45rem, 3.2vw, 1.9rem);
+  line-height: 1.22;
+  letter-spacing: -0.055em;
+  color: var(--ink);
+}
+
+.pullQuoteText span {
+  display: inline-block;
+  padding-right: 0.14em;
+}
+
+.pullQuoteAttr {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9a7a65;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Inline stats strip ─────────────────────────────────────── */
+.statStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid #dbc9b7;
+  border-radius: 14px;
+  overflow: hidden;
+  margin: 40px 0;
+  background: #dbc9b7; /* gap color */
+  gap: 1px;
+}
+
+.statCell {
+  background: #f8f1e8;
+  padding: 20px 18px;
+}
+
+.statNumber {
+  margin: 0;
+  font-family: var(--font-halant), serif;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  font-weight: 400;
+  letter-spacing: -0.06em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.statLabel {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7a5e4b;
+  letter-spacing: -0.01em;
+}
+
+/* ── Values list ─────────────────────────────────────────────── */
+.valuesList {
+  display: grid;
+  gap: 0;
+  margin-bottom: 0;
+}
+
+.valueRow {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 20px;
+  padding: 22px 0;
+  border-bottom: 1px solid #eeddd0;
+  align-items: start;
+}
+
+.valueNum {
+  margin: 0;
+  font-family: var(--font-halant), serif;
+  font-size: 1.3rem;
+  color: #b07850;
+  letter-spacing: -0.05em;
+  padding-top: 1px;
+}
+
+.valueContent {
+  display: grid;
+  gap: 5px;
+}
+
+.valueTitle {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.valueBody {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.62;
+  color: #5a4232;
+  letter-spacing: -0.025em;
+}
+
+/* ── Team list ───────────────────────────────────────────────── */
+.teamList {
+  display: grid;
+  gap: 0;
+}
+
+.teamRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  border-bottom: 1px solid #eeddd0;
+  gap: 12px;
+}
+
+.teamName {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.teamRole {
+  margin: 0;
+  font-size: 13px;
+  color: #8a6e5a;
+  letter-spacing: -0.01em;
+}
+
+/* ── CTA banner ──────────────────────────────────────────────── */
+.ctaBanner {
+  margin-top: 72px;
+  border-radius: 18px;
+  padding: 40px 36px;
+  background:
+    linear-gradient(
+      145deg,
+      rgb(46 95 95 / 94%) 0%,
+      rgb(81 144 151 / 85%) 28%,
+      rgb(220 138 68 / 82%) 62%,
+      rgb(134 68 53 / 92%) 100%
+    );
+  color: #fff6ee;
+  display: grid;
+  gap: 20px;
+}
+
+.ctaBannerKicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(255 238 215 / 80%);
+  margin: 0;
+}
+
+.ctaBannerTitle {
+  margin: 0;
+  font-family: var(--font-halant), serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  line-height: 1.05;
+  letter-spacing: -0.065em;
+  color: #fff;
+}
+
+.ctaBannerTitle span {
+  display: inline-block;
+  padding-right: 0.14em;
+}
+
+.ctaBannerBody {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  letter-spacing: -0.03em;
+  color: rgb(255 238 215 / 88%);
+  max-width: 480px;
+}
+
+.ctaBannerActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ctaPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 20px;
+  border-radius: 10px;
+  background: #fff;
+  color: #2b180a;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+}
+
+.ctaPrimary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.ctaSecondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 11px 18px;
+  border-radius: 10px;
+  border: 1px solid rgb(255 255 255 / 28%);
+  color: #fff6ee;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+  transition: background 0.2s var(--ease);
+}
+
+.ctaSecondary:hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.footer {
+  border-top: 1px solid var(--line);
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px 24px 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #8f735d;
+}
+
+.footerLinks {
+  display: flex;
+  gap: 16px;
+}
+
+.footerLinks a {
+  color: #8f735d;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footerLinks a:hover {
+  color: #4a3020;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .article {
+    padding-top: 110px;
+    padding-bottom: 64px;
+  }
+
+  .statStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ctaBanner {
+    padding: 28px 22px;
+  }
+
+  .footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -2,6 +2,9 @@
 
 import { motion } from "framer-motion";
 import { useState } from "react";
+import styles from "../dashboard.module.css";
+
+const easeOutExpo = [0.22, 1, 0.36, 1] as const;
 
 const settingRows = [
   {
@@ -30,11 +33,21 @@ export default function DashboardSettingsPage() {
   );
 
   return (
-    <section className="space-y-4 rounded-3xl border border-border/60 bg-white/80 p-4 shadow-sm backdrop-blur md:p-5 animate-fade-soft dark:border-white/10 dark:bg-[#101010]/95">
-      <div className="space-y-1 animate-in-view">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">Settings</p>
-        <h2 className="text-2xl font-black tracking-tight text-foreground">Workspace Preferences</h2>
-        <p className="text-sm text-muted-foreground">Control generation defaults and family-safety behavior for your Dream workspace.</p>
+    <motion.section
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: easeOutExpo }}
+      className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
+      style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
+    >
+      <div className="space-y-1">
+        <p style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9a7a65" }}>
+          Settings
+        </p>
+        <h2 className={`${styles.halant} text-2xl`}>Workspace Preferences</h2>
+        <p className="text-sm" style={{ color: "#9a7a65" }}>
+          Control generation defaults and family-safety behavior for your Dream workspace.
+        </p>
       </div>
 
       <div className="space-y-3">
@@ -43,31 +56,30 @@ export default function DashboardSettingsPage() {
             key={row.id}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, delay: index * 0.06 }}
-            className="flex items-start justify-between gap-4 rounded-2xl border border-border/70 bg-white p-4 micro-card dark:border-white/10 dark:bg-[#151515]"
+            transition={{ duration: 0.28, delay: index * 0.06, ease: easeOutExpo }}
+            className="flex items-start justify-between gap-4 rounded-2xl p-4"
+            style={{ border: "1px solid #dbc9b7", background: "#fcf6ef" }}
           >
             <div>
-              <p className="text-sm font-semibold text-foreground">{row.title}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{row.description}</p>
+              <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{row.title}</p>
+              <p className="mt-1 text-sm" style={{ color: "#9a7a65" }}>{row.description}</p>
             </div>
             <button
               type="button"
               role="switch"
               aria-checked={settings[row.id]}
               onClick={() => setSettings((prev) => ({ ...prev, [row.id]: !prev[row.id] }))}
-              className={`relative h-7 w-12 shrink-0 rounded-full transition ${
-                settings[row.id] ? "bg-primary" : "bg-muted"
-              }`}
+              className="relative h-7 w-12 shrink-0 rounded-full transition"
+              style={{ background: settings[row.id] ? "#2b180a" : "#dbc9b7" }}
             >
               <span
-                className={`absolute top-1 block size-5 rounded-full bg-white dark:!bg-white transition ${
-                  settings[row.id] ? "left-6" : "left-1"
-                }`}
+                className="absolute top-1 block size-5 rounded-full bg-white transition-all"
+                style={{ left: settings[row.id] ? "1.5rem" : "0.25rem" }}
               />
             </button>
           </motion.div>
         ))}
       </div>
-    </section>
+    </motion.section>
   );
 }

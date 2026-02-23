@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
+import Link from "next/link";
 import { motion, type Variants } from "framer-motion";
 import Image from "next/image";
 
@@ -11,27 +12,39 @@ interface AnimatedMarqueeHeroProps {
   title: React.ReactNode;
   description: string;
   ctaText: string;
+  ctaHref?: string;
   images: string[];
   className?: string;
   scrollToId?: string;
   sectionId?: string;
 }
 
-const ActionButton = ({ children }: { children: React.ReactNode }) => (
-  <motion.button
-    whileHover={{ scale: 1.03 }}
-    whileTap={{ scale: 0.98 }}
-    className="mt-8 rounded-full bg-primary px-8 py-3 font-semibold text-primary-foreground shadow-lg transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring"
-  >
-    {children}
-  </motion.button>
-);
+const ActionButton = ({ children, href }: { children: React.ReactNode; href?: string }) =>
+  href ? (
+    <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }} className="mt-8 inline-block">
+      <Link
+        href={href}
+        className="rounded-full bg-primary px-8 py-3 font-semibold text-primary-foreground shadow-lg transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        {children}
+      </Link>
+    </motion.div>
+  ) : (
+    <motion.button
+      whileHover={{ scale: 1.03 }}
+      whileTap={{ scale: 0.98 }}
+      className="mt-8 rounded-full bg-primary px-8 py-3 font-semibold text-primary-foreground shadow-lg transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring"
+    >
+      {children}
+    </motion.button>
+  );
 
 export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
   tagline,
   title,
   description,
   ctaText,
+  ctaHref,
   images,
   className,
   scrollToId,
@@ -199,7 +212,7 @@ export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
           variants={FADE_IN_ANIMATION_VARIANTS}
           transition={{ delay: 0.6 }}
         >
-          <ActionButton>{ctaText}</ActionButton>
+          <ActionButton href={ctaHref}>{ctaText}</ActionButton>
         </motion.div>
       </div>
 

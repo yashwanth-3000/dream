@@ -4,7 +4,6 @@ import { useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   Sparkles,
@@ -13,8 +12,6 @@ import {
   Film,
   Users,
   Settings,
-  Sun,
-  Moon,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -38,7 +35,6 @@ const spring = {
 
 export function DashboardNav() {
   const pathname = usePathname();
-  const { resolvedTheme, setTheme } = useTheme();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const dragState = useRef({ isDown: false, startX: 0, scrollLeft: 0 });
@@ -67,7 +63,6 @@ export function DashboardNav() {
 
   const onPointerUp = useCallback(() => {
     dragState.current.isDown = false;
-    // Small delay so the click handler on links can check isDragging
     setTimeout(() => setIsDragging(false), 50);
   }, []);
 
@@ -81,7 +76,7 @@ export function DashboardNav() {
   return (
     <div
       ref={scrollRef}
-      className="overflow-x-auto scrollbar-none cursor-grab active:cursor-grabbing"
+      className="overflow-x-auto cursor-grab active:cursor-grabbing"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -89,16 +84,13 @@ export function DashboardNav() {
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     >
       <nav
-        className={cn(
-          "inline-flex min-w-max items-center gap-0.5 p-1 animate-fade-soft select-none",
-          // Pop-out glassmorphic tray
-          "rounded-2xl border border-border/60",
-          "bg-white/90 backdrop-blur-xl",
-          "shadow-[0_4px_24px_-4px_rgba(0,0,0,0.10),0_1px_4px_-1px_rgba(0,0,0,0.06)]",
-          // Dark theme
-          "dark:bg-[#0b0b0b]/95 dark:border-white/[0.10]",
-          "dark:shadow-[0_10px_35px_-12px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.04),inset_0_1px_0_rgba(255,255,255,0.04)]"
-        )}
+        className="inline-flex min-w-max items-center gap-0.5 p-1 select-none rounded-2xl"
+        style={{
+          background: "rgb(246 240 233 / 0.95)",
+          border: "1px solid #dbc9b7",
+          boxShadow: "0 4px 24px -4px rgba(0,0,0,0.08), 0 1px 4px -1px rgba(0,0,0,0.04)",
+          backdropFilter: "blur(12px)",
+        }}
       >
         {dashboardLinks.map((link) => {
           const active =
@@ -117,20 +109,19 @@ export function DashboardNav() {
                 draggable={false}
                 onClick={handleLinkClick}
                 className={cn(
-                  "relative flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition micro-btn",
-                  active
-                    ? "text-foreground dark:text-white"
-                    : "text-muted-foreground hover:text-foreground dark:text-white/50 dark:hover:text-white"
+                  "relative flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition",
+                  active ? "text-[#2b180a]" : "text-[#9a7a65] hover:text-[#2b180a]"
                 )}
               >
                 {active && (
                   <motion.span
                     layoutId="dashboard-pill"
-                    className={cn(
-                      "absolute inset-0 rounded-xl border border-border/60",
-                      "bg-white shadow-sm",
-                      "dark:bg-[#1a1a1a] dark:border-white/[0.12] dark:shadow-[0_0_10px_-3px_rgba(255,255,255,0.05)]"
-                    )}
+                    className="absolute inset-0 rounded-xl"
+                    style={{
+                      background: "#fdf8f3",
+                      border: "1px solid #dbc9b7",
+                      boxShadow: "0 1px 4px -1px rgba(0,0,0,0.08)",
+                    }}
                     transition={spring}
                   />
                 )}
@@ -142,25 +133,6 @@ export function DashboardNav() {
             </motion.div>
           );
         })}
-
-        {/* Divider */}
-        <div className="mx-1 h-5 w-px bg-border/60 dark:bg-white/10" />
-
-        {/* Theme toggle */}
-        <motion.button
-          whileHover={{ y: -1 }}
-          whileTap={{ scale: 0.92 }}
-          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-          className={cn(
-            "relative flex items-center justify-center rounded-xl p-2 transition micro-btn",
-            "text-muted-foreground hover:text-foreground",
-            "dark:text-white/50 dark:hover:text-white"
-          )}
-          aria-label="Toggle theme"
-        >
-          <Sun className="size-4 rotate-0 scale-100 transition-transform dark:-rotate-90 dark:scale-0" />
-          <Moon className="absolute size-4 rotate-90 scale-0 transition-transform dark:rotate-0 dark:scale-100" />
-        </motion.button>
       </nav>
     </div>
   );
