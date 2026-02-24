@@ -1,0 +1,42 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "Back" [ref=e156] [cursor=pointer]:
+      - /url: /
+      - img [ref=e157]
+      - text: Back
+    - generic [ref=e159]:
+      - generic [ref=e161]:
+        - generic [ref=e162]:
+          - img [ref=e164]
+          - generic [ref=e167]:
+            - generic [ref=e168]: You
+            - generic [ref=e169]: "test story with superhero Character: Spider-Man (existing)"
+            - generic [ref=e170]: 20:34
+        - generic [ref=e171]:
+          - generic [ref=e172]:
+            - img [ref=e174]
+            - generic [ref=e177]: Dreaming
+            - generic [ref=e178]: 1s
+          - generic [ref=e184]:
+            - paragraph [ref=e185]: Reading your idea
+            - paragraph [ref=e186]: Parsing the prompt to understand the core theme, setting, and emotional tone you are looking for in the story.
+      - generic [ref=e192]:
+        - generic [ref=e194]:
+          - textbox "Continue the story..." [disabled] [ref=e196]
+          - generic [ref=e197]:
+            - generic [ref=e198]:
+              - button [ref=e199] [cursor=pointer]:
+                - img [ref=e200]
+              - generic [ref=e202]:
+                - button "Story" [ref=e203]:
+                  - generic [ref=e204]: Story
+                - button "Video" [ref=e207]:
+                  - generic [ref=e208]: Video
+                - button "Character" [ref=e211]:
+                  - generic [ref=e212]: Character
+            - button [disabled]:
+              - img
+        - paragraph [ref=e213]: Dream AI stories are fictional and made for kids.
+  - button "Open Next.js Dev Tools" [ref=e53] [cursor=pointer]:
+    - img [ref=e54]
+  - alert [ref=e57]

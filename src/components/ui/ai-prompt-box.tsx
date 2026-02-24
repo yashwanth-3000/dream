@@ -3,7 +3,7 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, Paperclip, Square, X, StopCircle, Mic, Globe, BrainCog, FolderCode } from "lucide-react";
+import { ArrowUp, Paperclip, Square, X, StopCircle, Mic } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Utility function for className merging
@@ -186,11 +186,17 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       </div>
       <div className="w-full h-10 flex items-center justify-center gap-0.5 px-4">
         {[...Array(visualizerBars)].map((_, i) => (
+          (() => {
+            const height = 20 + ((i * 17) % 80);
+            const duration = 0.55 + (((i * 13) % 45) / 100);
+            return (
           <div
             key={i}
             className="w-0.5 rounded-full bg-primary/50 animate-pulse"
-            style={{ height: `${Math.max(15, Math.random() * 100)}%`, animationDelay: `${i * 0.05}s`, animationDuration: `${0.5 + Math.random() * 0.5}s` }}
+            style={{ height: `${height}%`, animationDelay: `${i * 0.05}s`, animationDuration: `${duration}s` }}
           />
+            );
+          })()
         ))}
       </div>
     </div>
@@ -299,7 +305,7 @@ const PromptInputTextarea: React.FC<PromptInputTextareaProps & React.ComponentPr
 };
 
 // ── PromptInputActions ────────────────────────────────────────────────────────
-interface PromptInputActionsProps extends React.HTMLAttributes<HTMLDivElement> {}
+type PromptInputActionsProps = React.HTMLAttributes<HTMLDivElement>;
 const PromptInputActions: React.FC<PromptInputActionsProps> = ({ children, className, ...props }) => (
   <div className={cn("flex items-center gap-2", className)} {...props}>{children}</div>
 );
@@ -319,46 +325,91 @@ const PromptInputAction: React.FC<PromptInputActionProps> = ({ tooltip, children
   );
 };
 
+// ── Modes ─────────────────────────────────────────────────────────────────────
+const MODES = [
+  {
+    id: "story",
+    label: "Story",
+    description: "Craft a magical kid-safe narrative",
+    activeClass: "bg-amber-50 border-amber-300 text-amber-700",
+  },
+  {
+    id: "video",
+    label: "Video",
+    description: "Generate an animated video scene",
+    activeClass: "bg-violet-50 border-violet-300 text-violet-700",
+  },
+  {
+    id: "character",
+    label: "Character",
+    description: "Design and name a story character",
+    activeClass: "bg-emerald-50 border-emerald-300 text-emerald-700",
+  },
+] as const;
+
+export type ModeId = (typeof MODES)[number]["id"];
+
+export interface CharacterSelection {
+  type: "existing" | "create";
+  name: string;
+}
+
+export interface PromptSendPayload {
+  message: string;
+  files?: File[];
+  mode: ModeId | "normal";
+  characterSelection?: CharacterSelection | null;
+}
+
 // ── PromptInputBox (main export) ──────────────────────────────────────────────
 interface PromptInputBoxProps {
-  onSend?: (message: string, files?: File[]) => void;
+  onSend?: (payload: PromptSendPayload) => void;
   isLoading?: boolean; placeholder?: string; className?: string;
+  mode?: ModeId | null;
+  onModeChange?: (mode: ModeId | null) => void;
 }
 export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref: React.Ref<HTMLDivElement>) => {
-  const { onSend = () => {}, isLoading = false, placeholder = "Type your message here...", className } = props;
+  const {
+    onSend = () => {},
+    isLoading = false,
+    placeholder = "Type your message here...",
+    className,
+    mode,
+    onModeChange,
+  } = props;
   const [input, setInput] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
   const [filePreviews, setFilePreviews] = React.useState<Record<string, string>>({});
   const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
   const [isRecording, setIsRecording] = React.useState(false);
-  const [showSearch, setShowSearch] = React.useState(false);
-  const [showThink, setShowThink] = React.useState(false);
-  const [showCanvas, setShowCanvas] = React.useState(false);
+  const [internalActiveMode, setInternalActiveMode] = React.useState<ModeId | null>(null);
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
   const promptBoxRef = React.useRef<HTMLDivElement>(null);
+  const activeMode = mode !== undefined ? mode : internalActiveMode;
 
-  const handleToggleChange = (value: string) => {
-    if (value === "search") { setShowSearch((p) => !p); setShowThink(false); }
-    else if (value === "think") { setShowThink((p) => !p); setShowSearch(false); }
+  const activeModeConfig = activeMode ? MODES.find(m => m.id === activeMode) ?? null : null;
+
+  const toggleMode = (id: ModeId) => {
+    const nextMode = activeMode === id ? null : id;
+    if (onModeChange) onModeChange(nextMode);
+    else setInternalActiveMode(nextMode);
   };
 
-  const isImageFile = (file: File) => file.type.startsWith("image/");
-
-  const processFile = (file: File) => {
-    if (!isImageFile(file) || file.size > 10 * 1024 * 1024) return;
+  const processFile = React.useCallback((file: File) => {
+    if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) return;
     setFiles([file]);
     const reader = new FileReader();
     reader.onload = (e) => setFilePreviews({ [file.name]: e.target?.result as string });
     reader.readAsDataURL(file);
-  };
+  }, []);
 
   const handleDragOver = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDragLeave = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDrop = React.useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
-    const imgs = Array.from(e.dataTransfer.files).filter(isImageFile);
+    const imgs = Array.from(e.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
     if (imgs.length > 0) processFile(imgs[0]);
-  }, []);
+  }, [processFile]);
 
   const handleRemoveFile = (index: number) => {
     const f = files[index];
@@ -375,39 +426,56 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
         if (file) { e.preventDefault(); processFile(file); break; }
       }
     }
-  }, []);
+  }, [processFile]);
 
   React.useEffect(() => {
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
   }, [handlePaste]);
 
+  const resetComposer = () => {
+    setInput("");
+    setFiles([]);
+    setFilePreviews({});
+  };
+
+  const sendPayload = () => {
+    onSend({
+      message: input.trim(),
+      files,
+      mode: activeMode ?? "normal",
+      characterSelection: null,
+    });
+    resetComposer();
+  };
+
   const handleSubmit = () => {
     if (!input.trim() && files.length === 0) return;
-    let prefix = "";
-    if (showSearch) prefix = "[Search: ";
-    else if (showThink) prefix = "[Think: ";
-    else if (showCanvas) prefix = "[Canvas: ";
-    onSend(prefix ? `${prefix}${input}]` : input, files);
-    setInput(""); setFiles([]); setFilePreviews({});
+    sendPayload();
   };
 
   const handleStopRecording = (duration: number) => {
     setIsRecording(false);
-    onSend(`[Voice message - ${duration} seconds]`, []);
+    onSend({
+      message: `[Voice message - ${duration} seconds]`,
+      files: [],
+      mode: activeMode ?? "normal",
+      characterSelection: null,
+    });
   };
 
   const hasContent = input.trim() !== "" || files.length > 0;
 
   return (
-    <>
+    <div>
       <PromptInput
         value={input} onValueChange={setInput} isLoading={isLoading} onSubmit={handleSubmit}
         className={cn("w-full transition-all duration-300 ease-in-out", isRecording && "border-red-400/60", className)}
         disabled={isLoading || isRecording}
-        ref={ref || promptBoxRef}
+        ref={(promptBoxRef as React.Ref<HTMLDivElement>) ?? ref}
         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
       >
+
         {/* File previews */}
         {files.length > 0 && !isRecording && (
           <div className="flex flex-wrap gap-2 p-0 pb-1">
@@ -430,7 +498,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
         {/* Textarea */}
         <div className={cn("transition-all duration-300", isRecording ? "h-0 overflow-hidden opacity-0" : "opacity-100")}>
           <PromptInputTextarea
-            placeholder={showSearch ? "Search the web..." : showThink ? "Think deeply..." : showCanvas ? "Create on canvas..." : placeholder}
+            placeholder={activeModeConfig ? activeModeConfig.description + "…" : placeholder}
             className="text-base"
           />
         </div>
@@ -457,78 +525,44 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
               </button>
             </PromptInputAction>
 
-            {/* Toggle buttons */}
+            {/* Mode buttons */}
             <div className="flex items-center">
-              {/* Search */}
-              <button type="button" onClick={() => handleToggleChange("search")}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showSearch ? "bg-sky-50 border-sky-400 text-sky-600" : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showSearch ? 360 : 0, scale: showSearch ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1, transition: { type: "spring", stiffness: 300, damping: 10 } }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <Globe className="w-4 h-4" />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showSearch && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }} className="text-xs overflow-hidden whitespace-nowrap flex-shrink-0">
-                      Search
-                    </motion.span>
+              {MODES.map((mode, i) => (
+                <React.Fragment key={mode.id}>
+                  {i > 0 && (
+                    <div className="relative h-6 w-[1.5px] mx-1">
+                      <div className="absolute inset-0 bg-gradient-to-t from-transparent via-primary/40 to-transparent rounded-full" />
+                    </div>
                   )}
-                </AnimatePresence>
-              </button>
-
-              <div className="relative h-6 w-[1.5px] mx-1">
-                <div className="absolute inset-0 bg-gradient-to-t from-transparent via-primary/40 to-transparent rounded-full" />
-              </div>
-
-              {/* Think */}
-              <button type="button" onClick={() => handleToggleChange("think")}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showThink ? "bg-violet-50 border-violet-400 text-violet-600" : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showThink ? 360 : 0, scale: showThink ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1, transition: { type: "spring", stiffness: 300, damping: 10 } }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <BrainCog className="w-4 h-4" />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showThink && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }} className="text-xs overflow-hidden whitespace-nowrap flex-shrink-0">
-                      Think
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
-
-              <div className="relative h-6 w-[1.5px] mx-1">
-                <div className="absolute inset-0 bg-gradient-to-t from-transparent via-primary/40 to-transparent rounded-full" />
-              </div>
-
-              {/* Canvas */}
-              <button type="button" onClick={() => setShowCanvas((p) => !p)}
-                className={cn("rounded-full transition-all flex items-center gap-1 px-2 py-1 border h-8",
-                  showCanvas ? "bg-orange-50 border-primary text-primary" : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5")}>
-                <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
-                  <motion.div animate={{ rotate: showCanvas ? 360 : 0, scale: showCanvas ? 1.1 : 1 }}
-                    whileHover={{ rotate: 15, scale: 1.1, transition: { type: "spring", stiffness: 300, damping: 10 } }}
-                    transition={{ type: "spring", stiffness: 260, damping: 25 }}>
-                    <FolderCode className="w-4 h-4" />
-                  </motion.div>
-                </div>
-                <AnimatePresence>
-                  {showCanvas && (
-                    <motion.span initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }} className="text-xs overflow-hidden whitespace-nowrap flex-shrink-0">
-                      Canvas
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleMode(mode.id)}
+                    className={cn(
+                      "rounded-full transition-all flex items-center gap-1 px-2.5 py-1 border h-8 text-xs font-medium",
+                      activeMode === mode.id
+                        ? mode.activeClass
+                        : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5"
+                    )}
+                  >
+                    <AnimatePresence initial={false}>
+                      {activeMode === mode.id ? (
+                        <motion.span
+                          key="active"
+                          initial={{ width: 0, opacity: 0 }}
+                          animate={{ width: "auto", opacity: 1 }}
+                          exit={{ width: 0, opacity: 0 }}
+                          transition={{ duration: 0.18 }}
+                          className="overflow-hidden whitespace-nowrap"
+                        >
+                          {mode.label}
+                        </motion.span>
+                      ) : (
+                        <span>{mode.label}</span>
+                      )}
+                    </AnimatePresence>
+                  </button>
+                </React.Fragment>
+              ))}
             </div>
           </div>
 
@@ -567,7 +601,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
       </PromptInput>
 
       <ImageViewDialog imageUrl={selectedImage} onClose={() => setSelectedImage(null)} />
-    </>
+    </div>
   );
 });
 PromptInputBox.displayName = "PromptInputBox";

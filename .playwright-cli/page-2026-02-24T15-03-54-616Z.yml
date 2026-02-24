@@ -1,0 +1,127 @@
+- generic:
+  - generic:
+    - banner:
+      - navigation [ref=e3]:
+        - link [ref=e62] [cursor=pointer]:
+          - /url: /
+          - text: Dream
+        - generic [ref=e5]:
+          - link [ref=e63] [cursor=pointer]:
+            - /url: /chat
+            - text: Chat
+          - link [ref=e64] [cursor=pointer]:
+            - /url: /dashboard
+            - text: Dashboard
+          - link [ref=e65] [cursor=pointer]:
+            - /url: /about
+            - text: About
+          - link [ref=e66] [cursor=pointer]:
+            - /url: https://github.com/yashwanth-3000/Dream
+            - img [ref=e11]
+    - generic:
+      - heading [level=1]:
+        - generic: What
+        - generic: shall
+        - generic: we
+        - generic: dream
+        - generic: up?
+      - paragraph: Type an idea and Dream AI turns it into a magical story for kids.
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - generic:
+                - textbox:
+                  - /placeholder: Craft a magical kid-safe narrative…
+                  - text: test story with superhero
+              - generic:
+                - generic:
+                  - button:
+                    - img
+                  - generic:
+                    - button:
+                      - generic: Story
+                    - button:
+                      - generic: Video
+                    - button:
+                      - generic: Character
+                - button:
+                  - img
+  - button "Open Next.js Dev Tools" [ref=e53] [cursor=pointer]:
+    - img [ref=e54]
+  - alert
+  - dialog "Choose Character For Story" [ref=e68]:
+    - generic [ref=e69]:
+      - generic [ref=e70]:
+        - heading "Choose Character For Story" [level=2] [ref=e71]
+        - paragraph [ref=e72]: Pick from your dashboard character style cards.
+        - generic [ref=e73]:
+          - button "Use saved" [active] [ref=e74]
+          - button "Create new" [ref=e75]
+      - generic [ref=e77]:
+        - button "Superman Superman Man of Steel" [ref=e78]:
+          - generic [ref=e79]:
+            - img "Superman" [ref=e80]
+            - generic [ref=e82]:
+              - paragraph [ref=e83]: Superman
+              - paragraph [ref=e84]: Man of Steel
+        - button "Spider-Man Spider-Man Friendly Neighborhood Hero" [ref=e85]:
+          - generic [ref=e86]:
+            - img "Spider-Man" [ref=e87]
+            - generic [ref=e89]:
+              - paragraph [ref=e90]: Spider-Man
+              - paragraph [ref=e91]: Friendly Neighborhood Hero
+        - button "Batman Batman The Dark Knight" [ref=e92]:
+          - generic [ref=e93]:
+            - img "Batman" [ref=e94]
+            - generic [ref=e96]:
+              - paragraph [ref=e97]: Batman
+              - paragraph [ref=e98]: The Dark Knight
+        - button "Wonder Woman Wonder Woman Warrior Princess" [ref=e99]:
+          - generic [ref=e100]:
+            - img "Wonder Woman" [ref=e101]
+            - generic [ref=e103]:
+              - paragraph [ref=e104]: Wonder Woman
+              - paragraph [ref=e105]: Warrior Princess
+        - button "Elsa Elsa Ice Queen" [ref=e106]:
+          - generic [ref=e107]:
+            - img "Elsa" [ref=e108]
+            - generic [ref=e110]:
+              - paragraph [ref=e111]: Elsa
+              - paragraph [ref=e112]: Ice Queen
+        - button "Buzz Lightyear Buzz Lightyear Space Ranger" [ref=e113]:
+          - generic [ref=e114]:
+            - img "Buzz Lightyear" [ref=e115]
+            - generic [ref=e117]:
+              - paragraph [ref=e118]: Buzz Lightyear
+              - paragraph [ref=e119]: Space Ranger
+        - button "Pikachu Pikachu Electric Partner" [ref=e120]:
+          - generic [ref=e121]:
+            - img "Pikachu" [ref=e122]
+            - generic [ref=e124]:
+              - paragraph [ref=e125]: Pikachu
+              - paragraph [ref=e126]: Electric Partner
+        - button "Iron Man Iron Man Genius Inventor" [ref=e127]:
+          - generic [ref=e128]:
+            - img "Iron Man" [ref=e129]
+            - generic [ref=e131]:
+              - paragraph [ref=e132]: Iron Man
+              - paragraph [ref=e133]: Genius Inventor
+        - button "Moana Moana Ocean Voyager" [ref=e134]:
+          - generic [ref=e135]:
+            - img "Moana" [ref=e136]
+            - generic [ref=e138]:
+              - paragraph [ref=e139]: Moana
+              - paragraph [ref=e140]: Ocean Voyager
+        - button "Goku Goku Saiyan Warrior" [ref=e141]:
+          - generic [ref=e142]:
+            - img "Goku" [ref=e143]
+            - generic [ref=e145]:
+              - paragraph [ref=e146]: Goku
+              - paragraph [ref=e147]: Saiyan Warrior
+      - generic [ref=e148]:
+        - button "Cancel" [ref=e149]
+        - button "Continue" [ref=e150]
+    - button "Close" [ref=e151]:
+      - img [ref=e152]
+      - generic [ref=e155]: Close

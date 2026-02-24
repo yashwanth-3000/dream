@@ -1,11 +1,13 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUpRight, ChevronDown, ChevronRight, Play } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, ChevronRight, Github, Play, X } from "lucide-react";
+import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useMemo, useState } from "react";
 
 import DreamNavbar from "@/components/ui/dream-navbar";
+import MadeWith from "@/components/ui/made-with";
 
 import styles from "./home-landing.module.css";
 
@@ -259,17 +261,6 @@ export default function HomeLanding() {
             custom={0.02}
             style={withDelay(0)}
           >
-            <div className={styles.avatarTag}>
-              <div className={styles.avatarRow}>
-                <span>MH</span>
-                <span>JP</span>
-                <span>AK</span>
-                <span>TR</span>
-                <span>AL</span>
-              </div>
-              <p>Loved by 1000+ families and educators</p>
-            </div>
-
             <motion.h1
               className={styles.heroTitle}
               initial="hidden"
@@ -322,6 +313,7 @@ export default function HomeLanding() {
                 <ChevronRight size={16} />
               </button>
             </div>
+
           </motion.div>
 
           <motion.div
@@ -374,6 +366,32 @@ export default function HomeLanding() {
             </div>
           </motion.div>
         </section>
+
+        {/* ── Tech stack strip ── */}
+        <div className={styles.techStrip}>
+          <span className={styles.techLabel}>Built on</span>
+          <span className={styles.techDivider} />
+          <div className={styles.avatarRow}>
+            <span className={styles.logoChip} title="Microsoft">
+              <svg viewBox="0 0 21 21" width="14" height="14"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#00a4ef" d="M11 0h10v10H11z"/><path fill="#7fba00" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>
+            </span>
+            <span className={styles.logoChip} title="Azure AI Foundry">
+              <svg viewBox="0 0 96 96" width="15" height="15"><defs><linearGradient id="s-az-a" x1="-1032.17" x2="-1059.21" y1="145.31" y2="65.43" gradientTransform="matrix(1 0 0 -1 1075 158)" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#114a8b"/><stop offset="1" stopColor="#0669bc"/></linearGradient><linearGradient id="s-az-c" x1="-1027.16" x2="-997.48" y1="147.64" y2="68.56" gradientTransform="matrix(1 0 0 -1 1075 158)" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#3ccbf4"/><stop offset="1" stopColor="#2892df"/></linearGradient></defs><path fill="url(#s-az-a)" d="M33.34 6.54h26.04l-27.03 80.1a4.15 4.15 0 0 1-3.94 2.81H8.15a4.14 4.14 0 0 1-3.93-5.47L29.4 9.38a4.15 4.15 0 0 1 3.94-2.83z"/><path fill="#0078d4" d="M71.17 60.26H29.88a1.91 1.91 0 0 0-1.3 3.31l26.53 24.76a4.17 4.17 0 0 0 2.85 1.13h23.38z"/><path fill="url(#s-az-c)" d="M66.6 9.36a4.14 4.14 0 0 0-3.93-2.82H33.65a4.15 4.15 0 0 1 3.93 2.82l25.18 74.62a4.15 4.15 0 0 1-3.93 5.48h29.02a4.15 4.15 0 0 0 3.93-5.48z"/></svg>
+            </span>
+            <span className={styles.logoChip} title="A2A Protocol">
+              <svg viewBox="0 0 24 24" width="14" height="14"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            </span>
+            <span className={styles.logoChip} title="CrewAI">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="#FF5A50"><path d="M12.482.18C7.161 1.319 1.478 9.069 1.426 15.372c-.051 5.527 3.1 8.68 8.68 8.627 6.716-.05 14.259-6.87 12.09-10.9-.672-1.292-1.396-1.344-2.687-.207-1.602 1.395-1.654.31-.207-2.893 1.757-3.98 1.705-5.322-.31-7.544C17.03.388 14.962-.388 12.482.181Zm5.322 2.068c2.273 2.015 2.376 4.236.465 8.42-1.395 3.1-2.17 3.515-3.824 1.86-1.24-1.24-1.343-3.46-.258-6.044 1.137-2.635.982-3.1-.568-1.653-3.72 3.358-6.458 9.765-5.424 12.503.464 1.189.825 1.395 2.737 1.395 2.79 0 6.303-1.705 7.957-3.926 1.756-2.274 2.79-2.274 2.79-.052 0 3.875-6.459 8.627-11.625 8.627-6.251 0-9.351-4.752-7.491-11.47.878-2.995 4.443-7.904 7.077-9.66 3.255-2.17 5.684-2.17 8.164 0z"/></svg>
+            </span>
+            <span className={styles.logoChip} title="Vercel">
+              <svg viewBox="0 0 256 222" width="14" height="12"><path fill="#000" d="m128 0 128 221.705H0z"/></svg>
+            </span>
+            <span className={styles.logoChip} title="Railway">
+              <svg viewBox="0 0 1024 1024" width="14" height="14" fill="#000"><path d="M4.8 438.2A520.7 520.7 0 000 489.7h777.8c-2.7-5.3-6.4-10-10-14.7-133-171.8-204.5-157-306.9-161.3-34-1.4-57.2-2-193-2-72.7 0-151.7.2-228.6.4A621 621 0 0015 386.3h398.6v51.9H4.8zm779.1 103.5H.4c.8 13.8 2.1 27.5 4 41h723.4c32.2 0 50.3-18.3 56.1-41zM45 724.3s120 294.5 466.5 299.7c207 0 385-123 465.9-299.7H45z"/><path d="M511.5 0A512.2 512.2 0 0065.3 260.6l202.7-.2c158.4 0 164.2.6 195.2 2l19.1.6c66.7 2.3 148.7 9.4 213.2 58.2 35 26.5 85.6 85 115.7 126.5 27.9 38.5 35.9 82.8 17 125.2-17.5 39-55 62.2-100.4 62.2H16.7s4.2 18 10.6 37.8h970.6a510.4 510.4 0 0026.1-160.7A512.4 512.4 0 00511.5 0z"/></svg>
+            </span>
+          </div>
+        </div>
 
         <section className={styles.section} id="what-dream-is">
           <motion.div
@@ -432,6 +450,87 @@ export default function HomeLanding() {
           </motion.div>
         </section>
 
+        {/* ── Two ways to create ── */}
+        <section className={styles.section}>
+          <motion.div
+            className={styles.introBlock}
+            variants={blockMotion}
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, amount: 0.35 }}
+            custom={0.02}
+          >
+            <p className={styles.sectionKicker}>Two ways to create</p>
+            <AnimatedSubheading text="Chat freely, or build step by step." />
+            <p className={styles.sectionCopy}>
+              Dream works however you prefer — a single conversation that does
+              everything, or dedicated dashboards for granular control.
+            </p>
+          </motion.div>
+
+          <div className={styles.modesGrid}>
+            {/* Chat card — primary */}
+            <motion.article
+              className={styles.modeCardDark}
+              variants={blockMotion}
+              initial="hidden"
+              whileInView="show"
+              whileHover={{ y: -6, transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } }}
+              viewport={{ once: true, amount: 0.3 }}
+              custom={0.07}
+            >
+              <div className={styles.modeBadge}>Recommended for most</div>
+              <div className={styles.modeIconWrap}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+              </div>
+              <h3 className={styles.modeTitle}>Chat with Dream</h3>
+              <p className={styles.modeDesc}>
+                Just describe what you want in plain language. Dream handles story, video, and characters — all in one conversation. No setup, no steps.
+              </p>
+              <ul className={styles.modeFeatures}>
+                <li>All-in-one conversational AI</li>
+                <li>Story + video generated together</li>
+                <li>Best for families &amp; first sessions</li>
+              </ul>
+              <a href="/chat" className={styles.modeCta}>
+                Start chatting <ArrowUpRight size={14} />
+              </a>
+            </motion.article>
+
+            {/* Studio card — secondary */}
+            <motion.article
+              className={styles.modeCardWarm}
+              variants={blockMotion}
+              initial="hidden"
+              whileInView="show"
+              whileHover={{ y: -6, transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] } }}
+              viewport={{ once: true, amount: 0.3 }}
+              custom={0.13}
+            >
+              <div className={styles.modeBadgeWarm}>For specific workflows</div>
+              <div className={styles.modeIconWrapWarm}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+              </div>
+              <h3 className={styles.modeTitleWarm}>Dream Studio</h3>
+              <p className={styles.modeDescWarm}>
+                Take full control with dedicated dashboards. Manage your character vault, browse the story library, and run video jobs independently.
+              </p>
+              <ul className={styles.modeFeaturesWarm}>
+                <li>Character vault &amp; memory</li>
+                <li>Story &amp; video libraries</li>
+                <li>Best for classrooms &amp; creators</li>
+              </ul>
+              <a href="/dashboard" className={styles.modeCtaWarm}>
+                Open Studio <ArrowUpRight size={14} />
+              </a>
+            </motion.article>
+          </div>
+        </section>
+
         <section className={styles.section} id="dream-studio-section">
           <motion.div
             className={styles.introBlock}
@@ -449,72 +548,73 @@ export default function HomeLanding() {
             </p>
           </motion.div>
 
-          <div className={styles.servicesWrap}>
-            <motion.div
-              className={styles.serviceTabs}
-              variants={blockMotion}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, amount: 0.4 }}
-              custom={0.07}
-            >
-              {serviceSteps.map((item, idx) => (
-                <button
-                  key={item.title}
-                  type="button"
-                  className={`${styles.serviceTab} ${
-                    idx === activeService ? styles.serviceTabActive : ""
-                  }`}
-                  onMouseEnter={() => setActiveService(idx)}
-                  onFocus={() => setActiveService(idx)}
-                  onClick={() => setActiveService(idx)}
-                >
-                  <span>{item.title}</span>
-                  <em>{item.number}</em>
-                </button>
-              ))}
-            </motion.div>
+          <motion.div
+            className={styles.studioCard}
+            variants={blockMotion}
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, amount: 0.25 }}
+            custom={0.09}
+          >
+            {/* ── Left: vertical step list ── */}
+            <div className={styles.studioSteps}>
+              {serviceSteps.map((item, idx) => {
+                const active = idx === activeService;
+                return (
+                  <button
+                    key={item.title}
+                    type="button"
+                    className={`${styles.studioStep} ${active ? styles.studioStepActive : ""}`}
+                    onMouseEnter={() => setActiveService(idx)}
+                    onClick={() => setActiveService(idx)}
+                  >
+                    <span className={styles.studioNum}>{item.number}</span>
+                    <div className={styles.studioStepInner}>
+                      <span className={styles.studioStepName}>{item.title}</span>
+                      <AnimatePresence initial={false}>
+                        {active && (
+                          <motion.div
+                            key="body"
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.36, ease: easeOutExpo }}
+                            style={{ overflow: "hidden" }}
+                          >
+                            <p className={styles.studioBody}>{item.body}</p>
+                            <a href="/chat" className={styles.studioLink}>
+                              {item.cta} <ArrowUpRight size={12} />
+                            </a>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
 
-            <motion.article
-              className={styles.servicePanel}
-              variants={blockMotion}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, amount: 0.35 }}
-              custom={0.14}
-            >
-              <div
-                className={styles.servicePoster}
-                style={
-                  {
-                    "--service-poster": `url(${serviceSteps[activeService].image})`,
-                  } as CSSProperties
-                }
-                aria-hidden
-              >
-                <div className={styles.posterGlow} />
-              </div>
-
+            {/* ── Right: image poster ── */}
+            <div className={styles.studioPosterWrap}>
               <AnimatePresence mode="wait">
                 <motion.div
                   key={serviceSteps[activeService].title}
-                  className={styles.servicePanelText}
-                  initial={{ opacity: 0, y: 18, filter: "blur(8px)" }}
-                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                  exit={{ opacity: 0, y: -8, filter: "blur(8px)" }}
-                  transition={{ duration: 0.52, ease: easeOutExpo }}
+                  className={styles.studioPoster}
+                  style={{ "--service-poster": `url(${serviceSteps[activeService].image})` } as CSSProperties}
+                  initial={{ opacity: 0, scale: 1.03 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.48, ease: easeOutExpo }}
                 >
-                  <p className={styles.servicePanelLabel}>
-                    {serviceSteps[activeService].title}
-                  </p>
-                  <p>{serviceSteps[activeService].body}</p>
-                  <a href="/chat" className={styles.inlineLink}>
-                    {serviceSteps[activeService].cta} <ArrowUpRight size={16} />
-                  </a>
+                  <div className={styles.posterGlow} />
+                  <div className={styles.studioChip}>
+                    <span className={styles.studioChipNum}>{serviceSteps[activeService].number}</span>
+                    <span>{serviceSteps[activeService].title}</span>
+                  </div>
                 </motion.div>
               </AnimatePresence>
-            </motion.article>
-          </div>
+            </div>
+          </motion.div>
         </section>
 
         <section className={`${styles.section} ${styles.compactTop}`}>
@@ -606,6 +706,7 @@ export default function HomeLanding() {
           </motion.div>
 
           <div className={styles.compareGrid}>
+            {/* ── Generic tools (dark) ── */}
             <motion.article
               className={`${styles.compareCard} ${styles.compareDark}`}
               variants={blockMotion}
@@ -614,19 +715,30 @@ export default function HomeLanding() {
               viewport={{ once: true, amount: 0.35 }}
               custom={0.08}
             >
-              <ul>
-                <li>Unstable story continuity</li>
-                <li>No kid-focused safety layer</li>
-                <li>Separate tools for text and video</li>
-                <li>Hard to reuse characters</li>
+              <div className={styles.compareTop}>
+                <span className={styles.compareBadgeDark}>Generic tools</span>
+                <h3 className={styles.compareTitle}>Fragmented, inconsistent, and frustrating.</h3>
+                <p className={styles.compareDesc}>
+                  Separate tools, no safety layer, and no memory — every session starts from scratch.
+                </p>
+              </div>
+              <div className={styles.compareDivider} />
+              <ul className={styles.compareList}>
+                {[
+                  "Unstable story continuity",
+                  "No kid-focused safety layer",
+                  "Separate tools for text and video",
+                  "Hard to reuse characters",
+                ].map((item) => (
+                  <li key={item} className={styles.compareItem}>
+                    <span className={styles.iconBad}><X size={10} strokeWidth={3} /></span>
+                    {item}
+                  </li>
+                ))}
               </ul>
-              <h3>Generic tools</h3>
-              <p>
-                Fragmented workflow, inconsistent quality, and no reliable story
-                progression for repeat use.
-              </p>
             </motion.article>
 
+            {/* ── Dream (warm) ── */}
             <motion.article
               className={`${styles.compareCard} ${styles.compareWarm}`}
               variants={blockMotion}
@@ -635,17 +747,27 @@ export default function HomeLanding() {
               viewport={{ once: true, amount: 0.35 }}
               custom={0.14}
             >
-              <ul>
-                <li>Child-safe generation defaults</li>
-                <li>Text-to-story + text-to-video together</li>
-                <li>Persistent character memory</li>
-                <li>Fast creation for parents and teachers</li>
+              <div className={styles.compareTop}>
+                <span className={styles.compareBadgeWarm}>Dream</span>
+                <h3 className={styles.compareTitle}>One studio, safe by default.</h3>
+                <p className={styles.compareDesc}>
+                  Story, video, and character memory in a single flow — built for kids and families.
+                </p>
+              </div>
+              <div className={styles.compareDivider} />
+              <ul className={styles.compareList}>
+                {[
+                  "Child-safe generation defaults",
+                  "Text-to-story + text-to-video together",
+                  "Persistent character memory",
+                  "Fast creation for parents and teachers",
+                ].map((item) => (
+                  <li key={item} className={styles.compareItem}>
+                    <span className={styles.iconGood}><Check size={10} strokeWidth={3} /></span>
+                    {item}
+                  </li>
+                ))}
               </ul>
-              <h3>Dream</h3>
-              <p>
-                One streamlined studio that turns imagination into safe, reusable
-                story worlds.
-              </p>
             </motion.article>
           </div>
         </section>
@@ -715,26 +837,47 @@ export default function HomeLanding() {
               return (
                 <motion.article
                   key={item.q}
-                  className={styles.faqItem}
+                  className={`${styles.faqItem} ${open ? styles.faqItemOpen : ""}`}
                   variants={blockMotion}
                   initial="hidden"
                   whileInView="show"
                   viewport={{ once: true, amount: 0.35 }}
                   custom={0.05 + index * 0.045}
+                  layout
+                  layoutRoot
                 >
-                  <button
+                  <motion.button
                     type="button"
                     className={styles.faqButton}
                     onClick={() => setOpenFaq(open ? -1 : index)}
                     aria-expanded={open}
+                    whileHover={{ x: 2 }}
+                    transition={{ duration: 0.18, ease: easeOutExpo }}
                   >
                     <span>{item.q}</span>
-                    <ChevronDown size={16} className={open ? styles.chevOpen : undefined} />
-                  </button>
+                    <motion.span
+                      animate={{ rotate: open ? 180 : 0 }}
+                      transition={{ duration: 0.38, ease: easeOutExpo }}
+                      style={{ display: "flex", flexShrink: 0 }}
+                    >
+                      <ChevronDown size={16} />
+                    </motion.span>
+                  </motion.button>
 
-                  <div className={`${styles.faqPanel} ${open ? styles.faqPanelOpen : ""}`}>
-                    <p>{item.a}</p>
-                  </div>
+                  <AnimatePresence initial={false}>
+                    {open && (
+                      <motion.div
+                        key="panel"
+                        initial={{ height: 0, opacity: 0, y: -6 }}
+                        animate={{ height: "auto", opacity: 1, y: 0 }}
+                        exit={{ height: 0, opacity: 0, y: -4 }}
+                        transition={{ duration: 0.42, ease: easeOutExpo }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <p className={styles.faqAnswer}>{item.a}</p>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.article>
               );
             })}
@@ -743,48 +886,69 @@ export default function HomeLanding() {
       </main>
 
       <footer className={styles.footer}>
+        {/* ── Brand row ── */}
         <div className={styles.footerTop}>
-          <div>
+          <div className={styles.footerBrandBlock}>
             <h2 className={`${styles.footerBrand} ${styles.displayFont}`}>Dream</h2>
-            <p>Text-to-story and text-to-video magic for kids.</p>
+            <p className={styles.footerTagline}>
+              Text-to-story and text-to-video<br />magic for kids.
+            </p>
+            <a
+              href="https://github.com/yashwanth-3000/Dream"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.footerGithub}
+            >
+              <Github size={13} />
+              yashwanth-3000/Dream
+            </a>
           </div>
           <div className={styles.footerFlower} aria-hidden />
         </div>
 
+        {/* ── Link columns ── */}
         <div className={styles.footerCols}>
+          {/* Navigate */}
           <div>
             <p className={styles.colTitle}>Navigate</p>
-            <a href="#home-section">Home</a>
-            <a href="#dream-studio-section">Studio</a>
-            <a href="#how-we-work">How It Works</a>
-            <a href="#faq">FAQ</a>
+            <a href="#home-section" className={styles.footerLink}>Home</a>
+            <a href="#dream-studio-section" className={styles.footerLink}>Studio</a>
+            <a href="#how-we-work" className={styles.footerLink}>How It Works</a>
+            <a href="#faq" className={styles.footerLink}>FAQ</a>
           </div>
+
+          {/* Product — real dashboard links */}
           <div>
             <p className={styles.colTitle}>Product</p>
-            <a href="/chat">Create Story</a>
-            <a href="/dashboard/create">Create Video</a>
-            <a href="#dream-studio-section">Character Memory</a>
-            <a href="#">Safety</a>
+            <Link href="/chat" className={styles.footerLink}>AI Chat</Link>
+            <Link href="/dashboard/create" className={styles.footerLink}>Create Story & Video</Link>
+            <Link href="/dashboard/stories" className={styles.footerLink}>Story Library</Link>
+            <Link href="/dashboard/videos" className={styles.footerLink}>Video Studio</Link>
+            <Link href="/dashboard/characters" className={styles.footerLink}>Character Vault</Link>
+            <Link href="/dashboard/jobs" className={styles.footerLink}>Generation Jobs</Link>
           </div>
+
+          {/* Company */}
           <div>
             <p className={styles.colTitle}>Company</p>
-            <a href="#">About</a>
-            <a href="#">Team</a>
-            <a href="mailto:hello@dream.ai">Contact</a>
-            <a href="#">Careers</a>
-          </div>
-          <div>
-            <p className={styles.colTitle}>Legal</p>
-            <a href="#">Privacy Policy</a>
-            <a href="#">Terms of Service</a>
-            <a href="#">Cookie Policy</a>
-            <a href="#">Accessibility</a>
+            <Link href="/about" className={styles.footerLink}>About Dream</Link>
+            <a
+              href="https://github.com/yashwanth-3000/Dream"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.footerLink}
+            >
+              GitHub
+            </a>
+            <a href="mailto:hello@dream.ai" className={styles.footerLink}>Contact</a>
+            <Link href="/dashboard" className={styles.footerLink}>Dashboard</Link>
           </div>
         </div>
 
+        {/* ── Bottom bar ── */}
         <div className={styles.footerBottom}>
-          <p>© 2026 Dream. All rights reserved.</p>
-          <a href="#">Created by Dream Studio</a>
+          <p>© 2026 Dream AI · All rights reserved.</p>
+          <MadeWith />
         </div>
       </footer>
     </div>

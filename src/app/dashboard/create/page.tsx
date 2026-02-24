@@ -26,19 +26,21 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import {
-  getStoredCharactersServerSnapshot,
-  getStoredCharactersSnapshot,
-  subscribeStoredCharacters,
-} from "@/lib/custom-characters";
 import { cn } from "@/lib/utils";
+import {
+  GAMEPLAY_BACKGROUNDS as BRAIN_ROT_BACKGROUNDS,
+  GAMEPLAY_CATEGORY_OPTIONS as BRAIN_ROT_CATEGORY_OPTIONS,
+  VIDEO_MODE_OPTIONS as VIDEO_TYPE_OPTIONS,
+  type GameplayCategory,
+  type VideoGenerationType,
+} from "@/lib/video-generation-options";
 
 type Category = "KIDS" | "FAMILY" | "BEDTIME";
 type OutputType = "story" | "video";
-type VideoType = "normal" | "brain_rot";
-type BrainRotCategory = "minecraft" | "gta" | "subway";
+type VideoType = VideoGenerationType;
+type BrainRotCategory = GameplayCategory;
 
 type GenerationFormState = {
   projectName: string;
@@ -49,7 +51,6 @@ type GenerationFormState = {
   frontImage: File | null;
   backImage: File | null;
   styles: string[];
-  selectedCharacterId: string | null;
   brainRotCategory: BrainRotCategory;
   brainRotBackgroundId: string;
   selectedVoiceId: string;
@@ -69,8 +70,6 @@ type RuntimeState = Record<
 >;
 
 type LogLine = { ts: string; level: "info" | "success" | "warning"; message: string };
-
-type BackgroundClip = { id: string; name: string; thumb: string };
 
 type VoiceOption = {
   id: string;
@@ -119,52 +118,6 @@ const STYLE_OPTIONS = [
   "Line Art",
   "Neon",
 ];
-
-const VIDEO_TYPE_OPTIONS: { value: VideoType; label: string; description: string }[] = [
-  {
-    value: "normal",
-    label: "Normal Video",
-    description: "Narrative video based on your character and prompt.",
-  },
-  {
-    value: "brain_rot",
-    label: "Brain Rot Video",
-    description: "Short-form high-energy format with gameplay background.",
-  },
-];
-
-const BRAIN_ROT_CATEGORY_OPTIONS: { id: BrainRotCategory; label: string; emoji: string; description: string }[] = [
-  { id: "minecraft", label: "Minecraft", emoji: "⛏️", description: "Block world" },
-  { id: "gta", label: "GTA", emoji: "🚗", description: "City chaos" },
-  { id: "subway", label: "Subway", emoji: "🏃", description: "Endless runner" },
-];
-
-const BRAIN_ROT_BACKGROUNDS: Record<BrainRotCategory, BackgroundClip[]> = {
-  minecraft: [
-    { id: "mc_1", name: "Lava Path", thumb: "https://images.unsplash.com/photo-1579370318443-8da816457adf?w=600&auto=format&fit=crop&q=80" },
-    { id: "mc_2", name: "Temple Hall", thumb: "https://images.unsplash.com/photo-1611605698335-8b1569810432?w=600&auto=format&fit=crop&q=80" },
-    { id: "mc_3", name: "Sky Bridge", thumb: "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&auto=format&fit=crop&q=80" },
-    { id: "mc_4", name: "Night Build", thumb: "https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80" },
-    { id: "mc_5", name: "Cliff Tower", thumb: "https://images.unsplash.com/photo-1580327344181-c1163234e5a0?w=600&auto=format&fit=crop&q=80" },
-    { id: "mc_6", name: "Portal Run", thumb: "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600&auto=format&fit=crop&q=80" },
-  ],
-  gta: [
-    { id: "gta_1", name: "City Night", thumb: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=600&auto=format&fit=crop&q=80" },
-    { id: "gta_2", name: "Neon Street", thumb: "https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=600&auto=format&fit=crop&q=80" },
-    { id: "gta_3", name: "Freeway POV", thumb: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=600&auto=format&fit=crop&q=80" },
-    { id: "gta_4", name: "Downtown", thumb: "https://images.unsplash.com/photo-1465447142348-e9952c393450?w=600&auto=format&fit=crop&q=80" },
-    { id: "gta_5", name: "Rain Drift", thumb: "https://images.unsplash.com/photo-1494526585095-c41746248156?w=600&auto=format&fit=crop&q=80" },
-    { id: "gta_6", name: "Airport Run", thumb: "https://images.unsplash.com/photo-1489515217757-5fd1be406fef?w=600&auto=format&fit=crop&q=80" },
-  ],
-  subway: [
-    { id: "subway_1", name: "Tunnel Boost", thumb: "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=600&auto=format&fit=crop&q=80" },
-    { id: "subway_2", name: "Urban Track", thumb: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80" },
-    { id: "subway_3", name: "Rush Hour", thumb: "https://images.unsplash.com/photo-1470123808288-1e59739f8bf8?w=600&auto=format&fit=crop&q=80" },
-    { id: "subway_4", name: "Graffiti Rail", thumb: "https://images.unsplash.com/photo-1494522358652-f30e61a60313?w=600&auto=format&fit=crop&q=80" },
-    { id: "subway_5", name: "Golden Hour", thumb: "https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=600&auto=format&fit=crop&q=80" },
-    { id: "subway_6", name: "Late Night", thumb: "https://images.unsplash.com/photo-1468436385273-8abca6dfd8d3?w=600&auto=format&fit=crop&q=80" },
-  ],
-};
 
 const VOICE_OPTIONS: VoiceOption[] = [
   { id: "alloy", name: "Alloy", provider: "OpenAI Voice", accentClass: "from-[#ffb36b] to-[#fb7185]", sampleUrl: "https://cdn.openai.com/API/docs/audio/alloy.wav" },
@@ -386,12 +339,6 @@ function WaveformBars({ playing }: { playing: boolean }) {
 export default function DashboardCreatePage() {
   const router = useRouter();
 
-  const customCharacters = useSyncExternalStore(
-    subscribeStoredCharacters,
-    getStoredCharactersSnapshot,
-    getStoredCharactersServerSnapshot,
-  );
-
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<GenerationFormState>({
     projectName: "",
@@ -402,7 +349,6 @@ export default function DashboardCreatePage() {
     frontImage: null,
     backImage: null,
     styles: ["Cinematic"],
-    selectedCharacterId: null,
     brainRotCategory: "minecraft",
     brainRotBackgroundId: "mc_1",
     selectedVoiceId: "echo",
@@ -429,11 +375,6 @@ export default function DashboardCreatePage() {
   const [audioProgress, setAudioProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const availableCharacters = useMemo(
-    () => [...customCharacters].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [customCharacters],
-  );
-
   const backgroundOptions = useMemo(
     () => BRAIN_ROT_BACKGROUNDS[form.brainRotCategory],
     [form.brainRotCategory],
@@ -444,36 +385,15 @@ export default function DashboardCreatePage() {
     [form.outputType],
   );
 
-  useEffect(() => {
-    if (form.outputType !== "video" || form.videoType !== "normal") return;
-    if (availableCharacters.length === 0) {
-      if (form.selectedCharacterId) setForm((p) => ({ ...p, selectedCharacterId: null }));
-      return;
-    }
-    if (!form.selectedCharacterId || !availableCharacters.some((c) => c.id === form.selectedCharacterId)) {
-      setForm((p) => ({ ...p, selectedCharacterId: availableCharacters[0].id }));
-    }
-  }, [availableCharacters, form.outputType, form.selectedCharacterId, form.videoType]);
-
-  useEffect(() => {
-    if (form.outputType !== "video" || form.videoType !== "brain_rot") return;
-    if (backgroundOptions.some((item) => item.id === form.brainRotBackgroundId)) return;
-    setForm((p) => ({ ...p, brainRotBackgroundId: backgroundOptions[0]?.id ?? "" }));
-  }, [backgroundOptions, form.brainRotBackgroundId, form.outputType, form.videoType]);
-
-  const hasCharacterSelection =
-    form.outputType !== "video" || form.videoType !== "normal" || Boolean(form.selectedCharacterId);
-
   const hasVoiceAndMusicSetup =
     form.outputType !== "video" || Boolean(form.selectedVoiceId && form.selectedMusicId);
 
   const hasBrainRotBackgroundSetup =
-    form.outputType !== "video" || form.videoType !== "brain_rot" || Boolean(form.brainRotBackgroundId);
+    form.outputType !== "video" || form.videoType !== "gameplay" || Boolean(form.brainRotBackgroundId);
 
   const isStep1Valid = Boolean(
     form.projectName.trim() &&
       form.prompt.trim() &&
-      hasCharacterSelection &&
       hasVoiceAndMusicSetup &&
       hasBrainRotBackgroundSetup,
   );
@@ -602,9 +522,9 @@ export default function DashboardCreatePage() {
             }
 
             markRunning("generate_video");
-            addLog("info", form.videoType === "brain_rot"
+            addLog("info", form.videoType === "gameplay"
               ? "Compositing background clip, voice, captions, and music."
-              : "Rendering narrative video from selected character and prompt."
+              : "Rendering narrative video from prompt and selected style."
             );
 
             timersRef.current.push(
@@ -825,8 +745,8 @@ export default function DashboardCreatePage() {
                   />
                   <div className="mt-2 flex items-center justify-between">
                     <p className="text-xs text-muted-foreground">
-                      {form.outputType === "video" && form.videoType === "brain_rot"
-                        ? "Use punchy hooks and short lines for brain-rot pacing."
+                      {form.outputType === "video" && form.videoType === "gameplay"
+                        ? "Use punchy hooks and short lines for gameplay pacing."
                         : "Be specific — more detail means more consistent outputs."}
                     </p>
                     <span className={cn(
@@ -894,111 +814,48 @@ export default function DashboardCreatePage() {
                 </>
               )}
 
-              {/* ③ Video: Character & Style OR Background */}
+              {/* ③ Video: Style OR Background */}
               {form.outputType === "video" && (
                 <div className="rounded-2xl border border-border bg-white shadow-sm dark:border-white/10 dark:bg-[#141414]">
                   <div className="flex items-center gap-3 border-b border-border px-5 py-4 dark:border-white/8">
                     <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">3</span>
                     <p className="text-sm font-semibold text-foreground">
-                      {form.videoType === "brain_rot" ? "Background Clip" : "Character & Style"}
+                      {form.videoType === "gameplay" ? "Background Clip" : "Video Style"}
                     </p>
                   </div>
                   <div className="p-5">
 
                     {form.videoType === "normal" ? (
-                      <div className="space-y-5">
-                        {/* Character grid */}
-                        <div>
-                          <SectionLabel>Choose Character</SectionLabel>
-                          <p className="mt-0.5 text-xs text-muted-foreground">Pick one of your created characters.</p>
-
-                          {availableCharacters.length === 0 ? (
-                            <div className="mt-3 flex flex-col items-center rounded-xl border border-dashed border-border bg-muted/20 py-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
-                              <div className="flex size-10 items-center justify-center rounded-full bg-muted/60 dark:bg-white/8">
-                                <Sparkles className="h-4 w-4 text-muted-foreground" />
-                              </div>
-                              <p className="mt-2 text-sm font-semibold text-foreground">No characters yet</p>
-                              <p className="mt-1 text-xs text-muted-foreground">Create a character first, then come back.</p>
-                              <Link
-                                href="/dashboard/characters/new-character"
-                                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition hover:brightness-95 micro-btn"
+                      <div>
+                        <SectionLabel>Generation Style</SectionLabel>
+                        <p className="mt-0.5 text-xs text-muted-foreground">Choose a visual preset for your scenes.</p>
+                        <div className="mt-3 grid grid-cols-4 gap-2">
+                          {STYLE_OPTIONS.map((style, idx) => {
+                            const active = form.styles.includes(style);
+                            const preview = SCENE_POOL[idx % SCENE_POOL.length];
+                            return (
+                              <button
+                                key={style}
+                                type="button"
+                                onClick={() => toggleStyle(style)}
+                                className={cn(
+                                  "group relative overflow-hidden rounded-xl border transition-all duration-200",
+                                  active
+                                    ? "border-primary/50 ring-2 ring-primary/30"
+                                    : "border-border hover:border-primary/30 dark:border-white/10",
+                                )}
                               >
-                                <Sparkles className="h-3.5 w-3.5" />
-                                Create Character
-                              </Link>
-                            </div>
-                          ) : (
-                            <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                              {availableCharacters.map((char) => {
-                                const active = form.selectedCharacterId === char.id;
-                                return (
-                                  <button
-                                    key={char.id}
-                                    type="button"
-                                    onClick={() => setForm((p) => ({ ...p, selectedCharacterId: char.id }))}
-                                    className={cn(
-                                      "group relative overflow-hidden rounded-xl border transition-all duration-200",
-                                      active
-                                        ? "border-primary/50 ring-2 ring-primary/30"
-                                        : "border-border hover:border-primary/30 hover:shadow-md dark:border-white/10",
-                                    )}
-                                  >
-                                    <div className="aspect-[3/4] overflow-hidden">
-                                      <img
-                                        src={char.avatar}
-                                        alt={char.name}
-                                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
-                                      />
-                                    </div>
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/5 to-transparent" />
-                                    {active && (
-                                      <div className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-primary shadow-md">
-                                        <Check className="h-3 w-3 text-primary-foreground" />
-                                      </div>
-                                    )}
-                                    <div className="absolute inset-x-0 bottom-0 p-2">
-                                      <p className="truncate text-xs font-semibold text-white">{char.name}</p>
-                                      <p className="truncate text-[10px] text-white/60">{char.role}</p>
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Style grid */}
-                        <div className="border-t border-border/70 pt-5 dark:border-white/8">
-                          <SectionLabel>Generation Style</SectionLabel>
-                          <p className="mt-0.5 text-xs text-muted-foreground">Choose a visual preset for your scenes.</p>
-                          <div className="mt-3 grid grid-cols-4 gap-2">
-                            {STYLE_OPTIONS.map((style, idx) => {
-                              const active = form.styles.includes(style);
-                              const preview = SCENE_POOL[idx % SCENE_POOL.length];
-                              return (
-                                <button
-                                  key={style}
-                                  type="button"
-                                  onClick={() => toggleStyle(style)}
-                                  className={cn(
-                                    "group relative overflow-hidden rounded-xl border transition-all duration-200",
-                                    active
-                                      ? "border-primary/50 ring-2 ring-primary/30"
-                                      : "border-border hover:border-primary/30 dark:border-white/10",
-                                  )}
-                                >
-                                  <img src={preview} alt={style} className="h-20 w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
-                                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
-                                  {active && (
-                                    <div className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-primary shadow-md">
-                                      <Check className="h-3 w-3 text-primary-foreground" />
-                                    </div>
-                                  )}
-                                  <span className="absolute bottom-1.5 left-2 text-[11px] font-semibold text-white">{style}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                                <img src={preview} alt={style} className="h-20 w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                                {active && (
+                                  <div className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-primary shadow-md">
+                                    <Check className="h-3 w-3 text-primary-foreground" />
+                                  </div>
+                                )}
+                                <span className="absolute bottom-1.5 left-2 text-[11px] font-semibold text-white">{style}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : (
@@ -1011,7 +868,11 @@ export default function DashboardCreatePage() {
                               <button
                                 key={cat.id}
                                 type="button"
-                                onClick={() => setForm((p) => ({ ...p, brainRotCategory: cat.id }))}
+                                onClick={() => setForm((p) => ({
+                                  ...p,
+                                  brainRotCategory: cat.id,
+                                  brainRotBackgroundId: BRAIN_ROT_BACKGROUNDS[cat.id][0]?.id ?? p.brainRotBackgroundId,
+                                }))}
                                 className={cn(
                                   "rounded-full px-3 py-1 text-xs font-semibold transition-all duration-150",
                                   form.brainRotCategory === cat.id
@@ -1309,9 +1170,6 @@ export default function DashboardCreatePage() {
                   {[
                     { label: "Project name", ok: Boolean(form.projectName.trim()) },
                     { label: "Prompt written", ok: Boolean(form.prompt.trim()) },
-                    ...(form.outputType === "video" && form.videoType === "normal"
-                      ? [{ label: "Character selected", ok: hasCharacterSelection }]
-                      : []),
                     ...(form.outputType === "video"
                       ? [
                           { label: "Voice selected", ok: Boolean(form.selectedVoiceId) },

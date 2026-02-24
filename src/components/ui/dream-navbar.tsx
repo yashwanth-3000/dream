@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Github } from "lucide-react";
 
 const NAV_LINKS = [
   { label: "Chat", href: "/chat" },
@@ -22,7 +23,8 @@ export default function DreamNavbar() {
         {/* Logo */}
         <Link
           href="/"
-          className="text-[13px] font-semibold tracking-[-0.02em] text-[#f6efe8] transition-opacity duration-200 hover:opacity-80"
+          className="text-[18px] text-[#f6efe8] transition-opacity duration-200 hover:opacity-80"
+          style={{ fontFamily: "var(--font-halant)", fontWeight: 400, letterSpacing: "-0.04em" }}
         >
           Dream
         </Link>
@@ -45,6 +47,20 @@ export default function DreamNavbar() {
               </Link>
             );
           })}
+
+          {/* Divider */}
+          <span className="mx-1 h-3.5 w-px bg-white/20" />
+
+          {/* GitHub */}
+          <a
+            href="https://github.com/yashwanth-3000/Dream"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center rounded-full p-1.5 text-[#c4b5a8] transition-all duration-200 hover:text-[#f2e7dc]"
+            aria-label="GitHub"
+          >
+            <Github size={14} />
+          </a>
         </div>
       </nav>
     </header>
