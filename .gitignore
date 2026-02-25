@@ -20,6 +20,7 @@
 /website/output/verifyt/
 
 # next.js
+/.next/
 /website/.next/
 /website/out/
 
@@ -38,6 +39,18 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+
+# python virtual envs
+.venv/
+/backend/.venv/
+/backend/a2a-crew-ai-character-maker/.venv/
+
+# backend nested workspace artifacts
+/backend/a2a-crew-ai-character-maker/.pytest_cache/
+/backend/a2a-crew-ai-character-maker/*.egg-info/
+/backend/a2a-crew-ai-character-maker/.env
+/backend/a2a-crew-ai-character-maker/.env.*
+!/backend/a2a-crew-ai-character-maker/.env.example
 
 # vercel
 /website/.vercel

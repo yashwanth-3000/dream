@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dream-backend"
+version = "0.1.0"
+description = "CrewAI-powered character creation workflow with Replicate image generation"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "crewai",
+  "fastapi",
+  "openai",
+  "pydantic-settings",
+  "python-dotenv",
+  "replicate",
+  "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

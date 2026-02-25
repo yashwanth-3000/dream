@@ -12,6 +12,7 @@ import {
   Film,
   Users,
   Settings,
+  FlaskConical,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ const dashboardLinks = [
   { label: "Stories", href: "/dashboard/stories", icon: BookOpenText },
   { label: "Videos", href: "/dashboard/videos", icon: Film },
   { label: "Characters", href: "/dashboard/characters", icon: Users },
+  { label: "API Test", href: "/dashboard/api-test", icon: FlaskConical },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 
