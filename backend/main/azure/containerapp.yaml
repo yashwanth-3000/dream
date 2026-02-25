@@ -1,0 +1,35 @@
+# Template for Azure Container Apps deployment.
+# This file is optional when using scripts/deploy_azure.sh, but kept for infra clarity.
+name: ${AZURE_CONTAINERAPP_NAME}
+type: Microsoft.App/containerApps
+location: ${AZURE_LOCATION}
+properties:
+  managedEnvironmentId: ${AZURE_CONTAINERAPP_ENV_ID}
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+      transport: auto
+    secrets:
+      - name: azure-openai-api-key
+        value: ${AZURE_OPENAI_API_KEY}
+  template:
+    containers:
+      - name: maf-orchestrator
+        image: ${IMAGE_NAME}
+        env:
+          - name: AGENT_PROVIDER
+            value: azure
+          - name: A2A_BACKEND_BASE_URL
+            value: ${A2A_BACKEND_BASE_URL}
+          - name: AZURE_OPENAI_ENDPOINT
+            value: ${AZURE_OPENAI_ENDPOINT}
+          - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
+            value: ${AZURE_OPENAI_CHAT_DEPLOYMENT_NAME}
+          - name: AZURE_OPENAI_API_VERSION
+            value: ${AZURE_OPENAI_API_VERSION}
+          - name: AZURE_OPENAI_API_KEY
+            secretRef: azure-openai-api-key
+        resources:
+          cpu: 1
+          memory: 2Gi

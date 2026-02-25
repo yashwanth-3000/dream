@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     replicate_output_count: int = 1
     replicate_aspect_ratio: str = "3:4"
 
+    a2a_public_base_url: str = "http://127.0.0.1:8000"
+    a2a_rpc_path: str = "/a2a"
+    a2a_agent_name: str = "Dream CrewAI Character Agent"
+    a2a_agent_version: str = "0.1.0"
+
     crewai_verbose: bool = True
 
     model_config = SettingsConfigDict(
@@ -22,6 +27,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def a2a_rpc_url(self) -> str:
+        return f"{self.a2a_public_base_url.rstrip('/')}/{self.a2a_rpc_path.lstrip('/')}"
 
 
 @lru_cache(maxsize=1)

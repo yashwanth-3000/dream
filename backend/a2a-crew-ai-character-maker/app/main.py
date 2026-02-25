@@ -1,5 +1,6 @@
 from fastapi import Depends, FastAPI, HTTPException
 
+from app.a2a_server import register_a2a_routes
 from app.config import Settings, get_settings
 from app.schemas import (
     CharacterCreationRequest,
@@ -17,6 +18,14 @@ app = FastAPI(
         "with Replicate image rendering."
     ),
 )
+
+
+@app.on_event("startup")
+def setup_a2a_protocol_routes() -> None:
+    if getattr(app.state, "a2a_routes_registered", False):
+        return
+    register_a2a_routes(app=app, settings=get_settings())
+    app.state.a2a_routes_registered = True
 
 
 @app.get("/health")

@@ -42,8 +42,15 @@ yarn-error.log*
 
 # python virtual envs
 .venv/
+.venv*/
 /backend/.venv/
+/backend/.venv*/
 /backend/a2a-crew-ai-character-maker/.venv/
+/backend/a2a-crew-ai-character-maker/.venv*/
+/backend/main/.venv/
+/backend/main/.venv*/
+__pycache__/
+*.pyc
 
 # backend nested workspace artifacts
 /backend/a2a-crew-ai-character-maker/.pytest_cache/
@@ -51,6 +58,11 @@ yarn-error.log*
 /backend/a2a-crew-ai-character-maker/.env
 /backend/a2a-crew-ai-character-maker/.env.*
 !/backend/a2a-crew-ai-character-maker/.env.example
+/backend/main/.env
+/backend/main/.env.*
+!/backend/main/.env.example
+/backend/main/.pytest_cache/
+/backend/main/*.egg-info/
 
 # vercel
 /website/.vercel

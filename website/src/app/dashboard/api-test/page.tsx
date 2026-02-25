@@ -41,6 +41,7 @@ type DrawingTextField = "description" | "notes";
 type RequestState = "idle" | "loading" | "success" | "error";
 type HealthState = "idle" | "loading" | "ok" | "error";
 type RequestAction = "create" | "regenerate";
+type ApiTarget = "main" | "backend";
 type PromptPack = { positive_prompt: string; negative_prompt?: string };
 
 const EMPTY_WORLD_REFERENCE: WorldReferenceInput = {
@@ -102,6 +103,15 @@ function extractPromptPack(payload: unknown): PromptPack | null {
   return { positive_prompt: positivePrompt, negative_prompt: negativePrompt };
 }
 
+function unwrapWorkflowPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const backendResponse = (payload as { backend_response?: unknown }).backend_response;
+  if (backendResponse && typeof backendResponse === "object") {
+    return backendResponse;
+  }
+  return payload;
+}
+
 function StatusChip({ label, tone }: { label: string; tone: "neutral" | "ok" | "error" | "running" }) {
   const toneStyles: Record<typeof tone, { bg: string; fg: string; border: string }> = {
     neutral: { bg: "#f8efe5", fg: "#7a5a45", border: "#dbc9b7" },
@@ -127,6 +137,7 @@ function StatusChip({ label, tone }: { label: string; tone: "neutral" | "ok" | "
 export default function DashboardApiTestPage() {
   const [prompt, setPrompt] = useState("A moon ranger with shattered ceremonial armor and a plasma bow.");
   const [workflowChoice, setWorkflowChoice] = useState<WorkflowChoice>("");
+  const [apiTarget, setApiTarget] = useState<ApiTarget>("main");
 
   const [worldReferences, setWorldReferences] = useState<WorldReferenceInput[]>([
     {
@@ -140,6 +151,8 @@ export default function DashboardApiTestPage() {
 
   const [healthState, setHealthState] = useState<HealthState>("idle");
   const [healthMessage, setHealthMessage] = useState("");
+  const [a2aProbeState, setA2AProbeState] = useState<HealthState>("idle");
+  const [a2aProbeMessage, setA2AProbeMessage] = useState("");
 
   const [requestState, setRequestState] = useState<RequestState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
@@ -154,6 +167,19 @@ export default function DashboardApiTestPage() {
 
   const responseJson = useMemo(() => JSON.stringify(responseBody, null, 2), [responseBody]);
   const payloadJson = useMemo(() => JSON.stringify(lastPayload, null, 2), [lastPayload]);
+  const apiRouteQuery = useMemo(() => `?target=${apiTarget}`, [apiTarget]);
+
+  const orchestratorEnvelope =
+    responseBody && typeof responseBody === "object" && responseBody !== null
+      ? (responseBody as {
+          selected_action?: string;
+          selected_by?: string;
+          backend_endpoint?: string;
+          backend_status_code?: number;
+          backend_response?: unknown;
+        })
+      : null;
+  const workflowPayload = useMemo(() => unwrapWorkflowPayload(responseBody), [responseBody]);
 
   const uploadedWorldCount = useMemo(
     () => worldReferences.filter((entry) => Boolean(entry.file)).length,
@@ -166,8 +192,8 @@ export default function DashboardApiTestPage() {
   );
 
   const responseData =
-    responseBody && typeof responseBody === "object" && responseBody !== null
-      ? (responseBody as {
+    workflowPayload && typeof workflowPayload === "object" && workflowPayload !== null
+      ? (workflowPayload as {
           generated_images?: string[];
           drawing_descriptions?: string[];
           world_reference_descriptions?: string[];
@@ -198,7 +224,7 @@ export default function DashboardApiTestPage() {
     setHealthState("loading");
     setHealthMessage("");
     try {
-      const response = await fetch("/api/character-test", { method: "GET" });
+      const response = await fetch(`/api/character-test?target=${apiTarget}`, { method: "GET" });
       const text = await response.text();
       if (!response.ok) {
         setHealthState("error");
@@ -210,6 +236,25 @@ export default function DashboardApiTestPage() {
     } catch (error) {
       setHealthState("error");
       setHealthMessage(error instanceof Error ? error.message : "Health check failed.");
+    }
+  }, [apiTarget]);
+
+  const probeA2APath = useCallback(async () => {
+    setA2AProbeState("loading");
+    setA2AProbeMessage("");
+    try {
+      const response = await fetch("/api/character-test?target=main&check=a2a", { method: "GET" });
+      const text = await response.text();
+      if (!response.ok) {
+        setA2AProbeState("error");
+        setA2AProbeMessage(text || "A2A probe failed.");
+        return;
+      }
+      setA2AProbeState("ok");
+      setA2AProbeMessage(text || '{"status":"ok"}');
+    } catch (error) {
+      setA2AProbeState("error");
+      setA2AProbeMessage(error instanceof Error ? error.message : "A2A probe failed.");
     }
   }, []);
 
@@ -349,22 +394,15 @@ export default function DashboardApiTestPage() {
     );
   }
 
-  async function submitRequest() {
-    setRequestAction("create");
-    setRequestState("loading");
-    setErrorMessage("");
-    setResponseStatus(null);
+  async function buildPayloadForAction(action: RequestAction): Promise<Record<string, unknown>> {
+    const { worldReferencesPayload, drawingsPayload } = await buildReferencePayloads();
 
-    const normalizedPrompt = prompt.trim();
-    if (!normalizedPrompt) {
-      setRequestState("error");
-      setErrorMessage("Prompt is required.");
-      setRequestAction(null);
-      return;
-    }
+    if (action === "create") {
+      const normalizedPrompt = prompt.trim();
+      if (!normalizedPrompt) {
+        throw new Error("Prompt is required.");
+      }
 
-    try {
-      const { worldReferencesPayload, drawingsPayload } = await buildReferencePayloads();
       const payload: Record<string, unknown> = {
         user_prompt: normalizedPrompt,
         world_references: worldReferencesPayload,
@@ -373,10 +411,41 @@ export default function DashboardApiTestPage() {
       if (workflowChoice) {
         payload.force_workflow = workflowChoice;
       }
+      if (apiTarget === "main") {
+        payload.mode = "create";
+      }
+      return payload;
+    }
 
+    const promptPack = promptForRegeneration;
+    if (!promptPack?.positive_prompt.trim()) {
+      throw new Error("Generate once first to cache an image prompt, then use regenerate.");
+    }
+
+    const payload: Record<string, unknown> = {
+      positive_prompt: promptPack.positive_prompt,
+      negative_prompt: promptPack.negative_prompt,
+      world_references: worldReferencesPayload,
+      character_drawings: drawingsPayload,
+    };
+    if (apiTarget === "main") {
+      payload.mode = "regenerate";
+    }
+    return payload;
+  }
+
+
+  async function submitRequest() {
+    setRequestAction("create");
+    setRequestState("loading");
+    setErrorMessage("");
+    setResponseStatus(null);
+
+    try {
+      const payload = await buildPayloadForAction("create");
       setLastPayload(toPayloadForDisplay(payload));
 
-      const response = await fetch("/api/character-test", {
+      const response = await fetch(`/api/character-test${apiRouteQuery}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -391,7 +460,7 @@ export default function DashboardApiTestPage() {
         return;
       }
 
-      const promptPack = extractPromptPack(parsed);
+      const promptPack = extractPromptPack(unwrapWorkflowPayload(parsed));
       if (promptPack) {
         setLastImagePrompt(promptPack);
       }
@@ -410,26 +479,11 @@ export default function DashboardApiTestPage() {
     setErrorMessage("");
     setResponseStatus(null);
 
-    const promptPack = promptForRegeneration;
-    if (!promptPack?.positive_prompt.trim()) {
-      setRequestState("error");
-      setErrorMessage("Generate once first to cache an image prompt, then use regenerate.");
-      setRequestAction(null);
-      return;
-    }
-
     try {
-      const { worldReferencesPayload, drawingsPayload } = await buildReferencePayloads();
-      const payload: Record<string, unknown> = {
-        positive_prompt: promptPack.positive_prompt,
-        negative_prompt: promptPack.negative_prompt,
-        world_references: worldReferencesPayload,
-        character_drawings: drawingsPayload,
-      };
-
+      const payload = await buildPayloadForAction("regenerate");
       setLastPayload(toPayloadForDisplay(payload));
 
-      const response = await fetch("/api/character-test", {
+      const response = await fetch(`/api/character-test${apiRouteQuery}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -444,7 +498,15 @@ export default function DashboardApiTestPage() {
         return;
       }
 
-      const returnedPrompt = extractPromptPack(parsed) || promptPack;
+      const returnedPrompt =
+        extractPromptPack(unwrapWorkflowPayload(parsed)) ||
+        (payload.positive_prompt
+          ? {
+              positive_prompt: String(payload.positive_prompt),
+              negative_prompt:
+                typeof payload.negative_prompt === "string" ? payload.negative_prompt : undefined,
+            }
+          : null);
       setLastImagePrompt(returnedPrompt);
       setRequestState("success");
     } catch (error) {
@@ -483,6 +545,19 @@ export default function DashboardApiTestPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3" }}>
+            <span style={{ color: "#7a5a45" }}>Target</span>
+            <select
+              value={apiTarget}
+              onChange={(event) => setApiTarget(event.target.value as ApiTarget)}
+              className="rounded border px-2 py-0.5 text-xs outline-none"
+              style={{ borderColor: "#dbc9b7", background: "#fcf6ef", color: "#2b180a" }}
+            >
+              <option value="main">Main (MAF + A2A)</option>
+              <option value="backend">Backend Direct</option>
+            </select>
+          </label>
+          <StatusChip label={apiTarget === "main" ? "Route main -> A2A" : "Route backend direct"} tone={apiTarget === "main" ? "ok" : "neutral"} />
           <StatusChip label={`Prompt ${promptLength} chars`} tone={promptLength === 0 ? "error" : "neutral"} />
           <StatusChip label={`World uploads ${uploadedWorldCount}`} tone="neutral" />
           <StatusChip label={`Drawing uploads ${uploadedDrawingCount}`} tone="neutral" />
@@ -503,6 +578,22 @@ export default function DashboardApiTestPage() {
             )}
             Check Health
           </button>
+          {apiTarget === "main" ? (
+            <button
+              type="button"
+              onClick={probeA2APath}
+              className={`${styles.btnOutline} px-4 py-2 text-xs md:text-sm`}
+              disabled={a2aProbeState === "loading"}
+              title="Calls main /api/v1/orchestrate/a2a-health"
+            >
+              {a2aProbeState === "loading" ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+              )}
+              Probe A2A Path
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={submitRequest}
@@ -551,6 +642,26 @@ export default function DashboardApiTestPage() {
         </div>
         {healthMessage ? <pre className="mt-2 whitespace-pre-wrap">{healthMessage}</pre> : null}
       </div>
+
+      {apiTarget === "main" ? (
+        <div
+          className="rounded-2xl p-3 text-xs"
+          style={{
+            border: "1px solid #dbc9b7",
+            background: a2aProbeState === "error" ? "#fef2f2" : "#fcf6ef",
+            color: a2aProbeState === "error" ? "#991b1b" : "#2b180a",
+          }}
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <span className="font-semibold">A2A route probe:</span>
+            {a2aProbeState === "ok" ? <StatusChip label="Connected via main -> /a2a" tone="ok" /> : null}
+            {a2aProbeState === "loading" ? <StatusChip label="Checking" tone="running" /> : null}
+            {a2aProbeState === "error" ? <StatusChip label="Failed" tone="error" /> : null}
+            {a2aProbeState === "idle" ? <StatusChip label="Not checked" tone="neutral" /> : null}
+          </div>
+          {a2aProbeMessage ? <pre className="mt-2 whitespace-pre-wrap">{a2aProbeMessage}</pre> : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,1fr)]">
         <div className="space-y-4 rounded-2xl p-4 xl:sticky xl:top-4 self-start" style={{ border: "1px solid #dbc9b7", background: "#fcf6ef" }}>
@@ -810,7 +921,7 @@ export default function DashboardApiTestPage() {
             </button>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-4">
             <div className="rounded-xl border p-2 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3" }}>
               <p className="font-semibold">State</p>
               <div className="mt-1">
@@ -825,10 +936,40 @@ export default function DashboardApiTestPage() {
               <p className="mt-1">{responseStatus ?? "-"}</p>
             </div>
             <div className="rounded-xl border p-2 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3" }}>
+              <p className="font-semibold">Source</p>
+              <p className="mt-1">{orchestratorEnvelope?.backend_response ? "Main wrapper" : "Direct payload"}</p>
+            </div>
+            <div className="rounded-xl border p-2 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3" }}>
               <p className="font-semibold">Workflow</p>
               <p className="mt-1">{responseData?.workflow_used || "-"}</p>
             </div>
           </div>
+
+          {orchestratorEnvelope?.backend_response ? (
+            <div className="rounded-xl border p-3 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3", color: "#2b180a" }}>
+              <p className="font-semibold" style={{ color: "#9a7a65" }}>
+                Main orchestration details
+              </p>
+              <p className="mt-1">
+                selected_action: <span className="font-semibold">{orchestratorEnvelope.selected_action || "-"}</span>
+              </p>
+              <p>
+                selected_by: <span className="font-semibold">{orchestratorEnvelope.selected_by || "-"}</span>
+              </p>
+              <p>
+                backend_endpoint:{" "}
+                <span className="font-semibold">{orchestratorEnvelope.backend_endpoint || "-"}</span>
+              </p>
+              <p>
+                backend_status_code:{" "}
+                <span className="font-semibold">
+                  {typeof orchestratorEnvelope.backend_status_code === "number"
+                    ? orchestratorEnvelope.backend_status_code
+                    : "-"}
+                </span>
+              </p>
+            </div>
+          ) : null}
 
           {errorMessage ? (
             <div className="rounded-xl border p-3 text-xs" style={{ borderColor: "#f1b0b0", background: "#feefef", color: "#981b1b" }}>
