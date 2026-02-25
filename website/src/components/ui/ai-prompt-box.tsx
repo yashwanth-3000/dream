@@ -328,6 +328,12 @@ const PromptInputAction: React.FC<PromptInputActionProps> = ({ tooltip, children
 // ── Modes ─────────────────────────────────────────────────────────────────────
 const MODES = [
   {
+    id: "search",
+    label: "Search",
+    description: "Explore ideas and ask anything",
+    activeClass: "bg-sky-50 border-sky-300 text-sky-700",
+  },
+  {
     id: "story",
     label: "Story",
     description: "Craft a magical kid-safe narrative",
@@ -338,12 +344,6 @@ const MODES = [
     label: "Video",
     description: "Generate an animated video scene",
     activeClass: "bg-violet-50 border-violet-300 text-violet-700",
-  },
-  {
-    id: "character",
-    label: "Character",
-    description: "Design and name a story character",
-    activeClass: "bg-emerald-50 border-emerald-300 text-emerald-700",
   },
 ] as const;
 
