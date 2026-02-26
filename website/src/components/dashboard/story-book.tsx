@@ -1,9 +1,9 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,6 +14,8 @@ import {
   Maximize2,
   Palette,
   X,
+  Download,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -21,7 +23,7 @@ import { cn } from "@/lib/utils";
 import type { StoryPage } from "@/lib/dashboard-data";
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                              */
+/*  Props / data model                                                 */
 /* ------------------------------------------------------------------ */
 
 interface StoryBookProps {
@@ -31,111 +33,297 @@ interface StoryBookProps {
   cover: string;
 }
 
+/** One "opening" of the book: what you see on left + right simultaneously. */
+interface BookSpread {
+  leftPage: StoryPage | null; // null = cover
+  leftImage: string;
+  rightPage: StoryPage | null; // null = end-of-book placeholder
+  rightPageIndex: number;
+}
+
+function buildSpreads(pages: StoryPage[], cover: string): BookSpread[] {
+  const totalLeaves = Math.ceil(pages.length / 2);
+  const out: BookSpread[] = [];
+
+  // Spread 0: cover on left, title page on right
+  out.push({
+    leftPage: null,
+    leftImage: cover,
+    rightPage: pages[0] ?? null,
+    rightPageIndex: 0,
+  });
+
+  for (let k = 1; k <= totalLeaves; k++) {
+    const li = k * 2 - 1;
+    const ri = k * 2;
+    out.push({
+      leftPage: li < pages.length ? pages[li] : null,
+      leftImage:
+        li < pages.length && pages[li].illustration
+          ? pages[li].illustration!
+          : cover,
+      rightPage: ri < pages.length ? pages[ri] : null,
+      rightPageIndex: ri,
+    });
+  }
+
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Immersive themes                                                   */
+/* ------------------------------------------------------------------ */
+
 const IMMERSIVE_THEMES = [
   {
     id: "nightfall",
     label: "Nightfall",
-    backdrop: "radial-gradient(ellipse 120% 100% at 50% 10%, #1a1428 0%, #0e0e18 45%, #08080f 100%)",
-    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(245, 190, 90, 0.05) 0%, transparent 72%)",
-    orbs: ["bg-amber-500/[0.07]", "bg-indigo-500/[0.05]", "bg-teal-400/[0.04]", "bg-rose-400/[0.03]"],
+    backdrop:
+      "radial-gradient(ellipse 120% 100% at 50% 10%, #1a1428 0%, #0e0e18 45%, #08080f 100%)",
+    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(245,190,90,0.05) 0%, transparent 72%)",
+    orbs: [
+      "bg-amber-500/[0.07]",
+      "bg-indigo-500/[0.05]",
+      "bg-teal-400/[0.04]",
+      "bg-rose-400/[0.03]",
+    ],
     stars: "bg-white/45",
   },
   {
     id: "twilight",
     label: "Twilight",
-    backdrop: "radial-gradient(ellipse 120% 100% at 50% 8%, #2a2145 0%, #1a1631 42%, #121022 100%)",
-    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(139, 92, 246, 0.08) 0%, transparent 72%)",
-    orbs: ["bg-fuchsia-500/[0.08]", "bg-violet-500/[0.08]", "bg-sky-400/[0.05]", "bg-blue-500/[0.04]"],
+    backdrop:
+      "radial-gradient(ellipse 120% 100% at 50% 8%, #2a2145 0%, #1a1631 42%, #121022 100%)",
+    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(139,92,246,0.08) 0%, transparent 72%)",
+    orbs: [
+      "bg-fuchsia-500/[0.08]",
+      "bg-violet-500/[0.08]",
+      "bg-sky-400/[0.05]",
+      "bg-blue-500/[0.04]",
+    ],
     stars: "bg-white/35",
   },
   {
     id: "sunset",
     label: "Sunset",
-    backdrop: "radial-gradient(ellipse 120% 100% at 50% 8%, #4a2619 0%, #2d1a13 44%, #1e130f 100%)",
-    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(251, 146, 60, 0.11) 0%, transparent 72%)",
-    orbs: ["bg-orange-400/[0.11]", "bg-amber-300/[0.08]", "bg-rose-400/[0.06]", "bg-yellow-300/[0.05]"],
+    backdrop:
+      "radial-gradient(ellipse 120% 100% at 50% 8%, #4a2619 0%, #2d1a13 44%, #1e130f 100%)",
+    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(251,146,60,0.11) 0%, transparent 72%)",
+    orbs: [
+      "bg-orange-400/[0.11]",
+      "bg-amber-300/[0.08]",
+      "bg-rose-400/[0.06]",
+      "bg-yellow-300/[0.05]",
+    ],
     stars: "bg-amber-100/40",
   },
   {
     id: "aurora",
     label: "Aurora",
-    backdrop: "radial-gradient(ellipse 120% 100% at 50% 8%, #0d2a2c 0%, #0b1f2b 44%, #08131e 100%)",
-    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(56, 189, 248, 0.09) 0%, transparent 72%)",
-    orbs: ["bg-emerald-400/[0.09]", "bg-cyan-400/[0.08]", "bg-sky-400/[0.06]", "bg-teal-300/[0.05]"],
+    backdrop:
+      "radial-gradient(ellipse 120% 100% at 50% 8%, #0d2a2c 0%, #0b1f2b 44%, #08131e 100%)",
+    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(56,189,248,0.09) 0%, transparent 72%)",
+    orbs: [
+      "bg-emerald-400/[0.09]",
+      "bg-cyan-400/[0.08]",
+      "bg-sky-400/[0.06]",
+      "bg-teal-300/[0.05]",
+    ],
     stars: "bg-cyan-50/40",
   },
   {
     id: "storybook-day",
     label: "Storybook Day",
-    backdrop: "radial-gradient(ellipse 120% 100% at 50% 8%, #efe7d6 0%, #e8deca 44%, #ddd1bc 100%)",
-    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(180, 139, 85, 0.14) 0%, transparent 72%)",
-    orbs: ["bg-amber-400/[0.12]", "bg-orange-300/[0.10]", "bg-yellow-300/[0.08]", "bg-rose-300/[0.06]"],
+    backdrop:
+      "radial-gradient(ellipse 120% 100% at 50% 8%, #efe7d6 0%, #e8deca 44%, #ddd1bc 100%)",
+    glow: "radial-gradient(ellipse 60% 70% at 50% 50%, rgba(180,139,85,0.14) 0%, transparent 72%)",
+    orbs: [
+      "bg-amber-400/[0.12]",
+      "bg-orange-300/[0.10]",
+      "bg-yellow-300/[0.08]",
+      "bg-rose-300/[0.06]",
+    ],
     stars: "bg-black/20",
   },
 ] as const;
 
 /* ------------------------------------------------------------------ */
-/*  Page content renderer                                              */
+/*  Left-page panel                                                    */
 /* ------------------------------------------------------------------ */
 
-function PageContent({
-  page,
-  pageIndex,
-  totalPages,
-  immersive,
-}: {
-  page: StoryPage | undefined;
-  pageIndex: number;
-  totalPages: number;
-  immersive?: boolean;
-}) {
-  if (!page) return null;
+const PAGE_BG_LEFT =
+  "linear-gradient(135deg, #f0e9dc 0%, #f7f1e5 50%, #f4eddf 100%)";
+const PAGE_BG_RIGHT =
+  "linear-gradient(225deg, #f0e9dc 0%, #faf5ec 50%, #f6f0e4 100%)";
+const PAGE_BG_LEFT_IM =
+  "linear-gradient(135deg, #f2ead8 0%, #f9f2e3 50%, #f5edd8 100%)";
+const PAGE_BG_RIGHT_IM =
+  "linear-gradient(225deg, #f2ead8 0%, #fdf6e8 50%, #f8f1df 100%)";
 
-  /* ── Title page ─────────────────────────────────────────────────── */
-  if (page.isTitle) {
+function LeftPanel({
+  spread,
+  cover,
+  immersive,
+  hideCoverHint,
+}: {
+  spread: BookSpread;
+  cover: string;
+  immersive?: boolean;
+  hideCoverHint?: boolean; // hide "Open the cover" when inside the flip leaf
+}) {
+  const { leftPage, leftImage } = spread;
+
+  /* Cover (null leftPage) */
+  if (leftPage === null) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-5 md:p-8 text-center">
-        {page.illustration && (
-          <div
-            className={cn(
-              "rounded-full overflow-hidden mb-4 md:mb-6 shadow-lg",
-              immersive
-                ? "w-28 h-28 md:w-40 md:h-40 border-4 border-white/20 shadow-amber-500/10"
-                : "w-24 h-24 md:w-36 md:h-36 border-4 border-primary/20"
-            )}
-          >
-            <img src={page.illustration} alt={page.title || ""} className="w-full h-full object-cover" />
+      <div className="relative w-full h-full">
+        <img
+          src={cover}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ transform: "translateZ(0)" }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+        <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-black/15 to-transparent pointer-events-none" />
+        {!hideCoverHint && (
+          <div className="absolute bottom-4 left-0 right-0 flex flex-col items-center">
+            <BookOpen
+              className={cn(
+                "size-4 md:size-5 mb-1",
+                immersive ? "text-white/40" : "text-white/50"
+              )}
+            />
+            <p className="text-[9px] md:text-[11px] text-white/60 italic font-medium">
+              Open the cover
+            </p>
           </div>
         )}
-        <h2
+      </div>
+    );
+  }
+
+  /* End page */
+  if (leftPage.isEnd) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center h-full p-5 md:p-7 text-center select-none"
+        style={{
+          background: immersive
+            ? "linear-gradient(135deg, #1a1010 0%, #2a1a0e 100%)"
+            : "linear-gradient(135deg, #f0e4d0 0%, #e8d5bb 100%)",
+        }}
+      >
+        <Sparkles
           className={cn(
-            "text-sm md:text-xl font-black leading-tight px-2 text-stone-900"
+            "size-8 md:size-10 mb-3",
+            immersive ? "text-amber-400/40" : "text-amber-600/35"
           )}
-        >
-          {page.title}
+        />
+        <h3 className="text-sm md:text-base font-black text-stone-900 mb-2">
+          The End
+        </h3>
+        <p className="text-[9px] md:text-[11px] leading-relaxed text-stone-600 max-w-[150px]">
+          {leftPage.text}
+        </p>
+        {!hideCoverHint && !immersive && (
+          <Link
+            href="/dashboard/stories"
+            className="mt-3 inline-flex items-center gap-1 rounded-full border border-stone-300 px-2.5 py-1 text-[9px] font-semibold text-stone-700 transition hover:bg-stone-100"
+          >
+            <ArrowLeft className="size-2.5" />
+            Library
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  /* Regular: full-bleed illustration */
+  return (
+    <div className="relative w-full h-full overflow-hidden">
+      <img
+        src={leftImage}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover"
+        style={{ transform: "translateZ(0)" }}
+      />
+      {/* spine-side shadow for depth */}
+      <div className="absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-black/14 to-transparent pointer-events-none" />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Right-page panel                                                   */
+/* ------------------------------------------------------------------ */
+
+function RightPanel({
+  spread,
+  spreadIndex,
+  totalSpreads,
+  immersive,
+}: {
+  spread: BookSpread;
+  spreadIndex: number;
+  totalSpreads: number;
+  immersive?: boolean;
+}) {
+  const { rightPage } = spread;
+  // Spread 0 = cover/title, last spread has no right page.
+  // Content spreads are 1 … totalSpreads-2 → label them "Page 1", "Page 2", …
+  const pageLabel = spreadIndex > 0 ? `Page ${spreadIndex} of ${totalSpreads - 2}` : null;
+
+  /* End-of-book */
+  if (rightPage === null) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full select-none">
+        <Sparkles
+          className={cn(
+            "size-5 md:size-6 mb-1",
+            immersive ? "text-amber-500/30" : "text-primary/25"
+          )}
+        />
+        <p className="text-[9px] md:text-[11px] text-stone-500 italic font-medium">
+          Story complete
+        </p>
+      </div>
+    );
+  }
+
+  /* Title page */
+  if (rightPage.isTitle) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-5 md:p-8 text-center">
+        <h2 className="text-sm md:text-xl font-black leading-tight px-2 text-stone-900">
+          {rightPage.title}
         </h2>
-        <p className="mt-1.5 md:mt-2 text-[10px] md:text-sm text-stone-600 italic">{page.text}</p>
+        <p className="mt-1.5 md:mt-2 text-[10px] md:text-sm text-stone-600 italic">
+          {rightPage.text}
+        </p>
         <div className="mt-3 md:mt-5 flex items-center gap-1 text-primary">
           <BookOpenText className="size-3 md:size-4" />
-          <span className="text-[9px] md:text-xs font-semibold">Turn the page to begin</span>
+          <span className="text-[9px] md:text-xs font-semibold">
+            Turn the page to begin
+          </span>
         </div>
       </div>
     );
   }
 
-  /* ── End page ───────────────────────────────────────────────────── */
-  if (page.isEnd) {
+  /* End page on right side (if it lands here) */
+  if (rightPage.isEnd) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-5 md:p-8 text-center">
-        <Sparkles className={cn("size-8 md:size-12 mb-3 md:mb-4", immersive ? "text-amber-400/50" : "text-primary/60")} />
-        <h3 className="text-base md:text-xl font-black text-stone-900">The End</h3>
+        <h3 className="text-base md:text-xl font-black text-stone-900">
+          The End
+        </h3>
         <p className="mt-2 md:mt-3 text-[10px] md:text-sm text-stone-600 leading-relaxed max-w-[220px]">
-          {page.text}
+          {rightPage.text}
         </p>
         {!immersive && (
           <Link
             href="/dashboard/stories"
-            className="mt-4 md:mt-6 inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-[10px] md:text-xs font-semibold text-foreground transition hover:bg-white/60 micro-btn"
+            className="mt-4 md:mt-6 inline-flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-[10px] md:text-xs font-semibold text-foreground transition hover:bg-stone-100 micro-btn"
           >
             <ArrowLeft className="size-3" />
             Back to Library
@@ -145,57 +333,66 @@ function PageContent({
     );
   }
 
-  /* ── Regular story page ─────────────────────────────────────────── */
+  /* Regular page — text only */
   return (
-    <div className="flex flex-col h-full p-3.5 md:p-5">
-      {page.chapter && (
+    <div className="flex flex-col h-full p-4 md:p-6">
+      {rightPage.chapter && (
         <p
           className={cn(
-            "text-[8px] md:text-[10px] font-bold uppercase tracking-[0.14em] mb-1.5 md:mb-2",
+            "text-[8px] md:text-[10px] font-bold uppercase tracking-[0.14em] mb-2 md:mb-3",
             immersive ? "text-amber-600/80" : "text-primary"
           )}
         >
-          {page.chapter}
+          {rightPage.chapter}
         </p>
       )}
-      {page.illustration && (
-        <div
-          className={cn(
-            "w-full rounded-lg md:rounded-xl overflow-hidden mb-2.5 md:mb-3 flex-shrink-0",
-            immersive ? "h-24 md:h-36 shadow-md border border-black/5" : "h-20 md:h-32 shadow-sm border border-black/5"
-          )}
-        >
-          <img src={page.illustration} alt="" className="w-full h-full object-cover" />
-        </div>
+      <p className="text-[11px] md:text-[14px] leading-[1.8] md:leading-[1.95] text-stone-800 font-medium flex-1">
+        {rightPage.text}
+      </p>
+      {pageLabel && (
+        <p className="mt-auto pt-1.5 text-[8px] md:text-[10px] text-stone-400 text-center tabular-nums">
+          {pageLabel}
+        </p>
       )}
-      <p className="text-[10px] md:text-[13px] leading-[1.7] md:leading-[1.85] text-stone-800 font-medium flex-1">
-        {page.text}
-      </p>
-      <p className="mt-auto pt-1.5 text-[8px] md:text-[10px] text-stone-500 text-center tabular-nums">
-        {pageIndex + 1} / {totalPages}
-      </p>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Ambient background                                                 */
+/*  Ambient stars (immersive)                                          */
 /* ------------------------------------------------------------------ */
 
 function AmbientBackground({ themeIndex }: { themeIndex: number }) {
   const theme = IMMERSIVE_THEMES[themeIndex % IMMERSIVE_THEMES.length];
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden>
-      {/* Large warm orb — top-left */}
-      <div className={cn("absolute -top-[15%] -left-[10%] w-[55vw] h-[55vw] max-w-[700px] max-h-[700px] rounded-full blur-[140px] ambient-orb-1", theme.orbs[0])} />
-      {/* Cool indigo orb — bottom-right */}
-      <div className={cn("absolute -bottom-[18%] -right-[12%] w-[50vw] h-[50vw] max-w-[650px] max-h-[650px] rounded-full blur-[120px] ambient-orb-2", theme.orbs[1])} />
-      {/* Subtle teal accent — center-right */}
-      <div className={cn("absolute top-[25%] right-[5%] w-[30vw] h-[30vw] max-w-[400px] max-h-[400px] rounded-full blur-[100px] ambient-orb-3", theme.orbs[2])} />
-      {/* Faint rose — top-right */}
-      <div className={cn("absolute -top-[5%] right-[20%] w-[20vw] h-[20vw] max-w-[280px] max-h-[280px] rounded-full blur-[80px] ambient-orb-2", theme.orbs[3])} />
-
-      {/* Scattered ambient stars */}
+    <div
+      className="absolute inset-0 pointer-events-none overflow-hidden"
+      aria-hidden
+    >
+      <div
+        className={cn(
+          "absolute -top-[15%] -left-[10%] w-[55vw] h-[55vw] max-w-[700px] max-h-[700px] rounded-full blur-[140px] ambient-orb-1",
+          theme.orbs[0]
+        )}
+      />
+      <div
+        className={cn(
+          "absolute -bottom-[18%] -right-[12%] w-[50vw] h-[50vw] max-w-[650px] max-h-[650px] rounded-full blur-[120px] ambient-orb-2",
+          theme.orbs[1]
+        )}
+      />
+      <div
+        className={cn(
+          "absolute top-[25%] right-[5%] w-[30vw] h-[30vw] max-w-[400px] max-h-[400px] rounded-full blur-[100px] ambient-orb-3",
+          theme.orbs[2]
+        )}
+      />
+      <div
+        className={cn(
+          "absolute -top-[5%] right-[20%] w-[20vw] h-[20vw] max-w-[280px] max-h-[280px] rounded-full blur-[80px] ambient-orb-2",
+          theme.orbs[3]
+        )}
+      />
       {[
         { top: "12%", left: "18%", delay: "0s", size: 2 },
         { top: "28%", left: "72%", delay: "1.2s", size: 1.5 },
@@ -223,74 +420,116 @@ function AmbientBackground({ themeIndex }: { themeIndex: number }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Animation constants                                                */
+/* ------------------------------------------------------------------ */
+
+const FLIP_DURATION = 0.68; // seconds (CSS/framer)
+const FLIP_EASE: [number, number, number, number] = [
+  0.645, 0.045, 0.355, 1.0,
+]; // easeInOutCubic
+const FLIP_MS = FLIP_DURATION * 1000 + 30; // ms for setTimeout (+30 buffer)
+
+/* ------------------------------------------------------------------ */
 /*  StoryBook                                                          */
 /* ------------------------------------------------------------------ */
 
 export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
-  const [flippedCount, setFlippedCount] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [animatingLeaf, setAnimatingLeaf] = useState<number | null>(null);
+  /* ── Spread data ────────────────────────────────────────────────── */
+  const spreads = useMemo(() => buildSpreads(pages, cover), [pages, cover]);
+  const totalSpreads = spreads.length;
+
+  /* ── State ──────────────────────────────────────────────────────── */
+  /**
+   * `spread`      – canonical current spread (updates after animation)
+   * `leftDisplay` – which spread the left base panel shows
+   *                 (lags behind `spread` during forward flips so the
+   *                 old left image stays until the leaf finishes flipping)
+   * `flipAnim`    – non-null only during the 700ms animation
+   */
+  const [spread, setSpread] = useState(0);
+  const [leftDisplay, setLeftDisplay] = useState(0);
+  const [flipAnim, setFlipAnim] = useState<{
+    from: number;
+    to: number;
+    dir: 1 | -1;
+  } | null>(null);
   const [isImmersive, setIsImmersive] = useState(false);
   const [immersiveThemeIndex, setImmersiveThemeIndex] = useState(0);
 
-  const totalLeaves = Math.ceil(pages.length / 2);
-  const canGoBack = flippedCount > 0 && !isAnimating;
-  const canGoForward = flippedCount < totalLeaves && !isAnimating;
+  const animTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ── Flip helpers ───────────────────────────────────────────────── */
+  const [isExporting, setIsExporting] = useState(false);
 
-  const flipForward = useCallback(() => {
-    if (isAnimating || flippedCount >= totalLeaves) return;
-    setIsAnimating(true);
-    setAnimatingLeaf(flippedCount);
-    setFlippedCount((prev) => prev + 1);
-    setTimeout(() => {
-      setIsAnimating(false);
-      setAnimatingLeaf(null);
-    }, 700);
-  }, [isAnimating, flippedCount, totalLeaves]);
+  /* Hover tilt springs (only wired up in normal mode) */
+  const tiltX = useSpring(useMotionValue(0), { stiffness: 130, damping: 22, mass: 0.7 });
+  const tiltY = useSpring(useMotionValue(0), { stiffness: 130, damping: 22, mass: 0.7 });
 
-  const flipBackward = useCallback(() => {
-    if (isAnimating || flippedCount <= 0) return;
-    setIsAnimating(true);
-    setAnimatingLeaf(flippedCount - 1);
-    setFlippedCount((prev) => prev - 1);
-    setTimeout(() => {
-      setIsAnimating(false);
-      setAnimatingLeaf(null);
-    }, 700);
-  }, [isAnimating, flippedCount]);
+  const canGoBack = spread > 0 && !flipAnim;
+  const canGoForward = spread < totalSpreads - 1 && !flipAnim;
 
-  /* ── Immersive toggle ─────────────────────────────────────────── */
-
-  const enterImmersive = useCallback(() => {
-    setIsImmersive(true);
-  }, []);
-
-  const exitImmersive = useCallback(() => {
-    setIsImmersive(false);
-  }, []);
-
-  // Lock body scroll in immersive mode
+  /* ── Cleanup timer on unmount ───────────────────────────────────── */
   useEffect(() => {
-    if (isImmersive) document.body.style.overflow = "hidden";
-    else document.body.style.overflow = "";
+    return () => {
+      if (animTimer.current) clearTimeout(animTimer.current);
+    };
+  }, []);
+
+  /* ── Navigate ───────────────────────────────────────────────────── */
+  const navigate = useCallback(
+    (dir: 1 | -1) => {
+      const from = spread;
+      const to = spread + dir;
+      if (to < 0 || to >= totalSpreads || flipAnim) return;
+
+      if (animTimer.current) clearTimeout(animTimer.current);
+
+      /* Snap book tilt to neutral before the flip starts */
+      tiltX.set(0);
+      tiltY.set(0);
+
+      if (dir === -1) {
+        // Backward: update left base IMMEDIATELY so destination left
+        // image is ready when the leaf un-covers the left side.
+        setLeftDisplay(to);
+      }
+      // Forward: leftDisplay stays at `from` until animation ends
+      // (prevents the new image from popping in before the leaf rotates over)
+
+      setFlipAnim({ from, to, dir });
+
+      animTimer.current = setTimeout(() => {
+        setSpread(to);
+        if (dir === 1) setLeftDisplay(to); // now safe to show new left image
+        setFlipAnim(null);
+        animTimer.current = null;
+      }, FLIP_MS);
+    },
+    [spread, totalSpreads, flipAnim]
+  );
+
+  const flipForward = useCallback(() => navigate(1), [navigate]);
+  const flipBackward = useCallback(() => navigate(-1), [navigate]);
+
+  /* ── Immersive ──────────────────────────────────────────────────── */
+  const enterImmersive = useCallback(() => setIsImmersive(true), []);
+  const exitImmersive = useCallback(() => setIsImmersive(false), []);
+
+  useEffect(() => {
+    document.body.style.overflow = isImmersive ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
   }, [isImmersive]);
 
   const canUsePortal = typeof document !== "undefined";
-  const immersiveTheme = IMMERSIVE_THEMES[immersiveThemeIndex % IMMERSIVE_THEMES.length];
+  const immersiveTheme =
+    IMMERSIVE_THEMES[immersiveThemeIndex % IMMERSIVE_THEMES.length];
 
   /* ── Keyboard ───────────────────────────────────────────────────── */
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't capture keystrokes from inputs
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-
       if (e.key === "ArrowRight") flipForward();
       if (e.key === "ArrowLeft") flipBackward();
       if ((e.key === "f" || e.key === "F") && !isImmersive) enterImmersive();
@@ -300,229 +539,451 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [flipForward, flipBackward, isImmersive, enterImmersive, exitImmersive]);
 
-  /* ── Z-index logic ──────────────────────────────────────────────── */
-
-  const isFlipped = (i: number) => i < flippedCount;
-
-  const getZIndex = (i: number) => {
-    if (i === animatingLeaf) return totalLeaves * 3;
-    if (isFlipped(i)) return i + 1;
-    return totalLeaves * 2 - i;
-  };
-
-  /* ── Book renderer ──────────────────────────────────────────────── */
-
-  const renderBook = (maxW: number, immersive: boolean) => (
-    <div
-      className={cn("relative w-full mx-auto", immersive && "max-h-[68vh]")}
-      style={{
-        perspective: "2400px",
-        maxWidth: maxW,
-        aspectRatio: "7 / 5",
-      }}
-    >
-      {/* Book shadow */}
-      <div
-        className={cn(
-          "absolute -bottom-3 left-1/2 -translate-x-1/2 w-[88%] rounded-[100%] pointer-events-none",
-          immersive ? "h-10 bg-black/30 blur-2xl" : "h-6 bg-black/[0.07] blur-xl"
-        )}
-      />
-
-      {/* ── Left page base ──────────────────────────────────────── */}
-      <div
-        className={cn(
-          "absolute left-0 top-0 w-1/2 h-full rounded-l-2xl overflow-hidden",
-          immersive ? "border-y border-l border-white/[0.08]" : "border-y border-l border-border/30"
-        )}
-        style={{
-          background: immersive
-            ? "linear-gradient(135deg, #f2ead8 0%, #f9f2e3 50%, #f5edd8 100%)"
-            : "linear-gradient(135deg, #f0e9dc 0%, #f7f1e5 50%, #f4eddf 100%)",
-          boxShadow: immersive
-            ? "inset -8px 0 20px -8px rgba(0,0,0,0.12)"
-            : "inset -6px 0 14px -6px rgba(0,0,0,0.07)",
-        }}
-      >
-        {flippedCount === 0 && (
-          <div className="flex flex-col items-center justify-center h-full select-none">
-            <div
-              className={cn(
-                "rounded-xl overflow-hidden shadow-md mb-3",
-                immersive
-                  ? "w-24 h-24 md:w-32 md:h-32 border-2 border-white/20"
-                  : "w-20 h-20 md:w-28 md:h-28 border-2 border-primary/10"
-              )}
-            >
-              <img src={cover} alt="" className="w-full h-full object-cover" />
-            </div>
-            <BookOpen className={cn("size-5 md:size-6 mb-1", immersive ? "text-amber-600/30" : "text-primary/25")} />
-            <p className="text-[9px] md:text-[11px] text-stone-500 italic font-medium">Open the cover</p>
-          </div>
-        )}
-      </div>
-
-      {/* ── Right page base ─────────────────────────────────────── */}
-      <div
-        className={cn(
-          "absolute right-0 top-0 w-1/2 h-full rounded-r-2xl overflow-hidden",
-          immersive ? "border-y border-r border-white/[0.08]" : "border-y border-r border-border/30"
-        )}
-        style={{
-          background: immersive
-            ? "linear-gradient(225deg, #f2ead8 0%, #fdf6e8 50%, #f8f1df 100%)"
-            : "linear-gradient(225deg, #f0e9dc 0%, #faf5ec 50%, #f6f0e4 100%)",
-          boxShadow: immersive
-            ? "inset 8px 0 20px -8px rgba(0,0,0,0.08)"
-            : "inset 6px 0 14px -6px rgba(0,0,0,0.05)",
-        }}
-      >
-        {flippedCount === totalLeaves && (
-          <div className="flex flex-col items-center justify-center h-full select-none">
-            <Sparkles className={cn("size-5 md:size-6 mb-1", immersive ? "text-amber-500/30" : "text-primary/25")} />
-            <p className="text-[9px] md:text-[11px] text-stone-500 italic font-medium">Story complete</p>
-          </div>
-        )}
-      </div>
-
-      {/* ── Spine ───────────────────────────────────────────────── */}
-      <div
-        className="absolute left-1/2 -translate-x-1/2 top-0 w-5 h-full z-[200] pointer-events-none"
-        style={{
-          background: immersive
-            ? "linear-gradient(to right, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.03) 25%, transparent 50%, rgba(0,0,0,0.03) 75%, rgba(0,0,0,0.08) 100%)"
-            : "linear-gradient(to right, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.02) 25%, transparent 50%, rgba(0,0,0,0.02) 75%, rgba(0,0,0,0.05) 100%)",
-        }}
-      />
-
-      {/* ── Leaves ──────────────────────────────────────────────── */}
-      {Array.from({ length: totalLeaves }, (_, leafIndex) => {
-        const flipped = isFlipped(leafIndex);
-        const zIndex = getZIndex(leafIndex);
-        const frontPageIdx = leafIndex * 2;
-        const backPageIdx = leafIndex * 2 + 1;
-        const isCurrentlyAnimating = leafIndex === animatingLeaf;
-
-        return (
-          <div
-            key={leafIndex}
-            className="absolute right-0 top-0 w-1/2 h-full"
-            style={{
-              transformOrigin: "left center",
-              transformStyle: "preserve-3d",
-              transform: `rotateY(${flipped ? -180 : 0}deg)`,
-              transition: isCurrentlyAnimating
-                ? "transform 0.7s cubic-bezier(0.645, 0.045, 0.355, 1)"
-                : "none",
-              zIndex,
-            }}
-          >
-            {/* Front face (right page) */}
-            <div
-              className={cn(
-                "absolute inset-0 rounded-r-2xl overflow-hidden",
-                immersive ? "border-y border-r border-white/[0.08]" : "border-y border-r border-border/30"
-              )}
-              style={{
-                backfaceVisibility: "hidden",
-                background: immersive
-                  ? "linear-gradient(225deg, #f2ead8 0%, #fdf6e8 50%, #f8f1df 100%)"
-                  : "linear-gradient(225deg, #f0e9dc 0%, #faf5ec 50%, #f6f0e4 100%)",
-                boxShadow: "inset 2px 0 8px -2px rgba(0,0,0,0.04)",
-              }}
-            >
-              <PageContent page={pages[frontPageIdx]} pageIndex={frontPageIdx} totalPages={pages.length} immersive={immersive} />
-            </div>
-
-            {/* Back face (left page) */}
-            <div
-              className={cn(
-                "absolute inset-0 rounded-l-2xl overflow-hidden",
-                immersive ? "border-y border-l border-white/[0.08]" : "border-y border-l border-border/30"
-              )}
-              style={{
-                backfaceVisibility: "hidden",
-                transform: "rotateY(180deg)",
-                background: immersive
-                  ? "linear-gradient(135deg, #f2ead8 0%, #f9f2e3 50%, #f5edd8 100%)"
-                  : "linear-gradient(135deg, #f0e9dc 0%, #f7f1e5 50%, #f4eddf 100%)",
-                boxShadow: "inset -2px 0 8px -2px rgba(0,0,0,0.06)",
-              }}
-            >
-              {backPageIdx < pages.length && (
-                <PageContent page={pages[backPageIdx]} pageIndex={backPageIdx} totalPages={pages.length} immersive={immersive} />
-              )}
-            </div>
-
-            {/* Page turn sheen for a cleaner premium flip effect */}
-            {isCurrentlyAnimating && (
-              <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                <div className="page-sheen-sweep absolute inset-y-0 left-[-20%] w-[45%] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {/* ── Click zones ─────────────────────────────────────────── */}
-      <button
-        type="button"
-        onClick={flipBackward}
-        disabled={!canGoBack}
-        className="absolute left-0 top-0 w-1/2 h-full z-[300] opacity-0 disabled:cursor-default cursor-pointer"
-        aria-label="Previous page"
-      />
-      <button
-        type="button"
-        onClick={flipForward}
-        disabled={!canGoForward}
-        className="absolute right-0 top-0 w-1/2 h-full z-[300] opacity-0 disabled:cursor-default cursor-pointer"
-        aria-label="Next page"
-      />
-    </div>
+  /* ── Hover tilt (normal mode only) ─────────────────────────────── */
+  const handleTiltMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (flipAnim) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width - 0.5; // –0.5…0.5
+      const ny = (e.clientY - rect.top) / rect.height - 0.5;
+      tiltY.set(nx * 9);  // max ±4.5° left/right
+      tiltX.set(-ny * 5); // max ±2.5° up/down
+    },
+    [flipAnim, tiltX, tiltY]
   );
 
-  /* ── Progress dots ──────────────────────────────────────────────── */
+  const handleTiltLeave = useCallback(() => {
+    tiltX.set(0);
+    tiltY.set(0);
+  }, [tiltX, tiltY]);
 
+  /* ── PDF Download ────────────────────────────────────────────────── */
+  const handleDownload = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const { jsPDF } = await import("jspdf");
+      // 4:3 spread so each half is exactly 2:3 portrait (matches the on-screen book)
+      const H = 210;
+      const W = H * (4 / 3); // = 280mm  → left half 140×210, right half 140×210
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: [W, H] });
+
+      /** Fetch an image URL and return a base64 data-URL (null on failure). */
+      const fetchDataURL = async (src: string): Promise<string | null> => {
+        try {
+          const res = await fetch(src);
+          const blob = await res.blob();
+          return await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => resolve(null as unknown as string);
+            reader.readAsDataURL(blob);
+          });
+        } catch {
+          return null;
+        }
+      };
+
+      for (let i = 0; i < spreads.length; i++) {
+        const s = spreads[i];
+        if (i > 0) doc.addPage();
+
+        /* ── Warm backgrounds ─────────────────────────────────────── */
+        // Left page: warm ochre parchment
+        doc.setFillColor(237, 226, 208);
+        doc.rect(0, 0, W / 2, H, "F");
+        // Right page: cool cream
+        doc.setFillColor(253, 248, 240);
+        doc.rect(W / 2, 0, W / 2, H, "F");
+        // Subtle warm vignette on right page edges
+        doc.setFillColor(248, 241, 230);
+        doc.rect(W / 2, 0, W / 2, 6, "F");
+        doc.rect(W / 2, H - 6, W / 2, 6, "F");
+
+        /* ── Left: full-bleed illustration ───────────────────────── */
+        const dataURL = await fetchDataURL(s.leftImage || cover);
+        if (dataURL) {
+          const fmt = dataURL.startsWith("data:image/png") ? "PNG" : "JPEG";
+          try {
+            doc.addImage(dataURL, fmt, 0, 0, W / 2, H, undefined, "MEDIUM");
+          } catch { /* ignore */ }
+        }
+
+        /* ── Spine line ───────────────────────────────────────────── */
+        doc.setDrawColor(195, 170, 135);
+        doc.setLineWidth(0.3);
+        doc.line(W / 2, 0, W / 2, H);
+
+        /* ── Decorative border rules (right page only) ────────────── */
+        doc.setDrawColor(210, 182, 148);
+        doc.setLineWidth(0.35);
+        doc.line(W / 2 + 8, 9, W - 9, 9);       // top rule
+        doc.line(W / 2 + 8, H - 9, W - 9, H - 9); // bottom rule
+
+        /* ── Right: text content ──────────────────────────────────── */
+        const rp = s.rightPage;
+        const PX = W / 2 + 12;  // text X
+        const maxTW = W / 2 - 22; // max text width
+        let TY = 22;
+
+        if (rp === null) {
+          /* End-of-book */
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(11);
+          doc.setTextColor(140, 110, 80);
+          doc.text("~ Story Complete ~", W * 3 / 4, H / 2, { align: "center" });
+        } else if (rp.isTitle) {
+          /* Title spread */
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(21);
+          doc.setTextColor(43, 24, 10);
+          const tLines = doc.splitTextToSize((rp as { title?: string }).title || title, maxTW);
+          doc.text(tLines, W * 3 / 4, H / 2 - 14, { align: "center" });
+
+          /* Decorative center rule */
+          const ruleW = 28;
+          doc.setDrawColor(195, 160, 110);
+          doc.setLineWidth(0.4);
+          doc.line(W * 3 / 4 - ruleW / 2, H / 2 - 6, W * 3 / 4 + ruleW / 2, H / 2 - 6);
+
+          if (rp.text) {
+            doc.setFont("helvetica", "italic");
+            doc.setFontSize(9.5);
+            doc.setTextColor(120, 90, 65);
+            const subLines = doc.splitTextToSize(rp.text, maxTW - 10);
+            doc.text(subLines, W * 3 / 4, H / 2 + 4, {
+              align: "center",
+              lineHeightFactor: 1.65,
+            });
+          }
+        } else if (rp.isEnd) {
+          /* End page */
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(22);
+          doc.setTextColor(43, 24, 10);
+          doc.text("The End", W * 3 / 4, H / 2 - 8, { align: "center" });
+          if (rp.text) {
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(9.5);
+            doc.setTextColor(110, 80, 60);
+            doc.text(doc.splitTextToSize(rp.text, maxTW - 15), W * 3 / 4, H / 2 + 6, {
+              align: "center",
+              lineHeightFactor: 1.65,
+            });
+          }
+        } else {
+          /* Regular story page */
+          if (rp.chapter) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(6.5);
+            doc.setTextColor(175, 115, 45);
+            doc.text(rp.chapter.toUpperCase(), PX, TY);
+            TY += 4.5;
+            doc.setDrawColor(210, 175, 130);
+            doc.setLineWidth(0.3);
+            doc.line(PX, TY, PX + 26, TY);
+            TY += 8;
+          }
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(11);
+          doc.setTextColor(43, 24, 10);
+          const lines = doc.splitTextToSize(rp.text, maxTW);
+          doc.text(lines, PX, TY, { lineHeightFactor: 1.8 });
+        }
+
+        /* ── Footer ───────────────────────────────────────────────── */
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(175, 148, 115);
+        doc.text(String(i + 1), W * 3 / 4, H - 4, { align: "center" });
+
+        /* DREAM watermark */
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(195, 168, 132);
+        doc.text("DREAM", W - 8, H - 4, { align: "right" });
+
+        /* Story title in footer */
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.5);
+        doc.setTextColor(190, 162, 128);
+        const titleTrunc = title.length > 30 ? title.slice(0, 28) + "…" : title;
+        doc.text(titleTrunc, PX, H - 4);
+      }
+
+      const filename = `${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-dream.pdf`;
+      doc.save(filename);
+    } catch (err) {
+      console.error("[Dream] PDF export error:", err);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [spreads, cover, title, isExporting]);
+
+  /* ── Derived display values ─────────────────────────────────────── */
+  // Right-base display logic:
+  //  • Forward flip  (leaf starts on RIGHT, moves to LEFT):
+  //      Show the DESTINATION spread immediately — it gets revealed
+  //      from beneath as the leaf sweeps away to the left. ✓
+  //  • Backward flip (leaf starts on LEFT, moves to RIGHT):
+  //      Keep showing the SOURCE spread — the right side is fully
+  //      open during the whole animation; switching immediately would
+  //      cause a visible text jump. The switch to destination happens
+  //      at the very end, exactly when the leaf covers the right side.
+  const rightDisplayIdx = flipAnim
+    ? flipAnim.dir === 1
+      ? flipAnim.to   // forward  → show destination
+      : flipAnim.from // backward → keep source until leaf covers right
+    : spread;
+
+  /* ── Progress dots ──────────────────────────────────────────────── */
   const renderDots = (immersive: boolean) => (
     <div className="flex items-center gap-1 px-2">
-      {Array.from({ length: totalLeaves + 1 }, (_, i) => (
+      {Array.from({ length: totalSpreads }, (_, i) => (
         <motion.div
           key={i}
-          animate={
-            immersive
-              ? {
-                  width: i === flippedCount ? 10 : 6,
-                  height: i === flippedCount ? 10 : 6,
-                  opacity: i === flippedCount ? 1 : i < flippedCount ? 0.55 : 0.2,
-                }
-              : {
-                  width: i === flippedCount ? 10 : 6,
-                  height: i === flippedCount ? 10 : 6,
-                  opacity: i === flippedCount ? 1 : i < flippedCount ? 0.45 : 0.8,
-                }
-          }
+          animate={{
+            width: i === spread ? 10 : 6,
+            height: i === spread ? 10 : 6,
+            opacity: i === spread ? 1 : i < spread ? (immersive ? 0.55 : 0.45) : immersive ? 0.2 : 0.8,
+          }}
           transition={{ type: "spring", stiffness: 250, damping: 20, mass: 0.45 }}
           className={cn(
-            "rounded-full transition-all duration-300",
+            "rounded-full",
             immersive
-              ? i === flippedCount
-                ? "size-2.5 bg-white shadow-sm shadow-white/30"
-                : i < flippedCount
-                  ? "size-1.5 bg-white/40"
-                  : "size-1.5 bg-white/15"
-              : i === flippedCount
-                ? "size-2.5 bg-primary shadow-sm shadow-primary/30"
-                : i < flippedCount
-                  ? "size-1.5 bg-primary/30"
-                  : "size-1.5 bg-border"
+              ? i === spread
+                ? "bg-white shadow-sm shadow-white/30"
+                : i < spread
+                  ? "bg-white/40"
+                  : "bg-white/15"
+              : i === spread
+                ? "bg-primary shadow-sm shadow-primary/30"
+                : i < spread
+                  ? "bg-primary/30"
+                  : "bg-border"
           )}
         />
       ))}
     </div>
   );
 
-  /* ── Render ─────────────────────────────────────────────────────── */
+  /* ================================================================ */
+  /*  Book renderer                                                    */
+  /* ================================================================ */
+
+  const renderBook = (maxW: number, immersive: boolean) => {
+    const bgLeft = immersive ? PAGE_BG_LEFT_IM : PAGE_BG_LEFT;
+    const bgRight = immersive ? PAGE_BG_RIGHT_IM : PAGE_BG_RIGHT;
+    const borderLeft = immersive
+      ? "border-y border-l border-white/[0.08]"
+      : "border-y border-l border-border/30";
+    const borderRight = immersive
+      ? "border-y border-r border-white/[0.08]"
+      : "border-y border-r border-border/30";
+
+    // Which spread's left content to show in the flip leaf's faces
+    const flipFrontIdx = flipAnim ? (flipAnim.dir === 1 ? flipAnim.from : flipAnim.to) : 0;
+    const flipFront = flipAnim ? spreads[flipFrontIdx] : null;
+    const flipBack = flipAnim
+      ? spreads[flipAnim.dir === 1 ? flipAnim.to : flipAnim.from]
+      : null;
+
+    return (
+      <div
+        className={cn("relative w-full mx-auto select-none", immersive && "max-h-[68vh]")}
+        style={{ perspective: "2200px", maxWidth: maxW, aspectRatio: "4 / 3" }}
+      >
+        {/* ── Book shadow (grows + brightens while page is turning) ── */}
+        <motion.div
+          className="absolute -bottom-3 left-1/2 -translate-x-1/2 rounded-[100%] pointer-events-none"
+          animate={{
+            width: flipAnim ? "93%" : "88%",
+            opacity: immersive
+              ? (flipAnim ? 0.42 : 0.28)
+              : (flipAnim ? 0.14 : 0.07),
+          }}
+          transition={{ duration: 0.38, ease: "easeInOut" }}
+          style={{
+            height: immersive ? 44 : 22,
+            background: "black",
+            filter: immersive ? "blur(30px)" : "blur(18px)",
+          }}
+        />
+
+        {/* ── Left page base ──────────────────────────────────────── */}
+        {/* Shows leftDisplay spread. Stays "frozen" during forward
+            animations so the old image doesn't swap before the leaf
+            has crossed the spine. */}
+        <div
+          className={cn(
+            "absolute left-0 top-0 w-1/2 h-full rounded-l-2xl overflow-hidden",
+            borderLeft
+          )}
+          style={{
+            background: bgLeft,
+            boxShadow: immersive
+              ? "inset -8px 0 20px -8px rgba(0,0,0,0.12)"
+              : "inset -6px 0 14px -6px rgba(0,0,0,0.07)",
+          }}
+        >
+          <LeftPanel
+            spread={spreads[leftDisplay]}
+            cover={cover}
+            immersive={immersive}
+          />
+        </div>
+
+        {/* ── Right page base ─────────────────────────────────────── */}
+        {/* Always shows the destination spread right away so it's
+            already there when the flip leaf uncovers it. */}
+        <div
+          className={cn(
+            "absolute right-0 top-0 w-1/2 h-full rounded-r-2xl overflow-hidden",
+            borderRight
+          )}
+          style={{
+            background: bgRight,
+            boxShadow: immersive
+              ? "inset 8px 0 20px -8px rgba(0,0,0,0.08)"
+              : "inset 6px 0 14px -6px rgba(0,0,0,0.05)",
+          }}
+        >
+          <RightPanel
+            spread={spreads[rightDisplayIdx]}
+            spreadIndex={rightDisplayIdx}
+            totalSpreads={totalSpreads}
+            immersive={immersive}
+          />
+          {/* Corner page-turn hint: pulses when there's a next page */}
+          {!immersive && !flipAnim && canGoForward && (
+            <motion.div
+              className="absolute bottom-2.5 right-2.5 z-[50] pointer-events-none"
+              animate={{ opacity: [0.28, 0.72, 0.28], x: [0, 2.5, 0] }}
+              transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <ChevronRight className="size-3 text-primary/60" />
+            </motion.div>
+          )}
+        </div>
+
+        {/* ── Stacked page edges at right ───────────────────────────── */}
+        <div
+          className="absolute top-[4%] bottom-[4%] z-[180] pointer-events-none rounded-r-xl overflow-hidden"
+          style={{
+            right: -3,
+            width: 5,
+            background:
+              "repeating-linear-gradient(to bottom, #ddd0bc 0px, #ddd0bc 1px, #f0e6d4 1px, #f0e6d4 2.5px)",
+            opacity: 0.5,
+          }}
+        />
+
+        {/* ── Spine ───────────────────────────────────────────────── */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 top-0 w-5 h-full z-[200] pointer-events-none"
+          style={{
+            background: immersive
+              ? "linear-gradient(to right,rgba(0,0,0,0.08)0%,rgba(0,0,0,0.03)25%,transparent 50%,rgba(0,0,0,0.03)75%,rgba(0,0,0,0.08)100%)"
+              : "linear-gradient(to right,rgba(0,0,0,0.05)0%,rgba(0,0,0,0.02)25%,transparent 50%,rgba(0,0,0,0.02)75%,rgba(0,0,0,0.05)100%)",
+          }}
+        />
+
+        {/* ── Single animated flip leaf ────────────────────────────── */}
+        {/* Only exists for the ~700ms of the animation.
+            NO AnimatePresence wrapper — without an `exit` prop AP would
+            animate the leaf back to `initial` on unmount, visually
+            reversing the flip. Plain conditional rendering lets React
+            unmount it instantly at its final rotation. */}
+        {flipAnim && flipFront && flipBack && (
+          <motion.div
+            key="flip-leaf"
+            className="absolute top-0 h-full"
+            style={{
+              left: "50%",
+              width: "50%",
+              transformOrigin: "left center",
+              transformStyle: "preserve-3d",
+              zIndex: 300,
+              willChange: "transform",
+            }}
+            initial={{ rotateY: flipAnim.dir === 1 ? 0 : -180 }}
+            animate={{ rotateY: flipAnim.dir === 1 ? -180 : 0 }}
+            transition={{ duration: FLIP_DURATION, ease: FLIP_EASE }}
+          >
+            {/* Front face (right side at 0°) */}
+            <div
+              className={cn(
+                "absolute inset-0 rounded-r-2xl overflow-hidden",
+                borderRight
+              )}
+              style={{
+                backfaceVisibility: "hidden",
+                WebkitBackfaceVisibility: "hidden",
+                background: bgRight,
+                boxShadow: "inset 2px 0 8px -2px rgba(0,0,0,0.04)",
+              }}
+            >
+              {/* Forward: outgoing right text | Backward: arriving right text */}
+              <RightPanel
+                spread={flipFront}
+                spreadIndex={flipFrontIdx}
+                totalSpreads={totalSpreads}
+                immersive={immersive}
+              />
+            </div>
+
+            {/* Back face (left side at -180°) */}
+            <div
+              className={cn(
+                "absolute inset-0 rounded-l-2xl overflow-hidden",
+                borderLeft
+              )}
+              style={{
+                backfaceVisibility: "hidden",
+                WebkitBackfaceVisibility: "hidden",
+                transform: "rotateY(180deg)",
+                background: bgLeft,
+                boxShadow: "inset -2px 0 8px -2px rgba(0,0,0,0.06)",
+              }}
+            >
+              {/* Forward: arriving left image | Backward: outgoing left image */}
+              <LeftPanel
+                spread={flipBack}
+                cover={cover}
+                immersive={immersive}
+                hideCoverHint
+              />
+            </div>
+
+            {/* Gloss sheen sweep */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-r-2xl">
+              <div className="page-sheen-sweep absolute inset-y-0 left-[-20%] w-[45%] bg-gradient-to-r from-transparent via-white/35 to-transparent" />
+            </div>
+          </motion.div>
+        )}
+
+        {/* ── Click zones ─────────────────────────────────────────── */}
+        <button
+          type="button"
+          onClick={flipBackward}
+          disabled={!canGoBack}
+          className="absolute left-0 top-0 w-1/2 h-full z-[400] opacity-0 disabled:cursor-default cursor-pointer"
+          aria-label="Previous page"
+        />
+        <button
+          type="button"
+          onClick={flipForward}
+          disabled={!canGoForward}
+          className="absolute right-0 top-0 w-1/2 h-full z-[400] opacity-0 disabled:cursor-default cursor-pointer"
+          aria-label="Next page"
+        />
+      </div>
+    );
+  };
+
+  /* ================================================================ */
+  /*  Immersive portal                                                 */
+  /* ================================================================ */
 
   const immersivePortal = canUsePortal
     ? createPortal(
@@ -540,17 +1001,12 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
               exit={{ scale: 1.006 }}
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             >
-              {/* Always-opaque guard layer to prevent showing underlying app */}
               <div className="absolute inset-0 bg-[#050509]" />
-
-              {/* ── Backdrop (cross-fade per theme) ───────────────── */}
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div
                   key={immersiveTheme.id}
-                  className="absolute inset-0 bg-[#08080f]"
-                  style={{
-                    backgroundImage: immersiveTheme.backdrop,
-                  }}
+                  className="absolute inset-0"
+                  style={{ backgroundImage: immersiveTheme.backdrop }}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
@@ -560,12 +1016,15 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
 
               <AmbientBackground themeIndex={immersiveThemeIndex} />
 
-              {/* ── Content layer ─────────────────────────────────── */}
               <div className="relative z-10 flex h-full w-full flex-col items-center justify-center px-2">
-                {/* Theme switch button */}
+                {/* Theme picker */}
                 <motion.button
                   type="button"
-                  onClick={() => setImmersiveThemeIndex((prev) => (prev + 1) % IMMERSIVE_THEMES.length)}
+                  onClick={() =>
+                    setImmersiveThemeIndex(
+                      (p) => (p + 1) % IMMERSIVE_THEMES.length
+                    )
+                  }
                   whileHover={{ y: -1.5, scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   className="absolute left-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/45 px-3.5 py-2 text-[11px] font-semibold text-white/85 backdrop-blur-2xl transition-all hover:bg-black/65 hover:text-white md:left-6 md:top-6"
@@ -574,7 +1033,7 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                   <span className="hidden sm:inline">{immersiveTheme.label}</span>
                 </motion.button>
 
-                {/* Close button */}
+                {/* Close */}
                 <motion.button
                   type="button"
                   onClick={exitImmersive}
@@ -592,20 +1051,20 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                   style={{ maxWidth: 940 }}
                   initial={{ opacity: 0, y: 22, scale: 0.985 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
+                  transition={{
+                    duration: 0.55,
+                    ease: [0.22, 1, 0.36, 1],
+                    delay: 0.05,
+                  }}
                 >
-                  {/* Warm ambient glow behind the book */}
                   <div
                     className="absolute inset-0 -inset-x-8 pointer-events-none"
-                    style={{
-                      backgroundImage: immersiveTheme.glow,
-                    }}
+                    style={{ backgroundImage: immersiveTheme.glow }}
                   />
                   <div
-                    className="immersive-book-float"
                     style={{
                       filter:
-                        "drop-shadow(0 4px 80px rgba(200, 160, 80, 0.06)) drop-shadow(0 20px 40px rgba(0,0,0,0.4))",
+                        "drop-shadow(0 4px 80px rgba(200,160,80,0.06)) drop-shadow(0 20px 40px rgba(0,0,0,0.4))",
                     }}
                   >
                     {renderBook(880, true)}
@@ -617,9 +1076,15 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                   className="mt-5 flex items-center gap-2 rounded-full border border-white/20 bg-black/50 px-3 py-2 backdrop-blur-2xl shadow-2xl shadow-black/30 md:mt-7 md:gap-4 md:px-5 md:py-2.5"
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.45, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{
+                    duration: 0.45,
+                    delay: 0.12,
+                    ease: [0.22, 1, 0.36, 1],
+                  }}
                 >
-                  <p className="hidden max-w-[180px] truncate text-[11px] font-medium text-white/70 lg:block">{title}</p>
+                  <p className="hidden max-w-[180px] truncate text-[11px] font-medium text-white/70 lg:block">
+                    {title}
+                  </p>
                   <div className="hidden h-4 w-px bg-white/15 lg:block" />
 
                   <motion.button
@@ -630,7 +1095,9 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                     whileTap={canGoBack ? { scale: 0.98 } : undefined}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all",
-                      canGoBack ? "text-white/85 hover:bg-white/[0.12] hover:text-white" : "cursor-not-allowed text-white/30"
+                      canGoBack
+                        ? "text-white/85 hover:bg-white/[0.12] hover:text-white"
+                        : "cursor-not-allowed text-white/30"
                     )}
                   >
                     <ChevronLeft className="size-3.5" />
@@ -643,11 +1110,15 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                     type="button"
                     onClick={flipForward}
                     disabled={!canGoForward}
-                    whileHover={canGoForward ? { y: -1, scale: 1.02 } : undefined}
+                    whileHover={
+                      canGoForward ? { y: -1, scale: 1.02 } : undefined
+                    }
                     whileTap={canGoForward ? { scale: 0.98 } : undefined}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-medium transition-all",
-                      canGoForward ? "text-white/85 hover:bg-white/[0.12] hover:text-white" : "cursor-not-allowed text-white/30"
+                      canGoForward
+                        ? "text-white/85 hover:bg-white/[0.12] hover:text-white"
+                        : "cursor-not-allowed text-white/30"
                     )}
                   >
                     <span className="hidden sm:inline">Next</span>
@@ -655,7 +1126,9 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                   </motion.button>
 
                   <div className="hidden h-4 w-px bg-white/15 lg:block" />
-                  <p className="hidden items-center gap-1.5 text-[10px] font-medium text-white/55 lg:flex">Press ESC to close</p>
+                  <p className="hidden items-center gap-1.5 text-[10px] font-medium text-white/55 lg:flex">
+                    Press ESC to close
+                  </p>
                 </motion.div>
               </div>
             </motion.div>
@@ -665,50 +1138,66 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
       )
     : null;
 
+  /* ================================================================ */
+  /*  Normal mode                                                      */
+  /* ================================================================ */
+
   return (
     <>
-      {/* ════════════════════════════════════════════════════════════ */}
-      {/*  IMMERSIVE MODE                                             */}
-      {/* ════════════════════════════════════════════════════════════ */}
       {immersivePortal}
 
-      {/* ════════════════════════════════════════════════════════════ */}
-      {/*  NORMAL MODE                                                */}
-      {/* ════════════════════════════════════════════════════════════ */}
       {!isImmersive && (
         <motion.section
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-          className="space-y-5 rounded-3xl border border-border/60 bg-white/80 p-4 shadow-sm backdrop-blur md:p-6 dark:border-white/10 dark:bg-[#101010]/95"
+          initial={{ opacity: 0, y: 22, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+          className="space-y-5 rounded-3xl border border-border bg-card p-4 shadow-sm md:p-6"
         >
-          {/* ── Header ──────────────────────────────────────────── */}
+          {/* Header */}
           <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               <Link
                 href="/dashboard/stories"
-                className="group inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition hover:text-foreground mb-1"
+                className="group inline-flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:text-foreground mb-2"
               >
-                <ArrowLeft className="size-3.5 transition group-hover:-translate-x-0.5" />
+                <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
                 Back to Stories
               </Link>
-              <h2 className="text-lg md:text-2xl font-black tracking-tight text-foreground">{title}</h2>
-              <p className="text-xs md:text-sm text-muted-foreground">
+              <h2 className="text-lg md:text-2xl font-black tracking-tight text-foreground leading-tight">
+                {title}
+              </h2>
+              <p className="text-xs md:text-sm text-muted-foreground pt-0.5">
                 Age {ageBand} &middot; {pages.length} pages
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden md:flex items-center gap-2 rounded-full bg-muted/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="hidden md:flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
                 <BookOpen className="size-3.5" />
                 Press F for immersive
               </div>
               <motion.button
                 type="button"
+                onClick={handleDownload}
+                disabled={isExporting}
+                whileHover={!isExporting ? { y: -1.5, scale: 1.02 } : undefined}
+                whileTap={!isExporting ? { scale: 0.98 } : undefined}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3.5 py-2 text-xs font-semibold text-foreground transition-all hover:border-emerald-400/50 hover:bg-emerald-50 hover:text-emerald-700 micro-btn disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isExporting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Download className="size-3.5" />
+                )}
+                <span className="hidden sm:inline">
+                  {isExporting ? "Exporting…" : "Download"}
+                </span>
+              </motion.button>
+              <motion.button
+                type="button"
                 onClick={enterImmersive}
                 whileHover={{ y: -1.5, scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted micro-btn dark:bg-[#151515] dark:border-white/10"
-                title="Enter immersive reading mode"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3.5 py-2 text-xs font-semibold text-foreground transition-all hover:border-primary/40 hover:bg-primary/10 hover:text-primary micro-btn"
               >
                 <Maximize2 className="size-3.5" />
                 <span className="hidden sm:inline">Immersive</span>
@@ -716,10 +1205,23 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
             </div>
           </div>
 
-          {/* ── Book ────────────────────────────────────────────── */}
-          <div className="flex justify-center py-2 md:py-6">{renderBook(720, false)}</div>
+          {/* Book — 3D hover tilt wrapper */}
+          <div className="flex justify-center py-1 md:py-4">
+            <motion.div
+              className="w-full"
+              onMouseMove={handleTiltMove}
+              onMouseLeave={handleTiltLeave}
+              style={{
+                perspective: "1400px",
+                rotateX: tiltX,
+                rotateY: tiltY,
+              }}
+            >
+              {renderBook(680, false)}
+            </motion.div>
+          </div>
 
-          {/* ── Navigation bar ──────────────────────────────────── */}
+          {/* Nav */}
           <div className="flex items-center justify-center gap-3">
             <motion.button
               type="button"
@@ -728,8 +1230,10 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
               whileHover={canGoBack ? { y: -1.5, scale: 1.02 } : undefined}
               whileTap={canGoBack ? { scale: 0.98 } : undefined}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border border-border bg-white px-3.5 py-2 text-xs font-semibold transition micro-btn dark:bg-[#151515] dark:border-white/10",
-                canGoBack ? "hover:bg-muted text-foreground" : "opacity-35 cursor-not-allowed text-muted-foreground"
+                "inline-flex items-center gap-1 rounded-full border px-3.5 py-2 text-xs font-semibold transition-all micro-btn",
+                canGoBack
+                  ? "border-border bg-muted text-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  : "border-border/40 bg-transparent text-muted-foreground/40 cursor-not-allowed"
               )}
             >
               <ChevronLeft className="size-3.5" />
@@ -745,8 +1249,10 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
               whileHover={canGoForward ? { y: -1.5, scale: 1.02 } : undefined}
               whileTap={canGoForward ? { scale: 0.98 } : undefined}
               className={cn(
-                "inline-flex items-center gap-1 rounded-full border border-border bg-white px-3.5 py-2 text-xs font-semibold transition micro-btn dark:bg-[#151515] dark:border-white/10",
-                canGoForward ? "hover:bg-muted text-foreground" : "opacity-35 cursor-not-allowed text-muted-foreground"
+                "inline-flex items-center gap-1 rounded-full border px-3.5 py-2 text-xs font-semibold transition-all micro-btn",
+                canGoForward
+                  ? "border-border bg-muted text-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  : "border-border/40 bg-transparent text-muted-foreground/40 cursor-not-allowed"
               )}
             >
               <span className="hidden sm:inline">Next</span>

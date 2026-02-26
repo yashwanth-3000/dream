@@ -131,7 +131,7 @@ export const dashboardStories = [
     id: "story_001",
     title: "Luna and the Floating Library",
     ageBand: "5-8",
-    duration: "4 min read",
+    duration: "6 min read",
     status: "Published",
     cover: "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1200&auto=format&fit=crop&q=70",
   },
@@ -139,7 +139,7 @@ export const dashboardStories = [
     id: "story_002",
     title: "Captain Comet Saves Sunflower Town",
     ageBand: "6-9",
-    duration: "6 min read",
+    duration: "8 min read",
     status: "Published",
     cover: "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=1200&auto=format&fit=crop&q=70",
   },
@@ -147,7 +147,7 @@ export const dashboardStories = [
     id: "story_005",
     title: "Zara and the Moonlight Train",
     ageBand: "4-7",
-    duration: "5 min read",
+    duration: "7 min read",
     status: "Draft",
     cover: "https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=1200&auto=format&fit=crop&q=70",
   },
@@ -387,9 +387,23 @@ export type StoryPage = {
   chapter?: string;
 };
 
+/*
+  Spread layout from buildSpreads():
+    Spread 0 → cover (left)   | pages[0] title (right)
+    Spread 1 → pages[1] (left)| pages[2]       (right)  ← chapter label goes on [2]
+    Spread 2 → pages[3] (left)| pages[4]       (right)  ← chapter label goes on [4]
+    Spread 3 → pages[5] (left)| pages[6]       (right)  ← chapter label goes on [6]
+    Spread 4 → pages[7] (left)| pages[8]       (right)  ← chapter label goes on [8]
+    Spread 5 → pages[9] (left)| pages[10]      (right)  ← chapter label goes on [10]
+    Spread 6 → pages[11](left)| null           (right)
+  Left pages are ALWAYS image-only → chapter labels must live on even indices (right side).
+*/
 export const dashboardStoryPages: Record<string, StoryPage[]> = {
-  /* ── Luna and the Floating Library ───────────────────────────────── */
+  /* ── Luna and the Floating Library ─────────────────────────────────
+     12 pages: [0] title · [1–10] story (chapter labels on 2,4,6,8,10) · [11] end
+  ───────────────────────────────────────────────────────────────────── */
   story_001: [
+    /* [0] right — title */
     {
       isTitle: true,
       title: "Luna and the Floating Library",
@@ -397,47 +411,82 @@ export const dashboardStoryPages: Record<string, StoryPage[]> = {
       illustration:
         "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=800&auto=format&fit=crop&q=70",
     },
+    /* [1] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [2] right — Chapter 1 opens here */
     {
       chapter: "Chapter 1 · The Golden Key",
       text: "Luna found a golden key hidden in her grandmother's old jewelry box, tucked beneath silk scarves and faded letters. The moment her fingers touched it, the key hummed — a soft, warm note, like a lullaby she had forgotten long ago.",
       illustration:
-        "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=800&auto=format&fit=crop&q=70",
-    },
-    {
-      text: "The hum grew louder. The key glowed amber, then white, then lifted Luna right through the ceiling, through the clouds, into a sky she had never seen — a sky the color of honey and starlight.",
-      illustration:
         "https://images.unsplash.com/photo-1475274047050-1d0c55b91e0a?w=800&auto=format&fit=crop&q=70",
     },
+    /* [3] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1446776709462-d6b525c57bd3?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [4] right — Chapter 2 opens here */
     {
       chapter: "Chapter 2 · Above the Clouds",
-      text: "Above the cotton-candy clouds sat the most magnificent library Luna had ever imagined. It floated on nothing at all, its towers made of stacked books, its windows glowing with the light of a thousand stories waiting to be read.",
+      text: "The hum grew louder. The key glowed amber, then gold, then brilliant white, lifting Luna right through the ceiling and into a sky the color of honey and starlight. Above the cotton-candy clouds sat the most magnificent floating library she had ever imagined.",
       illustration:
         "https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=800&auto=format&fit=crop&q=70",
     },
+    /* [5] left — illustration only */
     {
-      text: "Books flew around Luna like colorful birds. A red one about dragons nuzzled her cheek. A blue one full of ocean tales splashed tiny waves at her feet. 'Choose me!' they whispered. 'Read me!'",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=800&auto=format&fit=crop&q=70",
     },
+    /* [6] right — Chapter 2 continues */
+    {
+      text: "Books flew around Luna like colorful birds. A red one about dragons nuzzled her cheek. A blue one full of ocean tales splashed tiny waves at her feet. At the heart of the library stood an ancient owl with silver spectacles and a coat stitched from book spines.",
+      illustration:
+        "https://images.unsplash.com/photo-1484406566174-9da000fda645?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [7] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [8] right — Chapter 3 opens here */
     {
       chapter: "Chapter 3 · The Story Within",
       text: "Luna opened a glowing book and felt herself pulled gently inside. She walked through kingdoms of candy, sailed paper boats across ink-dark seas, and danced with characters who already knew her name.",
       illustration:
-        "https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=70",
+        "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=800&auto=format&fit=crop&q=70",
     },
+    /* [9] left — illustration only */
     {
-      text: "When she finally emerged, the library gifted her one special book — the one that told her own story. 'Every child carries a story inside them,' whispered the library. 'This one is yours.'",
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [10] right — Chapter 4 opens here */
+    {
+      chapter: "Chapter 4 · A Story to Keep",
+      text: "When she finally emerged, the library gifted her one special book — the one that told her own story, with pages still blank at the end. 'Every child carries a story inside them,' whispered the library. 'Yours is still being written.'",
       illustration:
         "https://images.unsplash.com/photo-1491841651911-c44c30c34548?w=800&auto=format&fit=crop&q=70",
     },
+    /* [11] left — end page */
     {
       isEnd: true,
-      text: "And so Luna learned that the best stories aren't found on shelves — they're the ones we live, and the ones we share.",
+      text: "And so Luna learned that the best stories aren't found on shelves — they're the ones we live, and the ones we have the courage to share.",
     },
   ],
 
-  /* ── Captain Comet Saves Sunflower Town ──────────────────────────── */
+  /* ── Captain Comet Saves Sunflower Town ─────────────────────────────
+     12 pages: [0] title · [1–10] story (chapter labels on 2,4,6,8,10) · [11] end
+  ───────────────────────────────────────────────────────────────────── */
   story_002: [
+    /* [0] right — title */
     {
       isTitle: true,
       title: "Captain Comet Saves Sunflower Town",
@@ -445,47 +494,82 @@ export const dashboardStoryPages: Record<string, StoryPage[]> = {
       illustration:
         "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800&auto=format&fit=crop&q=70",
     },
+    /* [1] left — illustration only */
     {
-      chapter: "Chapter 1 · Morning Blooms",
-      text: "In Sunflower Town, every morning began with a dance. The flowers would stretch their golden petals, the bees would hum their favorite songs, and the sun would rise with a warm, proud smile that made everything glow.",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1470509037663-253afd7f0f51?w=800&auto=format&fit=crop&q=70",
     },
+    /* [2] right — Chapter 1 opens here */
     {
-      text: "But one gray morning, the sun didn't come. The flowers drooped. The bees fell silent. Captain Comet — the bravest kid in town — looked up at the empty sky and knew something was very, very wrong.",
+      chapter: "Chapter 1 · Morning Blooms",
+      text: "In Sunflower Town, every morning began with a dance. The flowers stretched their golden petals, the bees hummed their favorite songs, and the sun rose with a warm proud smile. But one gray morning, the sun didn't come.",
       illustration:
         "https://images.unsplash.com/photo-1465101046530-73398c7f28ca?w=800&auto=format&fit=crop&q=70",
     },
+    /* [3] left — illustration only */
     {
-      chapter: "Chapter 2 · Into the Darkness",
-      text: "Captain Comet zoomed past the clouds, his starlight cape blazing behind him. Higher and higher he flew, until he found the sun — tangled in a thick net of shadows, struggling to break free.",
-      illustration:
-        "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop&q=70",
-    },
-    {
-      text: "The shadows hissed and curled around him, trying to pull him in. But Captain Comet wasn't afraid. He reached deep into his cape and pulled out a beam of pure, golden starlight — the last gift from his father.",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1534088568595-a066f410bcda?w=800&auto=format&fit=crop&q=70",
     },
+    /* [4] right — Chapter 2 opens here */
     {
-      chapter: "Chapter 3 · The Light Returns",
-      text: "With one mighty throw, Captain Comet sent the starlight slicing through the net. The shadows screamed, scattered like frightened mice, and melted into the darkness where they belonged.",
+      chapter: "Chapter 2 · Into the Darkness",
+      text: "Captain Comet pulled on his starlight cape and zoomed past the clouds. Higher and higher he flew, until he found the sun — tangled in a thick net of shadows, struggling, flickering, nearly out.",
       illustration:
-        "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?w=800&auto=format&fit=crop&q=70",
+        "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop&q=70",
     },
+    /* [5] left — illustration only */
     {
-      text: "The sun burst free, brighter and warmer than ever before. Down in Sunflower Town, the flowers stood tall, the bees sang, and everyone cheered for the hero who brought back the light.",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800&auto=format&fit=crop&q=70",
     },
+    /* [6] right — Chapter 2 continues */
+    {
+      text: "The shadows hissed and curled around him, cold as deep water. But Captain Comet stood firm and reached into his cape — pulling out a beam of pure golden starlight, the last gift from his father, burning steady as a lighthouse.",
+      illustration:
+        "https://images.unsplash.com/photo-1446776709462-d6b525c57bd3?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [7] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [8] right — Chapter 3 opens here */
+    {
+      chapter: "Chapter 3 · The Light Returns",
+      text: "With one mighty throw, Captain Comet sent the starlight slicing through the shadow net. The shadows scattered like frightened mice and melted into the dark. The sun burst free, brighter and warmer than ever before.",
+      illustration:
+        "https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [9] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1490750967868-88aa4f44baee?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [10] right — Chapter 4 opens here */
+    {
+      chapter: "Chapter 4 · Seeds of Light",
+      text: "Captain Comet landed in the town square and reached into his pocket. The sunflower seed his sister had given him now glowed gold. He pressed it into the earth — and by morning a sunflower taller than a house had grown, petals shining like little suns.",
+      illustration:
+        "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [11] left — end page */
     {
       isEnd: true,
       text: "Captain Comet learned that even the smallest light can chase away the biggest darkness — especially when you're brave enough to shine.",
     },
   ],
 
-  /* ── Zara and the Moonlight Train ────────────────────────────────── */
+  /* ── Zara and the Moonlight Train ───────────────────────────────────
+     12 pages: [0] title · [1–10] story (chapter labels on 2,4,6,8,10) · [11] end
+  ───────────────────────────────────────────────────────────────────── */
   story_005: [
+    /* [0] right — title */
     {
       isTitle: true,
       title: "Zara and the Moonlight Train",
@@ -493,42 +577,74 @@ export const dashboardStoryPages: Record<string, StoryPage[]> = {
       illustration:
         "https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=800&auto=format&fit=crop&q=70",
     },
+    /* [1] left — illustration only */
     {
-      chapter: "Chapter 1 · The Midnight Visitor",
-      text: "Every night at exactly midnight, a silver train appeared at the edge of Zara's garden. It shimmered like moonlight on water, and its whistle sounded like a lullaby drifting across the stars.",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1474487548417-781cb71495f7?w=800&auto=format&fit=crop&q=70",
     },
+    /* [2] right — Chapter 1 opens here */
     {
-      text: "Tonight, Zara was brave enough to climb aboard. Inside, the seats were made of the softest clouds, the windows showed constellations she had never learned in school, and the air smelled like warm cocoa.",
+      chapter: "Chapter 1 · The Midnight Visitor",
+      text: "Every night at exactly midnight, a silver train appeared at the edge of Zara's garden. It shimmered like moonlight on water, and its whistle sounded like a lullaby drifting softly across the stars.",
+      illustration:
+        "https://images.unsplash.com/photo-1475274047050-1d0c55b91e0a?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [3] left — illustration only */
+    {
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=70",
     },
+    /* [4] right — Chapter 2 opens here */
     {
       chapter: "Chapter 2 · The Riddle Conductor",
-      text: "The conductor was a friendly owl with spectacles perched on his beak. 'Where would you like to go?' he asked. 'Somewhere I've never been,' whispered Zara. The owl smiled. 'Then you're already on the right train.'",
+      text: "Tonight Zara was brave enough to climb aboard. Inside, the seats were made of the softest clouds and the air smelled like warm cocoa. The conductor — a friendly owl with silver spectacles — asked, 'Where would you like to go?'",
       illustration:
         "https://images.unsplash.com/photo-1484406566174-9da000fda645?w=800&auto=format&fit=crop&q=70",
     },
+    /* [5] left — illustration only */
     {
-      text: "The train glided through valleys of sparkling stars and over bridges made of moonbeams. It passed sleeping mountains and sailed across a sea of silver mist that tickled Zara's fingers through the open window.",
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop&q=70",
     },
+    /* [6] right — Chapter 2 continues */
     {
-      chapter: "Chapter 3 · The Dream Garden",
-      text: "At the last stop, Zara found a garden where dreams grew like flowers. Dreams of flying had butterfly wings. Dreams of adventure were bright red roses. Dreams of kindness glowed like little golden suns.",
+      text: "'Somewhere I have never been,' whispered Zara. The owl smiled. 'Then you are already on the right train.' The Moonlight Train glided through star valleys and over bridges of moonbeams, past sleeping mountains and across a silver sea of mist.",
+      illustration:
+        "https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [7] left — illustration only */
+    {
+      text: "",
       illustration:
         "https://images.unsplash.com/photo-1490750967868-88aa4f44baee?w=800&auto=format&fit=crop&q=70",
     },
+    /* [8] right — Chapter 3 opens here */
     {
-      text: "Zara picked one dream — the dream of flying — and tucked it gently into her pocket. When the train brought her home, the dream stayed with her, warm and safe. She knew it would come true one day.",
+      chapter: "Chapter 3 · The Dream Garden",
+      text: "At the last stop, Zara found a garden where dreams grew like flowers. Dreams of flying had butterfly wings. Dreams of adventure were bright red roses. Dreams of kindness glowed like little golden suns, warming everything nearby.",
+      illustration:
+        "https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [9] left — illustration only */
+    {
+      text: "",
+      illustration:
+        "https://images.unsplash.com/photo-1446776709462-d6b525c57bd3?w=800&auto=format&fit=crop&q=70",
+    },
+    /* [10] right — Chapter 4 opens here */
+    {
+      chapter: "Chapter 4 · The Journey Home",
+      text: "Zara chose the dream of flying and tucked it gently into her pocket. As dawn painted the sky pink, the train turned for home. 'Same time next night?' asked the owl. Zara grinned. 'I'll be ready.'",
       illustration:
         "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=800&auto=format&fit=crop&q=70",
     },
+    /* [11] left — end page */
     {
       isEnd: true,
-      text: "And every midnight, if you listen closely, you can still hear the Moonlight Train's whistle — waiting for the next dreamer brave enough to climb aboard.",
+      text: "And every midnight, if you listen closely, you can still hear the Moonlight Train's silver whistle — waiting for the next dreamer brave enough to climb aboard.",
     },
   ],
 };
