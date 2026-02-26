@@ -60,6 +60,12 @@ class CharacterWorkflowDecider:
             model=settings.replicate_model,
             default_output_count=settings.replicate_output_count,
             default_aspect_ratio=settings.replicate_aspect_ratio,
+            default_quality=settings.replicate_quality,
+            default_background=settings.replicate_background,
+            default_moderation=settings.replicate_moderation,
+            default_output_format=settings.replicate_output_format,
+            default_input_fidelity=settings.replicate_input_fidelity,
+            default_output_compression=settings.replicate_output_compression,
         )
 
     @staticmethod

@@ -63,6 +63,13 @@ __pycache__/
 !/backend/main/.env.example
 /backend/main/.pytest_cache/
 /backend/main/*.egg-info/
+/backend/maf-story-book-maker/.venv/
+/backend/maf-story-book-maker/.venv*/
+/backend/maf-story-book-maker/.pytest_cache/
+/backend/maf-story-book-maker/*.egg-info/
+/backend/maf-story-book-maker/.env
+/backend/maf-story-book-maker/.env.*
+!/backend/maf-story-book-maker/.env.example
 
 # vercel
 /website/.vercel

@@ -1,87 +1,74 @@
 # Main: Microsoft Agent Framework Orchestrator
 
-This `backend/main/` service is the orchestration layer that connects your existing **A2A CrewAI Character Maker** backend to a **Microsoft Agent Framework** agent and prepares it for **Azure deployment**.
+This `backend/main/` service is the orchestration layer between UI/clients and specialized A2A backends.
 
-It decides whether to run:
-- full character creation pipeline (`/api/v1/characters/create`), or
-- regenerate-only image pipeline (`/api/v1/characters/regenerate-image`)
-
-and sends requests to the backend over real A2A protocol (`/a2a`).
-
-## Why this exists
-
-Your backend already has the heavy creative pipeline (Vision + CrewAI + Replicate). This service adds:
-- Microsoft Agent Framework decision layer
-- clean API boundary for multi-agent/A2A integration
-- Azure deployment packaging and CI/CD workflow
+It currently routes to:
+- `backend/a2a-crew-ai-character-maker` for character workflows
+- `backend/maf-story-book-maker` for short storybook workflows
 
 ## Architecture
 
 ```text
 User/UI
-  -> main (Microsoft Agent Framework orchestrator)
-      -> decides action (create | regenerate)
-      -> A2AAgent call -> backend/a2a-crew-ai-character-maker (/a2a)
-          -> vision + CrewAI + Replicate image generation
+  -> main (MAF orchestrator)
+      -> character route decision (create | regenerate)
+         -> A2A -> character backend (/a2a)
+      -> storybook request passthrough
+         -> A2A -> storybook backend (/a2a)
 ```
 
-## Folder layout
-
-```text
-backend/main/
-├── agent_orchestrator/
-│   ├── __init__.py
-│   ├── backend_client.py      # Calls A2A CrewAI backend APIs
-│   ├── config.py              # Environment and provider settings
-│   ├── maf_router.py          # Microsoft Agent Framework routing agent
-│   ├── main.py                # FastAPI entrypoint
-│   └── models.py              # Request/response models
-├── azure/
-│   └── containerapp.yaml      # Infra template (optional)
-├── scripts/
-│   └── deploy_azure.sh        # One-command Azure deployment (Container Apps)
-├── .env.example
-├── Dockerfile
-├── requirements.txt
-└── README.md
-```
-
-## API
+## Endpoints
 
 ### `GET /health`
-Returns orchestrator status plus backend connectivity check.
+Service health plus character backend connectivity snapshot.
 
 ### `GET /api/v1/orchestrate/a2a-health`
-No-cost protocol probe that always calls backend over A2A (`/a2a`) with `operation=healthcheck`.
+A2A health probe for character backend.
+
+### `GET /api/v1/orchestrate/storybook-health`
+A2A health probe for storybook backend (`maf-story-book-maker`).
 
 ### `POST /api/v1/orchestrate/character`
-Single entrypoint.
+Character orchestration entrypoint.
 
-Input supports:
-- `mode`: `auto | create | regenerate`
-- `user_prompt`
-- `positive_prompt` (for regenerate-only)
-- `negative_prompt`
-- `world_references[]`
-- `character_drawings[]`
-- `force_workflow` (`reference_enriched | prompt_only`)
+### `POST /api/v1/orchestrate/storybook`
+Storybook orchestration entrypoint. Forwards to storybook backend through A2A.
 
-Response includes:
-- selected action
-- who selected it (`agent`, `explicit_mode`, `rule_fallback`)
-- backend endpoint called
-- raw backend JSON response
+## Storybook Request Shape
 
-## Local run
+```json
+{
+  "user_prompt": "A moon explorer rescues a lost archive",
+  "world_references": [],
+  "character_drawings": [],
+  "force_workflow": "reference_enriched",
+  "max_characters": 2,
+  "tone": "hopeful",
+  "age_band": "5-8"
+}
+```
 
-### 1) Start existing backend
+## Local Run
+
+Start all three backends:
+
+### 1) Character backend (8000)
 
 ```bash
 cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/a2a-crew-ai-character-maker
-./.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+source .venv/bin/activate
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-### 2) Start orchestrator service
+### 2) Storybook backend (8020)
+
+```bash
+cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/maf-story-book-maker
+source .venv/bin/activate
+python -m uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
+```
+
+### 3) Main orchestrator (8010)
 
 ```bash
 cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/main
@@ -89,151 +76,79 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+python -m uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
-Set `.env` values for local testing:
-- `AGENT_PROVIDER=openai`
-- `OPENAI_API_KEY=...`
-- `A2A_BACKEND_BASE_URL=http://127.0.0.1:8000`
-- `A2A_RPC_PATH=/a2a`
-- `A2A_USE_PROTOCOL=true`
+## Required `.env` values in `backend/main/.env`
 
-Run:
-
-```bash
-./.venv/bin/uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
+```dotenv
+AGENT_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+A2A_BACKEND_BASE_URL=http://127.0.0.1:8000
+A2A_RPC_PATH=/a2a
+A2A_USE_PROTOCOL=true
+A2A_STORY_BACKEND_BASE_URL=http://127.0.0.1:8020
+A2A_STORY_RPC_PATH=/a2a
+A2A_STORY_USE_PROTOCOL=true
 ```
 
-One-command run (recommended):
+Model note:
+- Use raw OpenAI model IDs (for example `gpt-4o-mini`), not provider-prefixed IDs like `openai/gpt-4o-mini`.
+
+## Quick Tests
+
+### Health
 
 ```bash
-cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/main && source .venv/bin/activate && A2A_USE_PROTOCOL=true A2A_BACKEND_BASE_URL=http://127.0.0.1:8000 python -m uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
+curl -sS http://127.0.0.1:8010/health
 ```
 
-Health:
+### Storybook A2A health via main
 
 ```bash
-curl http://127.0.0.1:8010/health
+curl -sS http://127.0.0.1:8010/api/v1/orchestrate/storybook-health
 ```
 
-A2A protocol check:
+### Character via main
 
 ```bash
-curl http://127.0.0.1:8010/api/v1/orchestrate/a2a-health
-```
-
-### Example request (auto)
-
-```bash
-curl -X POST "http://127.0.0.1:8010/api/v1/orchestrate/character" \
+curl -sS -X POST "http://127.0.0.1:8010/api/v1/orchestrate/character" \
   -H "content-type: application/json" \
   -d '{
-    "mode": "auto",
+    "mode": "create",
     "user_prompt": "A relic hunter from submerged moon ruins",
-    "world_references": [
-      {
-        "title": "Temple archives",
-        "description": "Ancient orbital sanctuaries with cracked silver domes"
-      }
-    ]
-  }'
-```
-
-### Example request (regenerate-only)
-
-```bash
-curl -X POST "http://127.0.0.1:8010/api/v1/orchestrate/character" \
-  -H "content-type: application/json" \
-  -d '{
-    "mode": "regenerate",
-    "positive_prompt": "story-ready keyframe portrait ...",
     "world_references": [],
     "character_drawings": []
   }'
 ```
 
-## Azure deployment (Container Apps)
-
-This service is ready for Azure Container Apps deploy.
-
-### Prerequisites
-- Azure CLI logged in
-- Permission to create Resource Group, ACR, Container Apps
-- Azure OpenAI deployment already created
-- Your A2A backend deployed and reachable (`A2A_BACKEND_BASE_URL`)
-
-### Required env vars for script
-
-- `AZURE_SUBSCRIPTION_ID`
-- `AZURE_RESOURCE_GROUP`
-- `AZURE_LOCATION`
-- `AZURE_CONTAINERAPP_ENV`
-- `AZURE_ACR_NAME`
-- `AZURE_CONTAINERAPP_NAME`
-- `A2A_BACKEND_BASE_URL`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_API_VERSION` (optional, default `preview`)
-
-### Deploy command
+### Storybook via main
 
 ```bash
-cd /Users/yashwanthkrishna/Desktop/Projects/dream
-./backend/main/scripts/deploy_azure.sh
+curl -sS -X POST "http://127.0.0.1:8010/api/v1/orchestrate/storybook" \
+  -H "content-type: application/json" \
+  -d '{
+    "user_prompt": "A moon explorer rescues a lost archive",
+    "world_references": [],
+    "character_drawings": [],
+    "max_characters": 2,
+    "tone": "hopeful",
+    "age_band": "5-8"
+  }'
 ```
 
-Script flow:
-1. Creates/updates resource group.
-2. Creates ACR if missing.
-3. Builds image from `backend/main/` and pushes to ACR.
-4. Creates Container Apps environment if missing.
-5. Creates or updates orchestrator Container App.
-6. Sets runtime env + secrets and prints final URL.
+## Azure Deploy Notes
 
-## GitHub Actions deployment
+`backend/main/scripts/deploy_azure.sh` now supports optional story backend envs:
+- `A2A_STORY_BACKEND_BASE_URL` (defaults to `A2A_BACKEND_BASE_URL` if unset)
+- `A2A_STORY_RPC_PATH` (default `/a2a`)
+- `A2A_STORY_USE_PROTOCOL` (default `true`)
 
-Workflow file:
-- `.github/workflows/deploy-main-agent.yml`
+## Dependencies
 
-Set these repository secrets:
-- `AZURE_CREDENTIALS`
-- `AZURE_SUBSCRIPTION_ID`
-- `AZURE_RESOURCE_GROUP`
-- `AZURE_LOCATION`
-- `AZURE_CONTAINERAPP_ENV`
-- `AZURE_ACR_NAME`
-- `AZURE_CONTAINERAPP_NAME`
-- `A2A_BACKEND_BASE_URL`
-- `AZURE_OPENAI_ENDPOINT`
-- `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`
-- `AZURE_OPENAI_API_KEY`
-- `AZURE_OPENAI_API_VERSION`
-
-## Mapping to your ultimate requirements
-
-1. Build with hero technologies:
-- Uses **Microsoft Agent Framework** in `agent_orchestrator/maf_router.py`.
-- Uses Azure OpenAI client path when `AGENT_PROVIDER=azure`.
-
-2. Deploy to Azure:
-- Containerized app via `backend/main/Dockerfile`.
-- Azure deployment automation in `backend/main/scripts/deploy_azure.sh`.
-- CI/CD workflow in `.github/workflows/deploy-main-agent.yml`.
-
-3. Use GitHub + Copilot:
-- Repo is GitHub-ready with workflow and infra scripts.
-- Copilot can be used in VS Code/Visual Studio to iterate agents/tools/tests.
-
-## Notes
-
-- `agent-framework-core==1.0.0rc1` is used (instead of the `agent-framework`
-  meta package) to avoid pulling `core[all]` extras and slow pip resolver
-  backtracking.
-- `agent-framework-a2a==1.0.0b260219` is included for true A2A client calls.
-- `mcp==1.24.0` and `a2a-sdk==0.3.5` are pinned for reliable installs on Python 3.13.
-- `agent-framework-core==1.0.0rc1` currently has a semantic-conventions mismatch at import time.
-  This project includes a runtime compatibility shim in
-  `agent_orchestrator/maf_router.py` so `pip install -r requirements.txt` works
-  without forcing conflicting package pins.
-- Keep `.env` and API keys out of git.
+Pinned in `requirements.txt`:
+- `agent-framework-core==1.0.0rc1`
+- `agent-framework-a2a==1.0.0b260219`
+- `mcp==1.24.0`
+- `a2a-sdk==0.3.5`

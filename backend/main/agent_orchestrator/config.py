@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     a2a_use_protocol: bool = True
     a2a_create_path: str = "/api/v1/characters/create"
     a2a_regenerate_path: str = "/api/v1/characters/regenerate-image"
+    a2a_story_backend_base_url: str = "http://127.0.0.1:8020"
+    a2a_story_rpc_path: str = "/a2a"
+    a2a_story_use_protocol: bool = True
+    a2a_story_create_path: str = "/api/v1/stories/create"
     a2a_timeout_seconds: float = Field(default=240.0, gt=0.0)
 
     model_config = SettingsConfigDict(
@@ -39,6 +43,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_provider_credentials(self) -> "Settings":
+        self.openai_model = self._normalize_openai_model(self.openai_model)
+
         if self.agent_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required when AGENT_PROVIDER=openai.")
@@ -66,9 +72,30 @@ class Settings(BaseSettings):
     def a2a_rpc_url(self) -> str:
         return self._join_url(self.a2a_backend_base_url, self.a2a_rpc_path)
 
+    @property
+    def a2a_story_create_url(self) -> str:
+        return self._join_url(self.a2a_story_backend_base_url, self.a2a_story_create_path)
+
+    @property
+    def a2a_story_rpc_url(self) -> str:
+        return self._join_url(self.a2a_story_backend_base_url, self.a2a_story_rpc_path)
+
     @staticmethod
     def _join_url(base_url: str, path: str) -> str:
         return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    @staticmethod
+    def _normalize_openai_model(model_id: str) -> str:
+        raw = (model_id or "").strip()
+        if not raw:
+            return "gpt-4o-mini"
+
+        lowered = raw.lower()
+        for prefix in ("openai/", "models/", "model/"):
+            if lowered.startswith(prefix):
+                return raw[len(prefix) :].strip() or "gpt-4o-mini"
+
+        return raw
 
 
 @lru_cache(maxsize=1)

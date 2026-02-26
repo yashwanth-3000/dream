@@ -11,9 +11,15 @@ class Settings(BaseSettings):
     openai_vision_max_tokens: int = 500
 
     replicate_api_token: str
-    replicate_model: str = "prunaai/p-image"
+    replicate_model: str = "openai/gpt-image-1.5"
     replicate_output_count: int = 1
-    replicate_aspect_ratio: str = "3:4"
+    replicate_aspect_ratio: str = "2:3"
+    replicate_quality: str = "medium"
+    replicate_background: str = "auto"
+    replicate_moderation: str = "auto"
+    replicate_output_format: str = "webp"
+    replicate_input_fidelity: str = "high"
+    replicate_output_compression: int = 90
 
     a2a_public_base_url: str = "http://127.0.0.1:8000"
     a2a_rpc_path: str = "/a2a"

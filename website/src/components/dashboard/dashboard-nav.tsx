@@ -25,6 +25,7 @@ const dashboardLinks = [
   { label: "Videos", href: "/dashboard/videos", icon: Film },
   { label: "Characters", href: "/dashboard/characters", icon: Users },
   { label: "API Test", href: "/dashboard/api-test", icon: FlaskConical },
+  { label: "Storybook Test", href: "/dashboard/storybook-test", icon: BookOpenText },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
 

@@ -756,6 +756,9 @@ export default function DashboardApiTestPage() {
                   <input
                     type="file"
                     accept="image/*"
+                    onClick={(e) => {
+                      (e.currentTarget as HTMLInputElement).value = "";
+                    }}
                     onChange={(e) => setWorldReferenceFile(index, e.target.files?.[0] ?? null)}
                     className="mt-1 block w-full text-xs"
                   />
@@ -833,6 +836,9 @@ export default function DashboardApiTestPage() {
                   <input
                     type="file"
                     accept="image/*"
+                    onClick={(e) => {
+                      (e.currentTarget as HTMLInputElement).value = "";
+                    }}
                     onChange={(e) => setDrawingFile(index, e.target.files?.[0] ?? null)}
                     className="mt-1 block w-full text-xs"
                   />

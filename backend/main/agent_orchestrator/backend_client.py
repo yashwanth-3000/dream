@@ -37,6 +37,7 @@ class A2ABackendClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._a2a_agent: Any | None = None
+        self._a2a_story_agent: Any | None = None
 
     async def health(self) -> dict[str, Any]:
         url = f"{self._settings.a2a_backend_base_url.rstrip('/')}/health"
@@ -52,6 +53,19 @@ class A2ABackendClient:
         if self._settings.a2a_use_protocol:
             return await self._invoke_via_a2a(operation="regenerate", payload=payload)
         return await self._post_json(self._settings.a2a_regenerate_url, payload)
+
+    async def create_storybook(self, payload: dict[str, Any]) -> BackendCallResult:
+        if self._settings.a2a_story_use_protocol:
+            return await self._invoke_story_via_a2a(operation="story_create", payload=payload)
+        return await self._post_json(self._settings.a2a_story_create_url, payload)
+
+    async def storybook_health(self) -> BackendCallResult:
+        if self._settings.a2a_story_use_protocol:
+            return await self._invoke_story_via_a2a(
+                operation="healthcheck",
+                payload={"operation": "healthcheck"},
+            )
+        return await self._get_json(f"{self._settings.a2a_story_backend_base_url.rstrip('/')}/health")
 
     async def protocol_healthcheck(self) -> BackendCallResult:
         if self._settings.a2a_use_protocol:
@@ -133,6 +147,53 @@ class A2ABackendClient:
 
         return BackendCallResult(
             endpoint=self._settings.a2a_rpc_url,
+            status_code=200,
+            payload=parsed_payload,
+        )
+
+    async def _invoke_story_via_a2a(self, operation: str, payload: dict[str, Any]) -> BackendCallResult:
+        if A2A_IMPORT_ERROR is not None or AFMessage is None or A2AAgent is None:
+            raise A2ABackendError(
+                f"A2A client import failed: {A2A_IMPORT_ERROR}. semconv_patched={PATCHED_SEMCONV_ATTRS}"
+            )
+
+        if self._a2a_story_agent is None:
+            self._a2a_story_agent = A2AAgent(
+                url=self._settings.a2a_story_rpc_url,
+                timeout=self._settings.a2a_timeout_seconds,
+                name="dream-storybook-a2a-client",
+            )
+
+        summary_text = (
+            str(payload.get("user_prompt") or "").strip()
+            or f"{operation} storybook request"
+        )
+
+        request_message = AFMessage(
+            role="user",
+            text=summary_text,
+            additional_properties={
+                "operation": operation,
+                "payload": payload,
+            },
+        )
+
+        try:
+            response = await self._a2a_story_agent.run(request_message)
+        except Exception as exc:
+            raise A2ABackendError(
+                f"A2A story protocol call failed for {self._settings.a2a_story_rpc_url}: {exc}"
+            ) from exc
+
+        parsed_payload = self._extract_json_payload_from_agent_response(response)
+        if parsed_payload is None:
+            raise A2ABackendError(
+                "A2A story protocol response could not be parsed as JSON payload. "
+                f"response_text_preview={(response.text or '')[:800]}"
+            )
+
+        return BackendCallResult(
+            endpoint=self._settings.a2a_story_rpc_url,
             status_code=200,
             payload=parsed_payload,
         )

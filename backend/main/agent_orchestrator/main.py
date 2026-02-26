@@ -9,14 +9,16 @@ from .models import (
     CharacterOrchestrationRequest,
     CharacterOrchestrationResponse,
     ServiceHealthResponse,
+    StoryBookOrchestrationRequest,
+    StoryBookOrchestrationResponse,
 )
 
 app = FastAPI(
     title="Dream Microsoft Agent Framework Orchestrator",
     version="0.1.0",
     description=(
-        "Agent Framework orchestrator that routes requests to the A2A CrewAI character backend "
-        "for full creation or regenerate-only image generation."
+        "Agent Framework orchestrator that routes character and storybook requests to specialized "
+        "A2A backends."
     ),
 )
 
@@ -60,6 +62,21 @@ def _build_backend_payload(
     )
 
 
+def _build_story_backend_payload(payload: StoryBookOrchestrationRequest) -> dict[str, object]:
+    world_references = [r.model_dump(mode="json", exclude_none=True) for r in payload.world_references]
+    character_drawings = [d.model_dump(mode="json", exclude_none=True) for d in payload.character_drawings]
+
+    return {
+        "user_prompt": payload.user_prompt.strip(),
+        "world_references": world_references,
+        "character_drawings": character_drawings,
+        "force_workflow": payload.force_workflow,
+        "max_characters": payload.max_characters,
+        "tone": payload.tone,
+        "age_band": payload.age_band,
+    }
+
+
 @app.get("/health", response_model=ServiceHealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> ServiceHealthResponse:
     backend = A2ABackendClient(settings)
@@ -101,6 +118,21 @@ async def a2a_protocol_health(settings: Settings = Depends(get_settings)) -> dic
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/v1/orchestrate/storybook-health")
+async def storybook_protocol_health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    backend = A2ABackendClient(settings)
+    try:
+        result = await backend.storybook_health()
+        return {
+            "status": "ok",
+            "backend_endpoint": result.endpoint,
+            "backend_status_code": result.status_code,
+            "backend_response": result.payload,
+        }
+    except A2ABackendError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/v1/orchestrate/character", response_model=CharacterOrchestrationResponse)
 async def orchestrate_character(
     payload: CharacterOrchestrationRequest,
@@ -126,6 +158,26 @@ async def orchestrate_character(
         selected_by=selected_by,
         agent_reasoning=decision.rationale,
         agent_raw_output=raw_output,
+        backend_endpoint=result.endpoint,
+        backend_status_code=result.status_code,
+        backend_response=result.payload,
+    )
+
+
+@app.post("/api/v1/orchestrate/storybook", response_model=StoryBookOrchestrationResponse)
+async def orchestrate_storybook(
+    payload: StoryBookOrchestrationRequest,
+    settings: Settings = Depends(get_settings),
+) -> StoryBookOrchestrationResponse:
+    backend = A2ABackendClient(settings)
+
+    try:
+        backend_payload = _build_story_backend_payload(payload)
+        result = await backend.create_storybook(backend_payload)
+    except A2ABackendError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return StoryBookOrchestrationResponse(
         backend_endpoint=result.endpoint,
         backend_status_code=result.status_code,
         backend_response=result.payload,

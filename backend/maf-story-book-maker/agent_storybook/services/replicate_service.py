@@ -40,18 +40,18 @@ class ReplicateImageService:
     def model(self) -> str:
         return self._model
 
-    def generate_character_images(
+    def generate_story_image(
         self,
         prompt: str,
         negative_prompt: str | None = None,
         output_count: int | None = None,
         aspect_ratio: str | None = None,
         reference_images: list[str] | None = None,
-    ) -> list[str]:
+    ) -> str:
         output_count = output_count or self._default_output_count
         aspect_ratio = aspect_ratio or self._default_aspect_ratio
 
-        candidate_payloads = self._build_payload_candidates(
+        payload_candidates = self._build_payload_candidates(
             prompt=prompt,
             negative_prompt=negative_prompt,
             output_count=output_count,
@@ -60,12 +60,12 @@ class ReplicateImageService:
         )
 
         last_error: Exception | None = None
-        for payload in candidate_payloads:
+        for payload in payload_candidates:
             try:
                 raw_output = self._client.run(self._model, input=payload)
                 urls = self._coerce_output_urls(raw_output)
                 if urls:
-                    return urls
+                    return urls[0]
             except Exception as exc:
                 last_error = exc
                 continue
@@ -104,12 +104,7 @@ class ReplicateImageService:
         normalized_references = self._normalize_reference_images(reference_images)
         if normalized_references:
             primary_image = normalized_references[0]
-            for key in (
-                "input_image",
-                "reference_image",
-                "image",
-                "image_prompt",
-            ):
+            for key in ("input_image", "reference_image", "image", "image_prompt"):
                 candidate = dict(base_payload)
                 candidate[key] = primary_image
                 payloads.append(candidate)
@@ -122,7 +117,8 @@ class ReplicateImageService:
             candidate_multi_ref["reference_images"] = normalized_references
             payloads.append(candidate_multi_ref)
 
-            # When references are provided, keep generation reference-locked.
+            # Strict reference mode: when references are provided, do not silently fall back to
+            # prompt-only payloads. This guarantees every generation attempt includes references.
             return payloads
 
         payloads.append(dict(base_payload))
@@ -166,9 +162,9 @@ class ReplicateImageService:
                 normalized.append(value)
                 continue
 
-            data_url = self._decode_data_url(value)
-            if data_url is not None:
-                normalized.append(data_url)
+            data_bytes = self._decode_data_url(value)
+            if data_bytes is not None:
+                normalized.append(data_bytes)
                 normalized.append(value)
                 continue
 
@@ -235,11 +231,11 @@ class ReplicateImageService:
 
     def _compose_prompt(self, prompt: str, negative_prompt: str | None) -> str:
         constraints = [
-            "Use a polished 2D children's storybook illustration style (non-photorealistic).",
             "Treat input reference image #1 as the canonical character identity lock.",
-            "Match the original character drawings exactly and preserve outfit silhouette.",
-            "Preserve character identity and outfit consistency from reference images.",
-            "Do not render any text, letters, words, numbers, logos, watermarks, subtitles, or captions.",
+            "Match the original character drawings and generated character sheets exactly.",
+            "Keep face shape, hairstyle, skin tone, body proportions, and outfit silhouette consistent across all scenes.",
+            "Use a polished 2D children's storybook illustration style (non-photorealistic).",
+            "Do not render any text, letters, words, numbers, logos, watermarks, subtitles, or captions in the image.",
         ]
         if negative_prompt and negative_prompt.strip():
             constraints.append(f"Avoid: {negative_prompt.strip()}")

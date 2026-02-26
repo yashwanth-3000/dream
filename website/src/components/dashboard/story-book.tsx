@@ -42,20 +42,20 @@ interface BookSpread {
 }
 
 function buildSpreads(pages: StoryPage[], cover: string): BookSpread[] {
-  const totalLeaves = Math.ceil(pages.length / 2);
   const out: BookSpread[] = [];
 
-  // Spread 0: cover on left, title page on right
+  // Spread 0: cover only — right side is always blank
   out.push({
     leftPage: null,
     leftImage: cover,
-    rightPage: pages[0] ?? null,
-    rightPageIndex: 0,
+    rightPage: null,
+    rightPageIndex: -1,
   });
 
-  for (let k = 1; k <= totalLeaves; k++) {
-    const li = k * 2 - 1;
-    const ri = k * 2;
+  // Content spreads: even indices → left (image), odd indices → right (text)
+  for (let k = 0; k < Math.ceil(pages.length / 2); k++) {
+    const li = k * 2;
+    const ri = k * 2 + 1;
     out.push({
       leftPage: li < pages.length ? pages[li] : null,
       leftImage:
@@ -273,21 +273,9 @@ function RightPanel({
   // Content spreads are 1 … totalSpreads-2 → label them "Page 1", "Page 2", …
   const pageLabel = spreadIndex > 0 ? `Page ${spreadIndex} of ${totalSpreads - 2}` : null;
 
-  /* End-of-book */
+  /* Blank page (cover right-half or end right-half) */
   if (rightPage === null) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full select-none">
-        <Sparkles
-          className={cn(
-            "size-5 md:size-6 mb-1",
-            immersive ? "text-amber-500/30" : "text-primary/25"
-          )}
-        />
-        <p className="text-[9px] md:text-[11px] text-stone-500 italic font-medium">
-          Story complete
-        </p>
-      </div>
-    );
+    return <div className="w-full h-full" />;
   }
 
   /* Title page */
@@ -335,7 +323,13 @@ function RightPanel({
 
   /* Regular page — text only */
   return (
-    <div className="flex flex-col h-full p-4 md:p-6">
+    <motion.div
+      key={spreadIndex}
+      className="flex flex-col h-full p-4 md:p-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.28, delay: 0.06, ease: "easeOut" }}
+    >
       {rightPage.chapter && (
         <p
           className={cn(
@@ -354,7 +348,7 @@ function RightPanel({
           {pageLabel}
         </p>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -464,6 +458,10 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
   const tiltX = useSpring(useMotionValue(0), { stiffness: 130, damping: 22, mass: 0.7 });
   const tiltY = useSpring(useMotionValue(0), { stiffness: 130, damping: 22, mass: 0.7 });
 
+  /* Scale spring — dips briefly on page turn for a tactile feel */
+  const bookScaleRaw = useMotionValue(1);
+  const bookScale = useSpring(bookScaleRaw, { stiffness: 320, damping: 26, mass: 0.6 });
+
   const canGoBack = spread > 0 && !flipAnim;
   const canGoForward = spread < totalSpreads - 1 && !flipAnim;
 
@@ -486,6 +484,10 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
       /* Snap book tilt to neutral before the flip starts */
       tiltX.set(0);
       tiltY.set(0);
+
+      /* Brief scale dip for tactile page-turn feel */
+      bookScaleRaw.set(0.97);
+      setTimeout(() => bookScaleRaw.set(1), 120);
 
       if (dir === -1) {
         // Backward: update left base IMMEDIATELY so destination left
@@ -788,10 +790,21 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
       ? spreads[flipAnim.dir === 1 ? flipAnim.to : flipAnim.from]
       : null;
 
+    // Single-page mode: cover (spread 0) and end spread have no right page.
+    // While a flip is in progress we always use two-page layout so the leaf
+    // has room to animate; the snap to full-width happens after the flip ends.
+    const isLeftFull = spreads[leftDisplay].rightPage === null && !flipAnim;
+
     return (
-      <div
+      <motion.div
         className={cn("relative w-full mx-auto select-none", immersive && "max-h-[68vh]")}
-        style={{ perspective: "2200px", maxWidth: maxW, aspectRatio: "4 / 3" }}
+        animate={{ maxWidth: isLeftFull ? maxW / 2 : maxW }}
+        transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          perspective: "2200px",
+          aspectRatio: isLeftFull ? "2 / 3" : "4 / 3",
+          transition: "aspect-ratio 0.48s cubic-bezier(0.22,1,0.36,1)",
+        }}
       >
         {/* ── Book shadow (grows + brightens while page is turning) ── */}
         <motion.div
@@ -811,12 +824,10 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
         />
 
         {/* ── Left page base ──────────────────────────────────────── */}
-        {/* Shows leftDisplay spread. Stays "frozen" during forward
-            animations so the old image doesn't swap before the leaf
-            has crossed the spine. */}
         <div
           className={cn(
-            "absolute left-0 top-0 w-1/2 h-full rounded-l-2xl overflow-hidden",
+            "absolute left-0 top-0 h-full overflow-hidden",
+            isLeftFull ? "rounded-2xl w-full" : "rounded-l-2xl w-1/2",
             borderLeft
           )}
           style={{
@@ -833,60 +844,79 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
           />
         </div>
 
-        {/* ── Right page base ─────────────────────────────────────── */}
-        {/* Always shows the destination spread right away so it's
-            already there when the flip leaf uncovers it. */}
-        <div
-          className={cn(
-            "absolute right-0 top-0 w-1/2 h-full rounded-r-2xl overflow-hidden",
-            borderRight
-          )}
-          style={{
-            background: bgRight,
-            boxShadow: immersive
-              ? "inset 8px 0 20px -8px rgba(0,0,0,0.08)"
-              : "inset 6px 0 14px -6px rgba(0,0,0,0.05)",
-          }}
-        >
-          <RightPanel
-            spread={spreads[rightDisplayIdx]}
-            spreadIndex={rightDisplayIdx}
-            totalSpreads={totalSpreads}
-            immersive={immersive}
-          />
-          {/* Corner page-turn hint: pulses when there's a next page */}
-          {!immersive && !flipAnim && canGoForward && (
+        {/* ── Right page base (hidden in single-page mode) ──────────── */}
+        <AnimatePresence initial={false}>
+          {!isLeftFull && (
             <motion.div
-              className="absolute bottom-2.5 right-2.5 z-[50] pointer-events-none"
-              animate={{ opacity: [0.28, 0.72, 0.28], x: [0, 2.5, 0] }}
-              transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+              key="right-page"
+              className={cn(
+                "absolute right-0 top-0 w-1/2 h-full rounded-r-2xl overflow-hidden",
+                borderRight
+              )}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35, ease: "easeInOut" }}
+              style={{
+                background: bgRight,
+                boxShadow: immersive
+                  ? "inset 8px 0 20px -8px rgba(0,0,0,0.08)"
+                  : "inset 6px 0 14px -6px rgba(0,0,0,0.05)",
+              }}
             >
-              <ChevronRight className="size-3 text-primary/60" />
+              <RightPanel
+                spread={spreads[rightDisplayIdx]}
+                spreadIndex={rightDisplayIdx}
+                totalSpreads={totalSpreads}
+                immersive={immersive}
+              />
+              {/* Corner page-turn hint: pulses when there's a next page */}
+              {!immersive && !flipAnim && canGoForward && (
+                <motion.div
+                  className="absolute bottom-2.5 right-2.5 z-[50] pointer-events-none"
+                  animate={{ opacity: [0.28, 0.72, 0.28], x: [0, 2.5, 0] }}
+                  transition={{ duration: 2.6, repeat: Infinity, ease: "easeInOut" }}
+                >
+                  <ChevronRight className="size-3 text-primary/60" />
+                </motion.div>
+              )}
             </motion.div>
           )}
-        </div>
+        </AnimatePresence>
 
-        {/* ── Stacked page edges at right ───────────────────────────── */}
-        <div
-          className="absolute top-[4%] bottom-[4%] z-[180] pointer-events-none rounded-r-xl overflow-hidden"
-          style={{
-            right: -3,
-            width: 5,
-            background:
-              "repeating-linear-gradient(to bottom, #ddd0bc 0px, #ddd0bc 1px, #f0e6d4 1px, #f0e6d4 2.5px)",
-            opacity: 0.5,
-          }}
-        />
-
-        {/* ── Spine ───────────────────────────────────────────────── */}
-        <div
-          className="absolute left-1/2 -translate-x-1/2 top-0 w-5 h-full z-[200] pointer-events-none"
-          style={{
-            background: immersive
-              ? "linear-gradient(to right,rgba(0,0,0,0.08)0%,rgba(0,0,0,0.03)25%,transparent 50%,rgba(0,0,0,0.03)75%,rgba(0,0,0,0.08)100%)"
-              : "linear-gradient(to right,rgba(0,0,0,0.05)0%,rgba(0,0,0,0.02)25%,transparent 50%,rgba(0,0,0,0.02)75%,rgba(0,0,0,0.05)100%)",
-          }}
-        />
+        {/* ── Stacked page edges + spine (two-page mode only) ───────── */}
+        <AnimatePresence initial={false}>
+          {!isLeftFull && (
+            <motion.div
+              key="spine-and-edges"
+              className="absolute inset-0 pointer-events-none"
+              style={{ overflow: "visible" }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35 }}
+            >
+              <div
+                className="absolute top-[4%] bottom-[4%] z-[180] rounded-r-xl overflow-hidden"
+                style={{
+                  right: -3,
+                  width: 5,
+                  background:
+                    "repeating-linear-gradient(to bottom, #ddd0bc 0px, #ddd0bc 1px, #f0e6d4 1px, #f0e6d4 2.5px)",
+                  opacity: 0.5,
+                }}
+              />
+              <div
+                className="absolute left-1/2 -translate-x-1/2 top-0 w-5 h-full z-[200]"
+                style={{
+                  background: immersive
+                    ? "linear-gradient(to right,rgba(0,0,0,0.08)0%,rgba(0,0,0,0.03)25%,transparent 50%,rgba(0,0,0,0.03)75%,rgba(0,0,0,0.08)100%)"
+                    : "linear-gradient(to right,rgba(0,0,0,0.05)0%,rgba(0,0,0,0.02)25%,transparent 50%,rgba(0,0,0,0.02)75%,rgba(0,0,0,0.05)100%)",
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── Single animated flip leaf ────────────────────────────── */}
         {/* Only exists for the ~700ms of the animation.
@@ -977,7 +1007,7 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
           className="absolute right-0 top-0 w-1/2 h-full z-[400] opacity-0 disabled:cursor-default cursor-pointer"
           aria-label="Next page"
         />
-      </div>
+      </motion.div>
     );
   };
 
@@ -1215,6 +1245,7 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                 perspective: "1400px",
                 rotateX: tiltX,
                 rotateY: tiltY,
+                scale: bookScale,
               }}
             >
               {renderBook(680, false)}

@@ -70,6 +70,22 @@ class CharacterOrchestrationResponse(BaseModel):
     backend_response: dict[str, Any]
 
 
+class StoryBookOrchestrationRequest(BaseModel):
+    user_prompt: str = Field(min_length=1, description="Primary storybook concept")
+    world_references: list[WorldReference] = Field(default_factory=list)
+    character_drawings: list[CharacterDrawingReference] = Field(default_factory=list)
+    force_workflow: WorkflowType | None = None
+    max_characters: int = Field(default=2, ge=1, le=2)
+    tone: str | None = None
+    age_band: str | None = None
+
+
+class StoryBookOrchestrationResponse(BaseModel):
+    backend_endpoint: str
+    backend_status_code: int
+    backend_response: dict[str, Any]
+
+
 class A2AHealthResponse(BaseModel):
     status: str
 
