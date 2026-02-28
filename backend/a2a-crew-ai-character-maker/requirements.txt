@@ -1,0 +1,9 @@
+a2a-sdk[http-server]>=0.3.5
+crewai
+fastapi
+openai
+pydantic-settings
+python-dotenv
+replicate
+uvicorn[standard]
+gunicorn

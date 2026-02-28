@@ -1,59 +1,166 @@
 # Dream MAF Story Book Maker
 
-This service generates short illustrated storybooks with a fixed 7-spread contract using Microsoft Agent Framework (MAF), A2A integration, and Replicate image rendering.
+A multi-agent storybook engine that generates short illustrated storybooks with a fixed 7-spread contract. Built with Microsoft Agent Framework (MAF), it connects to the Character Maker via A2A and renders scene images through Replicate.
 
-It is designed to run alongside:
-- `backend/a2a-crew-ai-character-maker` (character pipeline)
-- `backend/main` (top-level orchestrator)
+**Pipeline:** User prompt + optional references → Vision enrichment → Story blueprint → Parallel character generation + story writing → Scene prompts → Replicate image rendering → Normalized 7-spread output.
 
-## What It Produces
+**Models used:**
 
-For every request it returns:
-- a compact story draft (title page + 5 right-page chapter entries + end page)
-- up to 2 character packets (generated through the existing character backend)
-- scene prompts (cover + 5 illustrations)
-- 6 generated images (cover + page 1..5 illustrations)
-- exact 7-spread normalized payload
+- `gpt-4o-mini` (MAF agents) — story planning, writing, scene prompt generation
+- `gpt-4.1-mini` — vision analysis of uploaded drawings/references
+- `openai/gpt-image-1.5` (Replicate) — cover + 5 scene illustration rendering
 
-Spread layout is fixed:
-- Spread 0: left cover image, right title page, no label
-- Spread 1..5: left illustration, right chapter text, labels `Page 1 of 5` ... `Page 5 of 5`
-- Spread 6: left end page, right empty, no label
+## Architecture
 
-## Pipeline
+<p align="center">
+  <img src="architecture.svg" alt="MAF Story Book Maker Architecture" width="100%" />
+</p>
 
-1. Optional vision enrichment for uploaded drawings/world references.
-2. `StoryBlueprintAgent` creates structured story plan + character briefs.
-3. In parallel:
-   - Character generation branch (A2A call to character backend per brief)
-   - Story writing branch (`StoryWriterAgent`)
-4. `ScenePromptAgent` generates cover + 5 page prompts.
-5. Replicate renders all 6 images in parallel.
-6. Response is normalized to exact 7-spread contract.
+### Agent Roles
 
-## API
+| Agent | Purpose |
+|-------|---------|
+| StoryBlueprintAgent | Creates structured story plan (title, chapters, character briefs) from prompt |
+| StoryWriterAgent | Writes 5 right-page chapter entries from the blueprint |
+| ScenePromptAgent | Generates cover prompt + 5 illustration prompts for Replicate |
+| Character Branch | Parallel A2A calls to Character Maker for each character brief |
 
-### `GET /health`
-Health + character backend connectivity snapshot.
+### Pipeline Steps
 
-### `POST /api/v1/stories/create`
-Runs full storybook workflow.
+| Step | What Happens |
+|------|--------------|
+| 1. Vision enrichment | Analyzes uploaded drawings/world references (optional, skipped if none) |
+| 2. Story blueprint | MAF agent creates story plan + character briefs |
+| 3. Parallel branches | Character generation (A2A) and story writing (MAF) run concurrently |
+| 4. Scene prompts | MAF agent generates cover + 5 illustration prompts |
+| 5. Image rendering | Replicate renders all 6 images in parallel |
+| 6. Normalization | Output shaped into fixed 7-spread contract |
 
-### A2A endpoints
-- `POST /a2a`
-- `GET /.well-known/agent-card.json`
-- `GET /.well-known/agent.json`
+### Spread Layout (Fixed Contract)
 
-## Request Schema (`/api/v1/stories/create`)
+| Spread | Left | Right | Label |
+|--------|------|-------|-------|
+| 0 | Cover image | Title page | — |
+| 1–5 | Illustration | Chapter text | `Page N of 5` |
+| 6 | End page | Empty | — |
+
+### Workflow Selection
+
+| Condition | Workflow |
+|-----------|----------|
+| References/drawings provided | `reference_enriched` — vision analysis feeds into blueprint |
+| Prompt only, no references | `prompt_only` — blueprint generated directly from prompt |
+
+## Project Layout
+
+```text
+backend/maf-story-book-maker/
+├── agent_storybook/
+│   ├── main.py                    # FastAPI entrypoint
+│   ├── a2a_server.py              # A2A protocol routes + executor
+│   ├── config.py                  # Environment settings (pydantic-settings)
+│   ├── schemas.py                 # Request/response models
+│   ├── af_compat.py               # Agent Framework compatibility shim
+│   ├── maf_agents.py              # MAF agent definitions (blueprint, writer, scene)
+│   ├── story_workflow.py          # Full workflow orchestrator
+│   └── services/
+│       └── replicate_service.py   # Replicate image generation
+├── tests/
+│   └── test_story_workflow.py
+├── Dockerfile
+├── requirements.txt
+├── architecture.svg
+├── .env.example
+├── pytest.ini
+└── README.md
+```
+
+## Setup
+
+```bash
+cd backend/maf-story-book-maker
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Environment Variables
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | Yes | — | OpenAI key for MAF agents + vision |
+| `REPLICATE_API_TOKEN` | Yes | — | Replicate API token |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | Text model for MAF agents |
+| `OPENAI_TEMPERATURE` | No | `0.5` | Generation temperature |
+| `OPENAI_VISION_MODEL` | No | `gpt-4.1-mini` | Vision model for image descriptions |
+| `OPENAI_VISION_MAX_TOKENS` | No | `500` | Max vision output tokens |
+| `REPLICATE_MODEL` | No | `openai/gpt-image-1.5` | Replicate image model |
+| `REPLICATE_OUTPUT_COUNT` | No | `1` | Images per scene |
+| `REPLICATE_ASPECT_RATIO` | No | `2:3` | Image aspect ratio |
+| `REPLICATE_QUALITY` | No | `medium` | Image quality level |
+| `REPLICATE_BACKGROUND` | No | `auto` | Background handling |
+| `REPLICATE_MODERATION` | No | `auto` | Content moderation |
+| `REPLICATE_OUTPUT_FORMAT` | No | `webp` | Output image format |
+| `REPLICATE_INPUT_FIDELITY` | No | `high` | Input fidelity level |
+| `REPLICATE_OUTPUT_COMPRESSION` | No | `90` | Output compression (0–100) |
+| `CHARACTER_BACKEND_BASE_URL` | No | `http://127.0.0.1:8000` | Character Maker backend URL |
+| `CHARACTER_BACKEND_RPC_PATH` | No | `/a2a` | Character Maker A2A RPC path |
+| `CHARACTER_BACKEND_USE_PROTOCOL` | No | `true` | Use A2A protocol for character calls |
+| `CHARACTER_BACKEND_TIMEOUT_SECONDS` | No | `240` | Timeout for character generation |
+| `A2A_PUBLIC_BASE_URL` | No | `http://127.0.0.1:8020` | Public base URL for agent card |
+| `A2A_RPC_PATH` | No | `/a2a` | A2A JSON-RPC endpoint path |
+| `A2A_AGENT_NAME` | No | `Dream MAF Story Book Agent` | Agent card display name |
+| `A2A_AGENT_VERSION` | No | `0.1.0` | Agent card version |
+
+**Model ID note:** Use raw OpenAI model IDs (`gpt-4o-mini`), not provider-prefixed (`openai/gpt-4o-mini`).
+
+## Run Locally
+
+```bash
+cd backend/maf-story-book-maker
+source .venv/bin/activate
+uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
+```
+
+Verify:
+
+```bash
+curl http://127.0.0.1:8020/health
+```
+
+## API Reference
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check + character backend connectivity |
+| `POST` | `/api/v1/stories/create` | Full storybook pipeline |
+| `POST` | `/a2a` | A2A JSON-RPC endpoint (`message/send`, `message/stream`) |
+| `GET` | `/.well-known/agent.json` | A2A agent card |
+| `GET` | `/docs` | Interactive API docs (Swagger) |
+
+### Create Request
 
 ```json
 {
   "user_prompt": "A moon explorer rescues a lost archive",
   "world_references": [
-    { "title": "Orbital temple", "description": "Flooded silver halls", "image_data": "data:image/png;base64,..." }
+    {
+      "title": "Orbital temple",
+      "description": "Flooded silver halls",
+      "image_data": "data:image/png;base64,..."
+    }
   ],
   "character_drawings": [
-    { "notes": "front pose", "image_data": "data:image/png;base64,..." }
+    {
+      "notes": "front pose",
+      "image_data": "data:image/png;base64,..."
+    }
   ],
   "force_workflow": "reference_enriched",
   "max_characters": 2,
@@ -62,7 +169,7 @@ Runs full storybook workflow.
 }
 ```
 
-## Response Highlights
+### Response
 
 ```json
 {
@@ -70,7 +177,9 @@ Runs full storybook workflow.
   "story": {
     "title": "...",
     "title_page_text": "...",
-    "right_pages": [{ "page_number": 1, "chapter": "Chapter 1", "text": "..." }],
+    "right_pages": [
+      { "page_number": 1, "chapter": "Chapter 1", "text": "..." }
+    ],
     "end_page_text": "..."
   },
   "characters": [
@@ -89,7 +198,7 @@ Runs full storybook workflow.
   },
   "generated_images": ["cover", "p1", "p2", "p3", "p4", "p5"],
   "spreads": [
-    { "spread_index": 0, "left": {"kind":"cover_image"}, "right": {"kind":"title_page"} }
+    { "spread_index": 0, "left": { "kind": "cover_image" }, "right": { "kind": "title_page" } }
   ],
   "generation_sources": {
     "blueprint": "maf",
@@ -102,41 +211,33 @@ Runs full storybook workflow.
 }
 ```
 
-## Environment
+### Error Codes
 
-Copy and fill:
+| Code | Meaning |
+|------|---------|
+| `422` | Missing `user_prompt` or invalid schema |
+| `502` | Upstream failure in OpenAI/Replicate/Character backend |
+| `500` | Unhandled server exception |
+
+## Quick Test Commands
+
+Health:
 
 ```bash
-cp .env.example .env
+curl http://127.0.0.1:8020/health
 ```
 
-Key variables:
-- `OPENAI_API_KEY` (required)
-- `OPENAI_MODEL` (default `gpt-4o-mini`)
-- `REPLICATE_API_TOKEN` (required)
-- `CHARACTER_BACKEND_BASE_URL` (default `http://127.0.0.1:8000`)
-- `CHARACTER_BACKEND_RPC_PATH` (default `/a2a`)
-- `CHARACTER_BACKEND_USE_PROTOCOL` (default `true`)
-- `A2A_PUBLIC_BASE_URL` (default `http://127.0.0.1:8020`)
-
-Model note:
-- Use raw OpenAI model IDs (for example `gpt-4o-mini`), not provider-prefixed IDs like `openai/gpt-4o-mini`.
-
-## Run
+Agent card:
 
 ```bash
-cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/maf-story-book-maker
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
+curl http://127.0.0.1:8020/.well-known/agent.json
 ```
 
-## Direct Test
+Direct storybook creation:
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:8020/api/v1/stories/create" \
-  -H "content-type: application/json" \
+curl -X POST http://127.0.0.1:8020/api/v1/stories/create \
+  -H "Content-Type: application/json" \
   -d '{
     "user_prompt": "A moon explorer rescues a lost archive",
     "max_characters": 2,
@@ -145,11 +246,11 @@ curl -sS -X POST "http://127.0.0.1:8020/api/v1/stories/create" \
   }'
 ```
 
-## A2A Test
+A2A storybook creation:
 
 ```bash
-curl -sS -X POST "http://127.0.0.1:8020/a2a" \
-  -H "content-type: application/json" \
+curl -X POST http://127.0.0.1:8020/a2a \
+  -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": "story-1",
@@ -172,3 +273,21 @@ curl -sS -X POST "http://127.0.0.1:8020/a2a" \
     }
   }'
 ```
+
+## Run Tests
+
+```bash
+cd backend/maf-story-book-maker
+python -m pytest -q
+```
+
+## Troubleshooting
+
+| Problem | Check |
+|---------|-------|
+| `Replicate generation failed` | Verify `REPLICATE_API_TOKEN`, model name, account limits |
+| `Vision description failed` | Verify `OPENAI_API_KEY`, vision model access, `image_data` format |
+| Character generation timeout | Increase `CHARACTER_BACKEND_TIMEOUT_SECONDS`, check character backend health |
+| A2A `Method not found` | Use `message/send` (not `tasks/send`) — requires a2a-sdk >= 0.3.5 |
+| Empty story output | Check MAF agent logs, verify `OPENAI_MODEL` is a valid raw model ID |
+| Character backend unreachable | Verify `CHARACTER_BACKEND_BASE_URL` and that the character service is running |

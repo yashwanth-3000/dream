@@ -1,0 +1,11 @@
+.env
+.venv
+.venv_a2a_test
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.swp
+tests/
+dream_backend.egg-info/
