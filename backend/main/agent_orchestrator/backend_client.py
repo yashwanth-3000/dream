@@ -5,6 +5,7 @@ import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -20,6 +21,32 @@ except Exception as exc:  # pragma: no cover - runtime import guard
     A2A_IMPORT_ERROR: Exception | None = exc
 else:
     A2A_IMPORT_ERROR = None
+
+try:
+    from a2a.client.transports.jsonrpc import JsonRpcTransport
+    from a2a.types import (
+        Message as A2AMessage,
+        MessageSendConfiguration,
+        MessageSendParams,
+        Part as A2APart,
+        Role as A2ARole,
+        TaskArtifactUpdateEvent,
+        TaskStatusUpdateEvent,
+        TextPart as A2ATextPart,
+    )
+except Exception as exc:  # pragma: no cover - runtime import guard
+    JsonRpcTransport = None  # type: ignore[assignment]
+    A2AMessage = None  # type: ignore[assignment]
+    MessageSendConfiguration = None  # type: ignore[assignment]
+    MessageSendParams = None  # type: ignore[assignment]
+    A2APart = None  # type: ignore[assignment]
+    A2ARole = None  # type: ignore[assignment]
+    TaskArtifactUpdateEvent = None  # type: ignore[assignment]
+    TaskStatusUpdateEvent = None  # type: ignore[assignment]
+    A2ATextPart = None  # type: ignore[assignment]
+    A2A_SDK_IMPORT_ERROR: Exception | None = exc
+else:
+    A2A_SDK_IMPORT_ERROR = None
 
 
 class A2ABackendError(RuntimeError):
@@ -45,65 +72,47 @@ class A2ABackendClient:
         return result.payload
 
     async def create_character(self, payload: dict[str, Any]) -> BackendCallResult:
-        if self._settings.a2a_use_protocol:
-            return await self._invoke_via_a2a(operation="create", payload=payload)
-        return await self._post_json(self._settings.a2a_create_url, payload)
+        self._require_a2a_enabled(self._settings.a2a_use_protocol, "A2A_USE_PROTOCOL")
+        return await self._invoke_via_a2a(operation="create", payload=payload)
 
     async def regenerate_image(self, payload: dict[str, Any]) -> BackendCallResult:
-        if self._settings.a2a_use_protocol:
-            return await self._invoke_via_a2a(operation="regenerate", payload=payload)
-        return await self._post_json(self._settings.a2a_regenerate_url, payload)
+        self._require_a2a_enabled(self._settings.a2a_use_protocol, "A2A_USE_PROTOCOL")
+        return await self._invoke_via_a2a(operation="regenerate", payload=payload)
 
     async def create_storybook(self, payload: dict[str, Any]) -> BackendCallResult:
-        if self._settings.a2a_story_use_protocol:
-            return await self._invoke_story_via_a2a(operation="story_create", payload=payload)
-        return await self._post_json(self._settings.a2a_story_create_url, payload)
+        self._require_a2a_enabled(self._settings.a2a_story_use_protocol, "A2A_STORY_USE_PROTOCOL")
+        return await self._invoke_story_via_a2a(operation="story_create", payload=payload)
 
     async def storybook_health(self) -> BackendCallResult:
-        if self._settings.a2a_story_use_protocol:
-            return await self._invoke_story_via_a2a(
-                operation="healthcheck",
-                payload={"operation": "healthcheck"},
-            )
-        return await self._get_json(f"{self._settings.a2a_story_backend_base_url.rstrip('/')}/health")
+        self._require_a2a_enabled(self._settings.a2a_story_use_protocol, "A2A_STORY_USE_PROTOCOL")
+        return await self._invoke_story_via_a2a(
+            operation="healthcheck",
+            payload={"operation": "healthcheck"},
+        )
 
     async def protocol_healthcheck(self) -> BackendCallResult:
-        if self._settings.a2a_use_protocol:
-            return await self._invoke_via_a2a(
-                operation="healthcheck",
-                payload={"operation": "healthcheck"},
-            )
-        return await self._get_json(f"{self._settings.a2a_backend_base_url.rstrip('/')}/health")
+        self._require_a2a_enabled(self._settings.a2a_use_protocol, "A2A_USE_PROTOCOL")
+        return await self._invoke_via_a2a(
+            operation="healthcheck",
+            payload={"operation": "healthcheck"},
+        )
 
     async def stream_operation(
         self,
         operation: str,
         payload: dict[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        if self._settings.a2a_use_protocol:
-            async for event in self._stream_via_a2a(operation=operation, payload=payload):
-                yield event
-            return
+        self._require_a2a_enabled(self._settings.a2a_use_protocol, "A2A_USE_PROTOCOL")
+        async for event in self._stream_via_a2a(operation=operation, payload=payload):
+            yield event
 
-        # Non-A2A fallback: emit a compact pseudo-stream with start/final.
-        yield {
-            "type": "status",
-            "message": "A2A protocol disabled; using HTTP fallback.",
-            "endpoint": self._settings.a2a_create_url
-            if operation == "create"
-            else self._settings.a2a_regenerate_url,
-        }
-        result = (
-            await self._post_json(self._settings.a2a_create_url, payload)
-            if operation == "create"
-            else await self._post_json(self._settings.a2a_regenerate_url, payload)
-        )
-        yield {
-            "type": "final",
-            "endpoint": result.endpoint,
-            "status_code": result.status_code,
-            "payload": result.payload,
-        }
+    async def stream_storybook_operation(
+        self,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        self._require_a2a_enabled(self._settings.a2a_story_use_protocol, "A2A_STORY_USE_PROTOCOL")
+        async for event in self._stream_story_via_a2a(operation="story_create", payload=payload):
+            yield event
 
     async def _invoke_via_a2a(self, operation: str, payload: dict[str, Any]) -> BackendCallResult:
         if A2A_IMPORT_ERROR is not None or AFMessage is None or A2AAgent is None:
@@ -257,6 +266,185 @@ class A2ABackendClient:
             "payload": parsed_payload,
         }
 
+    async def _stream_story_via_a2a(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        if (
+            A2A_SDK_IMPORT_ERROR is not None
+            or JsonRpcTransport is None
+            or A2AMessage is None
+            or MessageSendConfiguration is None
+            or MessageSendParams is None
+            or A2APart is None
+            or A2ARole is None
+            or A2ATextPart is None
+        ):
+            raise A2ABackendError(
+                "A2A story streaming client import failed: "
+                f"{A2A_SDK_IMPORT_ERROR}. semconv_patched={PATCHED_SEMCONV_ATTRS}"
+            )
+
+        summary_text = (
+            str(payload.get("user_prompt") or "").strip()
+            or f"{operation} storybook request"
+        )
+
+        metadata: dict[str, Any] = {
+            "operation": operation,
+            "payload": payload,
+        }
+
+        request_message = A2AMessage(
+            role=A2ARole.user,
+            message_id=str(uuid4()),
+            metadata=metadata,
+            parts=[
+                A2APart(
+                    root=A2ATextPart(
+                        text=summary_text,
+                        metadata=metadata,
+                    )
+                )
+            ],
+        )
+        request_config = MessageSendConfiguration(
+            blocking=True,
+            accepted_output_modes=["application/json", "text/plain"],
+        )
+        request_params = MessageSendParams(
+            message=request_message,
+            configuration=request_config,
+            metadata=metadata,
+        )
+
+        final_payload: dict[str, Any] | None = None
+        last_known_state = "unknown"
+        result_artifact_parts: list[str] = []
+        result_artifact_seen = False
+
+        timeout_seconds = self._settings.a2a_timeout_seconds
+        timeout = httpx.Timeout(
+            connect=timeout_seconds,
+            read=None,
+            write=timeout_seconds,
+            pool=timeout_seconds,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
+                transport = JsonRpcTransport(
+                    httpx_client=http_client,
+                    url=self._settings.a2a_story_rpc_url,
+                )
+                async for stream_event in transport.send_message_streaming(request_params):
+                    if (
+                        TaskStatusUpdateEvent is not None
+                        and isinstance(stream_event, TaskStatusUpdateEvent)
+                    ):
+                        raw_state = str(stream_event.status.state)
+                        state = raw_state.split(".")[-1].strip().lower() or raw_state
+                        last_known_state = state
+                        status_message = self._extract_status_message_text(stream_event)
+                        message = (
+                            status_message
+                            or f"A2A task state changed to {state}."
+                        )
+                        yield {
+                            "type": "status",
+                            "state": state,
+                            "message": message,
+                        }
+                        continue
+
+                    if (
+                        TaskArtifactUpdateEvent is not None
+                        and isinstance(stream_event, TaskArtifactUpdateEvent)
+                    ):
+                        artifact = stream_event.artifact
+                        artifact_name = str(artifact.name or "").strip().lower()
+                        text_parts = self._extract_text_parts_from_a2a_parts(artifact.parts)
+
+                        if artifact_name == "storybook-workflow-progress":
+                            for text_part in text_parts:
+                                progress_payload = self._parse_json_like_text(text_part)
+                                if (
+                                    isinstance(progress_payload, dict)
+                                    and str(progress_payload.get("kind") or "").lower() == "progress"
+                                ):
+                                    yield {
+                                        "type": "progress",
+                                        "stage": str(progress_payload.get("stage") or "progress"),
+                                        "message": str(progress_payload.get("message") or "Progress update."),
+                                        "data": (
+                                            progress_payload.get("data")
+                                            if isinstance(progress_payload.get("data"), dict)
+                                            else None
+                                        ),
+                                    }
+                                else:
+                                    yield {
+                                        "type": "update",
+                                        "message": text_part,
+                                    }
+                            continue
+
+                        if artifact_name == "storybook-workflow-result":
+                            result_artifact_seen = True
+                            for text_part in text_parts:
+                                result_artifact_parts.append(text_part)
+
+                            parsed_result = self._parse_json_like_text("".join(result_artifact_parts))
+                            if isinstance(parsed_result, dict):
+                                final_payload = parsed_result
+                            continue
+
+                        if artifact_name == "storybook-workflow-error":
+                            error_payload = self._parse_json_like_text("".join(text_parts))
+                            if isinstance(error_payload, dict):
+                                detail = str(error_payload.get("detail") or "Unknown error.")
+                            else:
+                                detail = " ".join(text_parts).strip() or "Unknown error."
+                            raise A2ABackendError(
+                                f"A2A story backend reported an error artifact: {detail}"
+                            )
+
+                        combined = " ".join(part for part in text_parts if part.strip())
+                        if combined:
+                            yield {
+                                "type": "update",
+                                "message": combined,
+                            }
+                        continue
+
+                    fallback_message = f"A2A story streaming update received ({type(stream_event).__name__})."
+                    yield {
+                        "type": "status",
+                        "state": last_known_state,
+                        "message": fallback_message,
+                    }
+        except Exception as exc:
+            raise A2ABackendError(
+                f"A2A story streaming call failed for {self._settings.a2a_story_rpc_url}: {exc}"
+            ) from exc
+
+        if result_artifact_seen and final_payload is None:
+            raise A2ABackendError(
+                "A2A story stream received result artifact but could not parse it as JSON."
+            )
+
+        if final_payload is None:
+            raise A2ABackendError(
+                "A2A story stream ended without a parsed final payload artifact."
+            )
+
+        yield {
+            "type": "final",
+            "endpoint": self._settings.a2a_story_rpc_url,
+            "status_code": 200,
+            "payload": final_payload,
+        }
+
     def _summarize_stream_update(self, update: Any) -> str:
         texts: list[str] = []
         contents = getattr(update, "contents", None)
@@ -313,6 +501,32 @@ class A2ABackendClient:
 
         return None
 
+    def _extract_status_message_text(self, event: Any) -> str:
+        status = getattr(event, "status", None)
+        message_obj = getattr(status, "message", None) if status is not None else None
+        parts = getattr(message_obj, "parts", None)
+        if not isinstance(parts, list):
+            return ""
+
+        chunks: list[str] = []
+        for part in parts:
+            root = getattr(part, "root", None)
+            text_value = getattr(root, "text", None)
+            if isinstance(text_value, str) and text_value.strip():
+                chunks.append(text_value.strip())
+        return " ".join(chunks).strip()
+
+    def _extract_text_parts_from_a2a_parts(self, parts: list[Any]) -> list[str]:
+        texts: list[str] = []
+        for part in parts:
+            root = getattr(part, "root", None)
+            text_value = getattr(root, "text", None)
+            if isinstance(text_value, str):
+                stripped = text_value.strip()
+                if stripped:
+                    texts.append(stripped)
+        return texts
+
     def _parse_json_like_text(self, text: str) -> dict[str, Any] | None:
         if not text:
             return None
@@ -344,6 +558,11 @@ class A2ABackendClient:
                 pass
 
         return None
+
+    def _require_a2a_enabled(self, enabled: bool, flag_name: str) -> None:
+        if enabled:
+            return
+        raise A2ABackendError(f"A2A-only mode: {flag_name} must be true.")
 
     async def _post_json(self, url: str, payload: dict[str, Any]) -> BackendCallResult:
         timeout = httpx.Timeout(self._settings.a2a_timeout_seconds)

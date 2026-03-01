@@ -15,7 +15,7 @@ from agent_storybook.schemas import (
     StoryRightPage,
 )
 from agent_storybook.services.replicate_service import ReplicateGenerationError
-from agent_storybook.story_workflow import StoryBookWorkflow, StoryWorkflowError
+from agent_storybook.story_workflow import CharacterA2AClient, StoryBookWorkflow, StoryWorkflowError
 
 
 class StubBlueprintAgent:
@@ -221,6 +221,72 @@ def test_choose_workflow_prompt_only_and_reference_enriched_and_forced():
 
     forced = build_payload(with_references=True, force_workflow="prompt_only")
     assert StoryBookWorkflow.choose_workflow(forced) == "prompt_only"
+
+
+def test_character_client_prefers_a2a_when_enabled(monkeypatch: pytest.MonkeyPatch):
+    settings = SimpleNamespace(
+        character_backend_use_protocol=True,
+        character_backend_timeout_seconds=30.0,
+        character_backend_rpc_url="http://127.0.0.1:8000/a2a",
+        character_backend_create_url="http://127.0.0.1:8000/api/v1/characters/create",
+    )
+    client = CharacterA2AClient(settings=settings)
+    calls: dict[str, dict[str, object]] = {}
+
+    async def fake_invoke_via_a2a(payload: dict[str, object]) -> dict[str, object]:
+        calls["a2a"] = payload
+        return {"generated_images": ["https://chars.local/nova.png"]}
+
+    async def fake_invoke_via_http(payload: dict[str, object]) -> dict[str, object]:
+        calls["http"] = payload
+        return {"generated_images": ["https://chars.local/nova.png"]}
+
+    monkeypatch.setattr(client, "_invoke_via_a2a", fake_invoke_via_a2a)
+    monkeypatch.setattr(client, "_invoke_via_http", fake_invoke_via_http)
+
+    result = asyncio.run(
+        client.create_character_from_brief(
+            brief=CharacterBrief(name="Nova", brief="Lead explorer"),
+            payload=build_payload(with_references=False),
+        )
+    )
+
+    assert "a2a" in calls
+    assert "http" not in calls
+    assert result["generated_images"] == ["https://chars.local/nova.png"]
+
+
+def test_character_client_uses_http_when_protocol_disabled(monkeypatch: pytest.MonkeyPatch):
+    settings = SimpleNamespace(
+        character_backend_use_protocol=False,
+        character_backend_timeout_seconds=30.0,
+        character_backend_rpc_url="http://127.0.0.1:8000/a2a",
+        character_backend_create_url="http://127.0.0.1:8000/api/v1/characters/create",
+    )
+    client = CharacterA2AClient(settings=settings)
+    calls: dict[str, dict[str, object]] = {}
+
+    async def fake_invoke_via_a2a(payload: dict[str, object]) -> dict[str, object]:
+        calls["a2a"] = payload
+        return {"generated_images": ["https://chars.local/nova.png"]}
+
+    async def fake_invoke_via_http(payload: dict[str, object]) -> dict[str, object]:
+        calls["http"] = payload
+        return {"generated_images": ["https://chars.local/nova.png"]}
+
+    monkeypatch.setattr(client, "_invoke_via_a2a", fake_invoke_via_a2a)
+    monkeypatch.setattr(client, "_invoke_via_http", fake_invoke_via_http)
+
+    result = asyncio.run(
+        client.create_character_from_brief(
+            brief=CharacterBrief(name="Nova", brief="Lead explorer"),
+            payload=build_payload(with_references=False),
+        )
+    )
+
+    assert "http" in calls
+    assert "a2a" not in calls
+    assert result["generated_images"] == ["https://chars.local/nova.png"]
 
 
 def test_spread_contract_matches_exact_layout():

@@ -23,7 +23,6 @@ import {
   Eraser,
   ImagePlus,
   Loader2,
-  Palette,
   PenTool,
   Redo2,
   RotateCcw,
@@ -59,7 +58,6 @@ type CharacterDraftState = {
   mood: string;
   description: string;
   visualNotes: string;
-  palette: string[];
   drawings: UploadAsset[];
   references: UploadAsset[];
 };
@@ -71,18 +69,8 @@ type DrawingMode = "draw" | "erase";
 /* ------------------------------------------------------------------ */
 
 const MAX_UPLOADS_PER_BUCKET = 8;
-const PALETTE_CHOICES = [
-  "#f97316",
-  "#facc15",
-  "#1d4ed8",
-  "#22c55e",
-  "#14b8a6",
-  "#f43f5e",
-  "#6366f1",
-  "#0f172a",
-];
-const DEFAULT_PALETTE = PALETTE_CHOICES.slice(0, 3);
 const FALLBACK_AVATAR = dashboardCharacters[0]?.avatar ?? "";
+const CHARACTER_API_ROUTE = "/api/character-test?target=main";
 
 const CANVAS_COLORS = [
   "#000000",
@@ -117,10 +105,49 @@ function buildInitialDraft(ageBand = "5-8"): CharacterDraftState {
     mood: "",
     description: "",
     visualNotes: "",
-    palette: [...DEFAULT_PALETTE],
     drawings: [],
     references: [],
   };
+}
+
+function cleanText(value: string) {
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function hasAnyValue(entry: Record<string, string | undefined>) {
+  return Object.values(entry).some(Boolean);
+}
+
+function unwrapWorkflowPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const backendResponse = (payload as { backend_response?: unknown }).backend_response;
+  if (backendResponse && typeof backendResponse === "object") {
+    return backendResponse;
+  }
+  return payload;
+}
+
+function extractErrorDetail(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "";
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === "string" && detail.trim().length > 0) return detail;
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error === "string" && error.trim().length > 0) return error;
+  return "";
+}
+
+function buildUserPrompt(draft: CharacterDraftState, name: string, description: string) {
+  const promptBlocks = [
+    `Character name: ${name}`,
+    draft.role.trim() ? `Role: ${draft.role.trim()}` : "",
+    draft.mood.trim() ? `Mood: ${draft.mood.trim()}` : "",
+    `Age band: ${draft.ageBand || "5-8"}`,
+    `Core description: ${description}`,
+    draft.visualNotes.trim() ? `Visual direction: ${draft.visualNotes.trim()}` : "",
+  ].filter(Boolean);
+
+  return promptBlocks.join("\n");
 }
 
 function revokeAssets(assets: UploadAsset[]) {
@@ -686,19 +713,10 @@ function LivePreviewCard({ draft }: { draft: CharacterDraftState }) {
           <p className="mt-0.5 truncate text-xs font-medium text-white/70">
             {draft.role || "Role"}
           </p>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center">
             <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
               {draft.ageBand || "5-8"}
             </span>
-            <div className="flex gap-0.5">
-              {draft.palette.map((color) => (
-                <span
-                  key={color}
-                  className="size-2.5 rounded-full ring-1 ring-white/30"
-                  style={{ backgroundColor: color }}
-                />
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -789,21 +807,6 @@ export default function DashboardNewCharacterPage() {
     });
   };
 
-  const handlePaletteToggle = (color: string) => {
-    setDraft((prev) => {
-      const exists = prev.palette.includes(color);
-      if (exists) {
-        if (prev.palette.length === 1) return prev;
-        return { ...prev, palette: prev.palette.filter((entry) => entry !== color) };
-      }
-
-      if (prev.palette.length < 3) {
-        return { ...prev, palette: [...prev.palette, color] };
-      }
-      return { ...prev, palette: [...prev.palette.slice(1), color] };
-    });
-  };
-
   const handleClear = () => {
     setDraft((prev) => {
       const nextAgeBand = prev.ageBand || "5-8";
@@ -836,21 +839,83 @@ export default function DashboardNewCharacterPage() {
       setIsSubmitting(true);
       setFormError("");
 
+      const worldReferencesPayload = (
+        await Promise.all(
+          draft.references.map(async (asset) => ({
+            title: cleanText(asset.file.name),
+            image_data: await fileToDataUrl(asset.file),
+          }))
+        )
+      ).filter(hasAnyValue);
+
+      const drawingsPayload = (
+        await Promise.all(
+          draft.drawings.map(async (asset) => ({
+            notes: cleanText(`${name} drawing`),
+            image_data: await fileToDataUrl(asset.file),
+          }))
+        )
+      ).filter(hasAnyValue);
+
+      const requestPayload = {
+        user_prompt: buildUserPrompt(draft, name, description),
+        world_references: worldReferencesPayload,
+        character_drawings: drawingsPayload,
+      };
+
+      const response = await fetch(CHARACTER_API_ROUTE, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
+
+      const responseText = await response.text();
+      const parsedResponse = responseText.trim()
+        ? (() => {
+            try {
+              return JSON.parse(responseText) as unknown;
+            } catch {
+              return { raw: responseText };
+            }
+          })()
+        : null;
+
+      if (!response.ok) {
+        const detail = extractErrorDetail(parsedResponse);
+        throw new Error(
+          detail
+            ? `Character generation failed: ${detail}`
+            : `Character generation failed with status ${response.status}.`
+        );
+      }
+
+      const workflowPayload = unwrapWorkflowPayload(parsedResponse);
+      const responseImage =
+        workflowPayload && typeof workflowPayload === "object"
+          ? (workflowPayload as { generated_images?: string[] }).generated_images?.[0]
+          : undefined;
+      const backstory =
+        workflowPayload && typeof workflowPayload === "object"
+          ? (workflowPayload as {
+              backstory?: { narrative_backstory?: string; archetype?: string; origin?: string };
+            }).backstory
+          : undefined;
+
       const avatarSource =
         draft.drawings[0]?.file ?? draft.references[0]?.file ?? null;
-      const avatar = avatarSource
+      const fallbackAvatar = avatarSource
         ? await fileToDataUrl(avatarSource)
         : FALLBACK_AVATAR;
+      const avatar = responseImage || fallbackAvatar;
 
       appendStoredCharacter({
         id: makeLocalId("char_user"),
         name,
-        role: draft.role.trim() || "Story Companion",
+        role: draft.role.trim() || backstory?.archetype || "Story Companion",
         ageBand: draft.ageBand || "5-8",
         mood: draft.mood.trim() || "Curious and kind",
         avatar,
-        palette: draft.palette.length ? draft.palette : [...DEFAULT_PALETTE],
-        description,
+        description: backstory?.narrative_backstory || description,
         visualNotes: draft.visualNotes.trim(),
         createdAt: new Date().toISOString(),
       });
@@ -863,8 +928,10 @@ export default function DashboardNewCharacterPage() {
         router.push("/dashboard/characters");
         router.refresh();
       }, 800);
-    } catch {
-      setFormError("Could not save character. Please try again.");
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : "Could not save character. Please try again."
+      );
       setIsSubmitting(false);
     }
   };
@@ -1065,38 +1132,10 @@ export default function DashboardNewCharacterPage() {
                         visualNotes: e.target.value,
                       }))
                     }
-                    placeholder="Example: soft watercolor style, rounded shapes, warm sunset palette..."
+                    placeholder="Example: soft watercolor style, rounded shapes, glowing evening light..."
                     rows={2}
                     className="w-full resize-none rounded-xl border border-border/70 bg-white px-3.5 py-2.5 text-sm font-medium leading-relaxed text-foreground outline-none transition placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-2 focus:ring-primary/10 dark:bg-[#0a0a0a]"
                   />
-                </div>
-
-                {/* Palette */}
-                <div className="space-y-2.5 rounded-xl border border-border/50 bg-muted/20 p-3.5 dark:bg-white/[0.02]">
-                  <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    <Palette className="size-3.5" />
-                    Color Palette (Pick up to 3)
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    {PALETTE_CHOICES.map((color) => {
-                      const selected = draft.palette.includes(color);
-                      return (
-                        <button
-                          key={color}
-                          type="button"
-                          onClick={() => handlePaletteToggle(color)}
-                          className={cn(
-                            "size-9 rounded-full border-2 transition-all",
-                            selected
-                              ? "scale-110 border-foreground shadow-md ring-2 ring-primary/20 ring-offset-2 ring-offset-background"
-                              : "border-border/50 hover:scale-105 hover:border-foreground/30"
-                          )}
-                          style={{ backgroundColor: color }}
-                          aria-label={`Palette color ${color}`}
-                        />
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             </motion.div>

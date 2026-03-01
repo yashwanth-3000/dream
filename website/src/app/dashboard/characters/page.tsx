@@ -301,15 +301,6 @@ export default function DashboardCharactersPage() {
                           <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
                             {char.ageBand}
                           </span>
-                          <div className="flex gap-0.5">
-                            {char.palette.map((color) => (
-                              <span
-                                key={color}
-                                className="size-2.5 rounded-full ring-1 ring-white/30"
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
                         </div>
                       </motion.div>
                     </div>
@@ -356,12 +347,12 @@ export default function DashboardCharactersPage() {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
                   transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3, ease: easing }}
-                  className="relative w-full max-w-lg overflow-hidden rounded-3xl shadow-2xl"
+                  className="relative my-auto flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-3xl shadow-2xl"
                   style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {/* Hero banner */}
-                  <div className="relative h-52 overflow-hidden sm:h-60">
+                  <div className="relative h-52 shrink-0 overflow-hidden sm:h-60">
                     <img
                       src={selectedCharacter.avatar}
                       alt=""
@@ -388,7 +379,7 @@ export default function DashboardCharactersPage() {
 
                   {/* Body */}
                   <motion.div
-                    className="relative -mt-12 px-6 pb-6"
+                    className="relative -mt-12 flex min-h-0 flex-1 flex-col px-6 pb-6"
                     initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.28, delay: 0.05, ease: easing }}
@@ -413,37 +404,33 @@ export default function DashboardCharactersPage() {
 
                     {/* Meta pills */}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      {[`Ages ${selectedCharacter.ageBand}`, selectedCharacter.mood].map((label) => (
-                        <span
-                          key={label}
-                          className="rounded-full px-3 py-1.5 text-xs font-medium"
-                          style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
-                        >
-                          {label}
-                        </span>
-                      ))}
                       <span
-                        className="flex items-center gap-1.5 rounded-full px-3 py-1.5"
-                        style={{ border: "1px solid #dbc9b7", background: "#f0e8dc" }}
+                        className="rounded-full px-3 py-1.5 text-xs font-medium"
+                        style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
                       >
-                        {selectedCharacter.palette.map((color) => (
-                          <span
-                            key={color}
-                            className="size-3.5 rounded-full ring-1 ring-black/10"
-                            style={{ backgroundColor: color }}
-                          />
-                        ))}
+                        {`Ages ${selectedCharacter.ageBand}`}
+                      </span>
+                      <span
+                        className="max-w-full truncate rounded-full px-3 py-1.5 text-xs font-medium"
+                        style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
+                        title={selectedCharacter.mood}
+                      >
+                        {selectedCharacter.mood}
                       </span>
                     </div>
 
-                    {"description" in selectedCharacter && selectedCharacter.description && (
-                      <p className="mt-4 text-sm leading-relaxed" style={{ color: "#6f5a4a" }}>
-                        {selectedCharacter.description}
-                      </p>
+                    {"description" in selectedCharacter && selectedCharacter.description ? (
+                      <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                        <p className="text-sm leading-relaxed" style={{ color: "#6f5a4a" }}>
+                          {selectedCharacter.description}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-4" />
                     )}
 
                     {/* Actions */}
-                    <div className="mt-5 flex flex-wrap gap-2">
+                    <div className="mt-5 flex shrink-0 flex-wrap gap-2 border-t pt-4" style={{ borderColor: "#dbc9b7" }}>
                       <motion.button
                         type="button"
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}

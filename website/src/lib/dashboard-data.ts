@@ -177,7 +177,6 @@ export type DashboardCharacter = {
   ageBand: string;
   mood: string;
   avatar: string;
-  palette: string[];
 };
 
 export const dashboardCharacters: DashboardCharacter[] = [
@@ -188,7 +187,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-10",
     mood: "Brave and hopeful",
     avatar: "https://images.unsplash.com/photo-1635863138275-d9b33299680b?w=600&auto=format&fit=crop&q=80",
-    palette: ["#0057B8", "#DC143C", "#FFD700"],
   },
   {
     id: "char_002",
@@ -197,7 +195,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "6-9",
     mood: "Witty and courageous",
     avatar: "https://images.unsplash.com/photo-1521714161819-15534968fc5f?w=600&auto=format&fit=crop&q=80",
-    palette: ["#E62429", "#1B3A6B", "#FFFFFF"],
   },
   {
     id: "char_003",
@@ -206,7 +203,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-10",
     mood: "Determined and clever",
     avatar: "https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?w=600&auto=format&fit=crop&q=80",
-    palette: ["#1C1C1C", "#FFC107", "#333333"],
   },
   {
     id: "char_004",
@@ -215,7 +211,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-10",
     mood: "Strong and compassionate",
     avatar: "https://images.unsplash.com/photo-1608889825205-eebdb9fc5806?w=600&auto=format&fit=crop&q=80",
-    palette: ["#C41E3A", "#003366", "#FFD700"],
   },
   {
     id: "char_005",
@@ -224,7 +219,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Magical and free",
     avatar: "https://images.unsplash.com/photo-1551269901-5c5e14c25df7?w=600&auto=format&fit=crop&q=80",
-    palette: ["#89CFF0", "#B6E3F4", "#FFFFFF"],
   },
   {
     id: "char_006",
@@ -233,7 +227,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Bold and loyal",
     avatar: "https://images.unsplash.com/photo-1446776709462-d6b525c57bd3?w=600&auto=format&fit=crop&q=80",
-    palette: ["#6A5ACD", "#32CD32", "#FFFFFF"],
   },
   {
     id: "char_007",
@@ -242,7 +235,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Playful and loyal",
     avatar: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png",
-    palette: ["#FFD700", "#FF4500", "#3B2F2F"],
   },
   {
     id: "char_008",
@@ -251,7 +243,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "6-9",
     mood: "Smart and fearless",
     avatar: "https://images.unsplash.com/photo-1608889175123-8ee362201f81?w=600&auto=format&fit=crop&q=80",
-    palette: ["#B22222", "#FFD700", "#1C1C1C"],
   },
   {
     id: "char_009",
@@ -260,7 +251,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-8",
     mood: "Adventurous and kind",
     avatar: "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?w=600&auto=format&fit=crop&q=80",
-    palette: ["#E2725B", "#00CED1", "#228B22"],
   },
   {
     id: "char_010",
@@ -269,7 +259,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "6-9",
     mood: "Energetic and pure-hearted",
     avatar: "https://images.unsplash.com/photo-1601645191163-3fc0d5d64e35?w=600&auto=format&fit=crop&q=80",
-    palette: ["#FF6B00", "#1E90FF", "#000000"],
   },
   {
     id: "char_011",
@@ -278,7 +267,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Curious and creative",
     avatar: "https://images.unsplash.com/photo-1513151233558-d860c5398176?w=600&auto=format&fit=crop&q=80",
-    palette: ["#DA70D6", "#FFD700", "#9370DB"],
   },
   {
     id: "char_012",
@@ -287,7 +275,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Loyal and caring",
     avatar: "https://images.unsplash.com/photo-1535930749574-1399327ce78f?w=600&auto=format&fit=crop&q=80",
-    palette: ["#8B4513", "#FFD700", "#FFFFFF"],
   },
   {
     id: "char_013",
@@ -296,7 +283,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-10",
     mood: "Noble and fierce",
     avatar: "https://images.unsplash.com/photo-1562577309-2592ab84b1bc?w=600&auto=format&fit=crop&q=80",
-    palette: ["#1C1C1C", "#8B5CF6", "#C0C0C0"],
   },
   {
     id: "char_014",
@@ -305,7 +291,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "6-9",
     mood: "Quick-witted and heroic",
     avatar: "https://images.unsplash.com/photo-1461696114087-397271a7aedc?w=600&auto=format&fit=crop&q=80",
-    palette: ["#DC143C", "#FFD700", "#8B0000"],
   },
   {
     id: "char_015",
@@ -314,7 +299,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Brave and playful",
     avatar: "https://images.unsplash.com/photo-1546182990-dffeafbe841d?w=600&auto=format&fit=crop&q=80",
-    palette: ["#DAA520", "#CD853F", "#8B4513"],
   },
   {
     id: "char_016",
@@ -323,7 +307,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "5-10",
     mood: "Noble and determined",
     avatar: "https://images.unsplash.com/photo-1569003339405-ea396a5a8a90?w=600&auto=format&fit=crop&q=80",
-    palette: ["#002868", "#BF0A30", "#FFFFFF"],
   },
   {
     id: "char_017",
@@ -332,7 +315,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "4-7",
     mood: "Curious and friendly",
     avatar: "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=600&auto=format&fit=crop&q=80",
-    palette: ["#FF69B4", "#8A2BE2", "#FFA500"],
   },
   {
     id: "char_018",
@@ -341,7 +323,6 @@ export const dashboardCharacters: DashboardCharacter[] = [
     ageBand: "6-9",
     mood: "Mighty and warm-hearted",
     avatar: "https://images.unsplash.com/photo-1605727216801-e27ce1d0cc28?w=600&auto=format&fit=crop&q=80",
-    palette: ["#4169E1", "#C0C0C0", "#DC143C"],
   },
 ];
 

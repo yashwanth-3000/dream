@@ -28,6 +28,7 @@ class StoryBookA2AExecutor(AgentExecutor):
         task_id = context.task_id or str(uuid.uuid4())
         context_id = context.context_id or str(uuid.uuid4())
         updater = TaskUpdater(event_queue=event_queue, task_id=task_id, context_id=context_id)
+        progress_artifact_id = f"{task_id}-progress"
 
         try:
             await updater.submit()
@@ -42,7 +43,32 @@ class StoryBookA2AExecutor(AgentExecutor):
                 }
             else:
                 request = StoryBookCreationRequest.model_validate(payload)
-                workflow = StoryBookWorkflow(settings=self._settings)
+
+                await self._publish_progress(
+                    updater=updater,
+                    artifact_id=progress_artifact_id,
+                    stage="request_received",
+                    message="Story create request received by storybook A2A executor.",
+                    data={
+                        "storybook_rpc": self._settings.a2a_rpc_url,
+                        "character_backend_rpc": self._settings.character_backend_rpc_url,
+                        "max_characters": request.max_characters,
+                    },
+                )
+
+                async def progress_reporter(event: dict[str, Any]) -> None:
+                    await self._publish_progress(
+                        updater=updater,
+                        artifact_id=progress_artifact_id,
+                        stage=str(event.get("stage") or "progress"),
+                        message=str(event.get("message") or "Progress update"),
+                        data=event.get("data") if isinstance(event.get("data"), dict) else None,
+                    )
+
+                workflow = StoryBookWorkflow(
+                    settings=self._settings,
+                    progress_reporter=progress_reporter,
+                )
                 result_payload = (await workflow.run(request)).model_dump(mode="json")
 
             await updater.add_artifact(
@@ -158,6 +184,30 @@ class StoryBookA2AExecutor(AgentExecutor):
             parts=[Part(root=TextPart(text=json.dumps(payload, ensure_ascii=True)))],
             append=False,
             last_chunk=True,
+        )
+
+    async def _publish_progress(
+        self,
+        updater: TaskUpdater,
+        artifact_id: str,
+        stage: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "kind": "progress",
+            "stage": stage,
+            "message": message,
+        }
+        if data:
+            payload["data"] = data
+
+        await updater.add_artifact(
+            artifact_id=artifact_id,
+            name="storybook-workflow-progress",
+            parts=[Part(root=TextPart(text=json.dumps(payload, ensure_ascii=True)))],
+            append=False,
+            last_chunk=False,
         )
 
 

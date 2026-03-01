@@ -10,7 +10,7 @@ A multi-agent storybook engine that generates short illustrated storybooks with 
 - `gpt-4.1-mini` — vision analysis of uploaded drawings/references
 - `openai/gpt-image-1.5` (Replicate) — cover + 5 scene illustration rendering
 
-## Architecture
+### Architecture
 
 <p align="center">
   <img src="architecture.svg" alt="MAF Story Book Maker Architecture" width="100%" />
@@ -54,7 +54,7 @@ A multi-agent storybook engine that generates short illustrated storybooks with 
 ## Project Layout
 
 ```text
-backend/maf-story-book-maker/
+backend/a2a-maf-story-book-maker/
 ├── agent_storybook/
 │   ├── main.py                    # FastAPI entrypoint
 │   ├── a2a_server.py              # A2A protocol routes + executor
@@ -78,7 +78,7 @@ backend/maf-story-book-maker/
 ## Setup
 
 ```bash
-cd backend/maf-story-book-maker
+cd backend/a2a-maf-story-book-maker
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -107,6 +107,8 @@ cp .env.example .env
 | `REPLICATE_OUTPUT_FORMAT` | No | `webp` | Output image format |
 | `REPLICATE_INPUT_FIDELITY` | No | `high` | Input fidelity level |
 | `REPLICATE_OUTPUT_COMPRESSION` | No | `90` | Output compression (0–100) |
+| `SCENE_IMAGE_TIMEOUT_SECONDS` | No | `70` | Per-scene image generation timeout in seconds |
+| `SCENE_IMAGE_RETRY_COUNT` | No | `1` | Retries after a failed/timed-out scene image generation |
 | `CHARACTER_BACKEND_BASE_URL` | No | `http://127.0.0.1:8000` | Character Maker backend URL |
 | `CHARACTER_BACKEND_RPC_PATH` | No | `/a2a` | Character Maker A2A RPC path |
 | `CHARACTER_BACKEND_USE_PROTOCOL` | No | `true` | Use A2A protocol for character calls |
@@ -121,7 +123,7 @@ cp .env.example .env
 ## Run Locally
 
 ```bash
-cd backend/maf-story-book-maker
+cd backend/a2a-maf-story-book-maker
 source .venv/bin/activate
 uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
 ```
@@ -277,7 +279,7 @@ curl -X POST http://127.0.0.1:8020/a2a \
 ## Run Tests
 
 ```bash
-cd backend/maf-story-book-maker
+cd backend/a2a-maf-story-book-maker
 python -m pytest -q
 ```
 

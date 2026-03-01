@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     def validate_provider_credentials(self) -> "Settings":
         self.openai_model = self._normalize_openai_model(self.openai_model)
 
+        if not self.a2a_use_protocol:
+            raise ValueError("A2A-only mode: A2A_USE_PROTOCOL must be true.")
+        if not self.a2a_story_use_protocol:
+            raise ValueError("A2A-only mode: A2A_STORY_USE_PROTOCOL must be true.")
+
         if self.agent_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required when AGENT_PROVIDER=openai.")

@@ -23,8 +23,6 @@ function isValidCharacter(value: unknown): value is StoredCharacter {
     typeof record.ageBand === "string" &&
     typeof record.mood === "string" &&
     typeof record.avatar === "string" &&
-    Array.isArray(record.palette) &&
-    record.palette.every((entry) => typeof entry === "string") &&
     typeof record.createdAt === "string"
   );
 }

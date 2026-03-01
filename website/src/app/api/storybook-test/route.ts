@@ -1,33 +1,41 @@
 import { NextResponse } from "next/server";
 
-const DEFAULT_STORYBOOK_BACKEND_BASE_URL = "http://127.0.0.1:8020";
 const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
 const TARGET_MAIN = "main";
-const TARGET_BACKEND = "backend";
-
-function storybookBackendBaseUrl() {
-  return (
-    process.env.STORYBOOK_API_BASE_URL ||
-    process.env.BACKEND_STORYBOOK_API_BASE_URL ||
-    DEFAULT_STORYBOOK_BACKEND_BASE_URL
-  ).replace(/\/+$/, "");
-}
 
 function mainBaseUrl() {
   return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(/\/+$/, "");
 }
 
 function resolveTarget(url: URL) {
-  const target = (url.searchParams.get("target") || TARGET_MAIN).toLowerCase();
-  return target === TARGET_BACKEND ? TARGET_BACKEND : TARGET_MAIN;
+  return (url.searchParams.get("target") || TARGET_MAIN).toLowerCase();
+}
+
+function shouldStream(url: URL) {
+  const raw = (url.searchParams.get("stream") || "").toLowerCase().trim();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+function a2aOnlyTargetError(target: string) {
+  return NextResponse.json(
+    {
+      detail: "A2A-only mode: Storybook test endpoint only supports target=main.",
+      target,
+      allowed_target: TARGET_MAIN,
+    },
+    { status: 400 }
+  );
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const target = resolveTarget(url);
-  const baseUrl = target === TARGET_MAIN ? mainBaseUrl() : storybookBackendBaseUrl();
-  const healthPath =
-    target === TARGET_MAIN ? "/api/v1/orchestrate/storybook-health" : "/health";
+  if (target !== TARGET_MAIN) {
+    return a2aOnlyTargetError(target);
+  }
+
+  const baseUrl = mainBaseUrl();
+  const healthPath = "/api/v1/orchestrate/storybook-health";
 
   try {
     const response = await fetch(`${baseUrl}${healthPath}`, {
@@ -54,7 +62,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const url = new URL(request.url);
   const target = resolveTarget(url);
-  const baseUrl = target === TARGET_MAIN ? mainBaseUrl() : storybookBackendBaseUrl();
+  if (target !== TARGET_MAIN) {
+    return a2aOnlyTargetError(target);
+  }
+
+  const stream = shouldStream(url);
+  const baseUrl = mainBaseUrl();
 
   let payload: unknown;
   try {
@@ -68,11 +81,49 @@ export async function POST(request: Request) {
     ? ({ ...(payload as Record<string, unknown>) } as Record<string, unknown>)
     : {};
 
-  const path =
-    target === TARGET_MAIN ? "/api/v1/orchestrate/storybook" : "/api/v1/stories/create";
+  if (stream) {
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(bodyPayload),
+        cache: "no-store",
+      });
+
+      if (!response.body) {
+        return NextResponse.json(
+          {
+            detail: "Stream was requested but upstream response body is empty.",
+            backendBaseUrl: baseUrl,
+            target,
+          },
+          { status: 502 }
+        );
+      }
+
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "cache-control": "no-store",
+          "x-accel-buffering": "no",
+        },
+      });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          detail: "Storybook stream request failed.",
+          error: error instanceof Error ? error.message : String(error),
+          backendBaseUrl: baseUrl,
+          target,
+        },
+        { status: 502 }
+      );
+    }
+  }
 
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(bodyPayload),

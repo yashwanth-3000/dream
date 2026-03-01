@@ -9,7 +9,7 @@ A self-contained multi-agent character engine that generates story-ready charact
 - `gpt-4.1-mini`: vision analysis of uploaded drawings/references
 - `openai/gpt-image-1.5` (Replicate): final character image rendering
 
-## Architecture
+### Architecture
 
 <p align="center">
   <img src="architecture.svg" alt="A2A CrewAI Character Maker Architecture" width="100%" />

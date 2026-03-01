@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -112,6 +114,9 @@ class CharacterBranchResult:
     total_count: int
 
 
+ProgressReporter = Callable[[dict[str, Any]], Awaitable[None] | None]
+
+
 class CharacterA2AClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -129,10 +134,12 @@ class CharacterA2AClient:
             "force_workflow": payload.force_workflow,
         }
 
-        if self._settings.character_backend_use_protocol:
-            return await self._invoke_via_a2a(request_payload)
+        if not self._settings.character_backend_use_protocol:
+            raise CharacterBackendError(
+                "A2A-only mode: CHARACTER_BACKEND_USE_PROTOCOL must be true for storybook character generation."
+            )
 
-        return await self._invoke_via_http(request_payload)
+        return await self._invoke_via_a2a(request_payload)
 
     def _compose_character_prompt(self, brief: CharacterBrief, payload: StoryBookCreationRequest) -> str:
         age = f" for age band {payload.age_band}" if payload.age_band else ""
@@ -276,6 +283,7 @@ class StoryBookWorkflow:
         vision_service: OpenAIVisionService | None = None,
         replicate_service: ReplicateImageService | None = None,
         character_client: CharacterA2AClient | None = None,
+        progress_reporter: ProgressReporter | None = None,
     ) -> None:
         self._settings = settings
         self._blueprint_agent = blueprint_agent or StoryBlueprintAgent(settings)
@@ -299,6 +307,31 @@ class StoryBookWorkflow:
             default_output_compression=settings.replicate_output_compression,
         )
         self._character_client = character_client or CharacterA2AClient(settings)
+        self._progress_reporter = progress_reporter
+
+    async def _emit_progress(
+        self,
+        stage: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        if self._progress_reporter is None:
+            return
+
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "message": message,
+        }
+        if data:
+            payload["data"] = data
+
+        try:
+            maybe_awaitable = self._progress_reporter(payload)
+            if inspect.isawaitable(maybe_awaitable):
+                await maybe_awaitable
+        except Exception:
+            # Telemetry must never break primary workflow execution.
+            return
 
     @staticmethod
     def choose_workflow(payload: StoryBookCreationRequest) -> WorkflowType:
@@ -317,12 +350,43 @@ class StoryBookWorkflow:
             "character_branch": "parallel_success",
         }
 
+        await self._emit_progress(
+            stage="workflow_start",
+            message="Storybook workflow started.",
+            data={
+                "agents": [
+                    "StoryBlueprintAgent",
+                    "StoryWriterAgent",
+                    "ScenePromptAgent",
+                ],
+                "character_backend_rpc": self._settings.character_backend_rpc_url,
+                "storybook_replicate_model": self._replicate.model,
+                "requested_max_characters": payload.max_characters,
+                "world_reference_count": len(payload.world_references),
+                "character_drawing_count": len(payload.character_drawings),
+            },
+        )
+
         prepared_payload, drawing_descriptions, world_reference_descriptions = (
             self._prepare_payload_with_vision_descriptions(payload)
         )
         workflow = self.choose_workflow(prepared_payload)
 
+        await self._emit_progress(
+            stage="vision_enrichment_complete",
+            message="Reference analysis completed.",
+            data={
+                "workflow_selected": workflow,
+                "drawing_descriptions": len(drawing_descriptions),
+                "world_reference_descriptions": len(world_reference_descriptions),
+            },
+        )
+
         try:
+            await self._emit_progress(
+                stage="blueprint_generation_start",
+                message="Generating story blueprint with StoryBlueprintAgent.",
+            )
             blueprint = await self._blueprint_agent.generate(
                 payload=prepared_payload,
                 workflow=workflow,
@@ -333,14 +397,35 @@ class StoryBookWorkflow:
             warnings.append(f"Blueprint agent fallback used: {exc}")
             blueprint = self._fallback_blueprint(prepared_payload)
             generation_sources["blueprint"] = "fallback"
+            await self._emit_progress(
+                stage="blueprint_generation_fallback",
+                message="Blueprint agent failed; fallback blueprint was used.",
+                data={"detail": str(exc)},
+            )
 
         blueprint = self._normalize_blueprint(blueprint=blueprint, payload=prepared_payload)
+        await self._emit_progress(
+            stage="blueprint_generation_complete",
+            message="Blueprint ready.",
+            data={
+                "title": blueprint.title,
+                "character_brief_count": len(blueprint.character_briefs),
+                "page_plan_count": len(blueprint.page_plans),
+                "source": generation_sources["blueprint"],
+            },
+        )
 
         character_task = asyncio.create_task(
             self._generate_characters(blueprint=blueprint, payload=prepared_payload)
         )
         story_task = asyncio.create_task(
             self._story_writer_agent.generate(payload=prepared_payload, blueprint=blueprint)
+        )
+        await self._emit_progress(
+            stage="parallel_branches_started",
+            message=(
+                "Character branch (A2A) and story branch (StoryWriterAgent) started in parallel."
+            ),
         )
 
         character_result_raw, story_result_raw = await asyncio.gather(
@@ -358,6 +443,11 @@ class StoryBookWorkflow:
                 total_count=len(blueprint.character_briefs),
             )
             generation_sources["character_branch"] = "full_fallback"
+            await self._emit_progress(
+                stage="character_branch_fallback",
+                message="Character branch failed; fallback packets were created.",
+                data={"detail": str(character_result_raw)},
+            )
         else:
             character_result = character_result_raw
             if character_result.total_count == 0:
@@ -369,9 +459,35 @@ class StoryBookWorkflow:
             else:
                 generation_sources["character_branch"] = "partial_fallback"
 
+        await self._emit_progress(
+            stage="character_branch_complete",
+            message="Character branch completed.",
+            data={
+                "success_count": character_result.success_count,
+                "total_count": character_result.total_count,
+                "source": generation_sources["character_branch"],
+                "characters": [
+                    {
+                        "name": packet.name,
+                        "brief": packet.brief,
+                        "generated_image_count": len(packet.generated_images),
+                        "generated_images": packet.generated_images,
+                        "warning_count": len(packet.warnings),
+                    }
+                    for packet in character_result.packets
+                ],
+            },
+        )
+
         warnings.extend(character_result.warnings)
 
         if self._count_identity_reference_images(prepared_payload, character_result.packets) == 0:
+            await self._emit_progress(
+                stage="identity_reference_missing",
+                message=(
+                    "No identity references found after character branch; cannot start scene image generation."
+                ),
+            )
             raise StoryWorkflowError(
                 "Character generation must complete first with at least one identity reference image "
                 "(generated character image or uploaded character drawing) before scene image generation."
@@ -381,12 +497,30 @@ class StoryBookWorkflow:
             warnings.append(f"Story writer fallback used: {story_result_raw}")
             story = self._fallback_story_draft(blueprint=blueprint)
             generation_sources["story"] = "fallback"
+            await self._emit_progress(
+                stage="story_generation_fallback",
+                message="StoryWriterAgent failed; fallback story draft was used.",
+                data={"detail": str(story_result_raw)},
+            )
         else:
             story = story_result_raw
 
         story = self._normalize_story_draft(story=story, blueprint=blueprint)
+        await self._emit_progress(
+            stage="story_generation_complete",
+            message="Story draft ready.",
+            data={
+                "title": story.title,
+                "page_count": len(story.right_pages),
+                "source": generation_sources["story"],
+            },
+        )
 
         try:
+            await self._emit_progress(
+                stage="scene_prompt_generation_start",
+                message="Generating scene prompts with ScenePromptAgent.",
+            )
             scene_prompts = await self._scene_prompt_agent.generate(
                 payload=prepared_payload,
                 blueprint=blueprint,
@@ -397,12 +531,25 @@ class StoryBookWorkflow:
             warnings.append(f"Scene prompt fallback used: {exc}")
             scene_prompts = self._fallback_scene_prompts(story=story, blueprint=blueprint)
             generation_sources["scene_prompts"] = "fallback"
+            await self._emit_progress(
+                stage="scene_prompt_generation_fallback",
+                message="ScenePromptAgent failed; fallback prompts were used.",
+                data={"detail": str(exc)},
+            )
 
         scene_prompts = self._normalize_scene_prompts(
             scene_prompts=scene_prompts,
             story=story,
             blueprint=blueprint,
             characters=character_result.packets,
+        )
+        await self._emit_progress(
+            stage="scene_prompt_generation_complete",
+            message="Scene prompts ready.",
+            data={
+                "prompt_count": len(scene_prompts.illustration_prompts) + 1,
+                "source": generation_sources["scene_prompts"],
+            },
         )
 
         reference_images = self._collect_reference_images(
@@ -415,12 +562,42 @@ class StoryBookWorkflow:
         )
         scene_reference_counts = [len(reference_images)] * 6
 
+        await self._emit_progress(
+            stage="scene_image_generation_start",
+            message="Starting scene image generation via Replicate.",
+            data={
+                "scene_count": 6,
+                "reference_images_used": len(reference_images),
+                "replicate_model": self._replicate.model,
+            },
+        )
+
         generated_images = await self._generate_scene_images(
             scene_prompts=scene_prompts,
             reference_images=reference_images,
         )
 
+        await self._emit_progress(
+            stage="scene_image_generation_complete",
+            message="All scene images generated.",
+            data={"generated_image_count": len(generated_images)},
+        )
+
         spreads = self._build_exact_spreads(story=story, generated_images=generated_images)
+        await self._emit_progress(
+            stage="spread_contract_complete",
+            message="7-spread contract assembled.",
+            data={"spread_count": len(spreads)},
+        )
+
+        await self._emit_progress(
+            stage="workflow_complete",
+            message="Storybook workflow completed successfully.",
+            data={
+                "workflow_used": workflow,
+                "warning_count": len(warnings),
+            },
+        )
 
         return StoryBookCreationResponse(
             workflow_used=workflow,
@@ -445,6 +622,10 @@ class StoryBookWorkflow:
         payload: StoryBookCreationRequest,
     ) -> CharacterBranchResult:
         if not blueprint.character_briefs:
+            await self._emit_progress(
+                stage="character_generation_skipped",
+                message="No character briefs were provided; character generation skipped.",
+            )
             return CharacterBranchResult(
                 packets=[],
                 warnings=[],
@@ -456,16 +637,26 @@ class StoryBookWorkflow:
         warnings: list[str] = []
         briefs = blueprint.character_briefs[: payload.max_characters]
 
+        await self._emit_progress(
+            stage="character_generation_start",
+            message="Sending character briefs to character backend via A2A.",
+            data={
+                "character_count": len(briefs),
+                "character_backend_rpc": self._settings.character_backend_rpc_url,
+            },
+        )
+
         tasks = [
             asyncio.create_task(self._character_client.create_character_from_brief(brief=brief, payload=payload))
             for brief in briefs
         ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         success_count = 0
-        for brief, result in zip(briefs, results, strict=True):
-            if isinstance(result, Exception):
-                warnings.append(f"Character generation failed for '{brief.name or 'unnamed'}': {result}")
+        for brief, task in zip(briefs, tasks, strict=True):
+            try:
+                result = await task
+            except Exception as exc:
+                warnings.append(f"Character generation failed for '{brief.name or 'unnamed'}': {exc}")
                 packets.append(
                     GeneratedCharacterPacket(
                         name=brief.name or "Character",
@@ -473,10 +664,26 @@ class StoryBookWorkflow:
                         warnings=["Character generation failed; using fallback packet."],
                     )
                 )
+                await self._emit_progress(
+                    stage="character_generation_failed",
+                    message=f"Character generation failed for {brief.name or 'unnamed'}.",
+                    data={"detail": str(exc)},
+                )
                 continue
 
             success_count += 1
-            packets.append(self._character_packet_from_backend(brief=brief, payload=result))
+            packet = self._character_packet_from_backend(brief=brief, payload=result)
+            packets.append(packet)
+            await self._emit_progress(
+                stage="character_generation_complete",
+                message=f"Character ready: {packet.name}.",
+                data={
+                    "name": packet.name,
+                    "brief": packet.brief,
+                    "generated_image_count": len(packet.generated_images),
+                    "generated_images": packet.generated_images,
+                },
+            )
 
         if success_count == 0:
             warnings.append(
@@ -546,15 +753,39 @@ class StoryBookWorkflow:
             for index, prompt in enumerate(prompt_list)
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
         urls: list[str] = []
-        for index, result in enumerate(results):
-            if isinstance(result, Exception):
+        for index, task in enumerate(tasks):
+            try:
+                result = await task
+            except Exception as exc:
+                pending_tasks = tasks[index + 1 :]
+                for pending in pending_tasks:
+                    if not pending.done():
+                        pending.cancel()
+                if pending_tasks:
+                    await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+                await self._emit_progress(
+                    stage="scene_image_failed",
+                    message=f"Scene image generation failed at index {index}.",
+                    data={"scene_index": index, "detail": str(exc)},
+                )
                 raise StoryWorkflowError(
-                    f"Replicate scene generation failed at scene index {index}: {result}"
-                ) from result
+                    f"Replicate scene generation failed at scene index {index}: {exc}"
+                ) from exc
             urls.append(result)
+            await self._emit_progress(
+                stage="scene_image_generated",
+                message=(
+                    f"{'Cover' if index == 0 else f'Page image {index}'} generated "
+                    f"({index + 1}/6)."
+                ),
+                data={
+                    "scene_index": index,
+                    "scene_type": "cover" if index == 0 else "page",
+                    "image_url": result,
+                },
+            )
 
         return urls
 
@@ -565,17 +796,104 @@ class StoryBookWorkflow:
         negative_prompt: str,
         reference_images: list[str],
     ) -> str:
-        try:
-            return await asyncio.to_thread(
-                self._replicate.generate_story_image,
-                prompt,
-                negative_prompt or None,
-                None,
-                None,
-                reference_images,
+        max_attempts = max(1, self._settings.scene_image_retry_count + 1)
+        timeout_seconds = self._settings.scene_image_timeout_seconds
+        last_error: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            await self._emit_progress(
+                stage="scene_image_attempt_start",
+                message=(
+                    f"Scene image attempt {attempt}/{max_attempts} started for index {scene_index}."
+                ),
+                data={
+                    "scene_index": scene_index,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "timeout_seconds": timeout_seconds,
+                },
             )
-        except ReplicateGenerationError as exc:
-            raise StoryWorkflowError(f"scene_index={scene_index}, detail={exc}") from exc
+
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._replicate.generate_story_image,
+                        prompt,
+                        negative_prompt or None,
+                        None,
+                        None,
+                        reference_images,
+                    ),
+                    timeout=timeout_seconds,
+                )
+                return result
+            except asyncio.TimeoutError as exc:
+                last_error = StoryWorkflowError(
+                    f"scene_index={scene_index}, detail=Image generation timed out after {timeout_seconds:.0f} seconds."
+                )
+                await self._emit_progress(
+                    stage="scene_image_attempt_timeout",
+                    message=(
+                        f"Scene image attempt {attempt}/{max_attempts} timed out at index {scene_index}."
+                    ),
+                    data={
+                        "scene_index": scene_index,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "timeout_seconds": timeout_seconds,
+                        "will_retry": attempt < max_attempts,
+                    },
+                )
+            except ReplicateGenerationError as exc:
+                last_error = StoryWorkflowError(f"scene_index={scene_index}, detail={exc}")
+                await self._emit_progress(
+                    stage="scene_image_attempt_error",
+                    message=(
+                        f"Scene image attempt {attempt}/{max_attempts} failed at index {scene_index}."
+                    ),
+                    data={
+                        "scene_index": scene_index,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "detail": str(exc),
+                        "will_retry": attempt < max_attempts,
+                    },
+                )
+            except Exception as exc:
+                last_error = StoryWorkflowError(f"scene_index={scene_index}, detail={exc}")
+                await self._emit_progress(
+                    stage="scene_image_attempt_error",
+                    message=(
+                        f"Scene image attempt {attempt}/{max_attempts} failed at index {scene_index}."
+                    ),
+                    data={
+                        "scene_index": scene_index,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "detail": str(exc),
+                        "will_retry": attempt < max_attempts,
+                    },
+                )
+
+            if attempt < max_attempts:
+                await self._emit_progress(
+                    stage="scene_image_retry_scheduled",
+                    message=(
+                        f"Retrying scene image generation for index {scene_index} using the same prompt."
+                    ),
+                    data={
+                        "scene_index": scene_index,
+                        "next_attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                    },
+                )
+
+        if last_error is not None:
+            raise last_error
+
+        raise StoryWorkflowError(
+            f"scene_index={scene_index}, detail=Image generation failed for unknown reason."
+        )
 
     def _prepare_payload_with_vision_descriptions(
         self,
@@ -1100,10 +1418,7 @@ class StoryBookWorkflow:
             if index == 4:
                 chapter = "Chapter 3 cont."
             beat = plan.beat if plan else f"{chapter} continues the adventure."
-            text = (
-                f"{beat} "
-                "The hero reacts with courage and purpose, and the moment clearly leads into the next page."
-            )
+            text = beat
             pages.append(StoryRightPage(page_number=index, chapter=chapter, text=text))
 
         return StoryDraft(
@@ -1145,13 +1460,15 @@ class StoryBookWorkflow:
 
         if not self._has_any_keyword(final_text, RESOLUTION_KEYWORDS):
             final_text = (
-                f"{final_text} By the end, the challenge is clearly resolved, and the goal feels within reach."
+                f"{final_text} The challenge reaches a clear, hopeful resolution."
             ).strip()
 
         if not self._has_any_keyword(final_text, POSITIVE_ENDING_KEYWORDS):
             final_text = (
-                f"{final_text} Everyone leaves with smiles, stronger confidence, and hope for the future."
+                f"{final_text} The ending feels warm, confident, and encouraging."
             ).strip()
+
+        final_text = self._sanitize_story_page_text(final_text)
 
         patched_pages[-1] = StoryRightPage(
             page_number=final_page.page_number,
@@ -1185,7 +1502,7 @@ class StoryBookWorkflow:
         chapter: str,
         plan_beat: str,
     ) -> str:
-        normalized = re.sub(r"\s+", " ", text or "").strip()
+        normalized = self._sanitize_story_page_text(text)
         if len(normalized) >= MIN_CHAPTER_TEXT_CHARS:
             return normalized
 
@@ -1204,6 +1521,42 @@ class StoryBookWorkflow:
                 continue
             merged = f"{merged} {sentence}".strip()
 
+        return self._sanitize_story_page_text(merged)
+
+    def _sanitize_story_page_text(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", text or "").strip()
+        if not normalized:
+            return normalized
+
+        boilerplate_phrases = (
+            "The hero reacts with courage and purpose, and the moment clearly leads into the next page.",
+            "The hero reacts with courage and purpose, and the moment clearly leads into the next page",
+            "By the end, the challenge is clearly resolved, and the goal feels within reach.",
+            "By the end, the challenge is clearly resolved, and the goal feels within reach",
+        )
+        for phrase in boilerplate_phrases:
+            normalized = re.sub(re.escape(phrase), "", normalized, flags=re.IGNORECASE)
+
+        normalized = re.sub(r"\s+", " ", normalized).strip(" .")
+        if not normalized:
+            return normalized
+
+        sentences = re.split(r"(?<=[.!?])\s+", normalized)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for sentence in sentences:
+            trimmed = sentence.strip()
+            if not trimmed:
+                continue
+            key = re.sub(r"[^a-z0-9]+", "", trimmed.lower())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(trimmed)
+
+        merged = " ".join(deduped).strip()
+        if merged and merged[-1] not in ".!?":
+            merged = f"{merged}."
         return merged
 
     def _page_text_extensions(self, page_number: int, chapter: str, plan_beat: str) -> list[str]:
@@ -1220,27 +1573,27 @@ class StoryBookWorkflow:
 
         by_page: dict[int, list[str]] = {
             1: [
-                f"In {chapter_line}, the story world opens with a clear goal: {beat_sentence}",
-                "The lead character notices a chance to begin and decides to take the first brave step.",
+                f"In {chapter_line}, the story world opens with a clear goal.",
+                "The lead character notices a chance to begin and takes the first brave step.",
                 *common_tail,
             ],
             2: [
-                f"In {chapter_line}, teamwork starts shaping the journey: {beat_sentence}",
+                f"In {chapter_line}, teamwork starts shaping the journey.",
                 "Friends share encouragement, and the lead character begins trusting the process.",
                 *common_tail,
             ],
             3: [
-                f"In {chapter_line}, tension rises and the challenge becomes real: {beat_sentence}",
+                f"In {chapter_line}, tension rises and the challenge becomes real.",
                 "A mistake or obstacle appears, but the group stays focused instead of giving up.",
                 *common_tail,
             ],
             4: [
-                f"In {chapter_line}, the turning point gains momentum: {beat_sentence}",
+                f"In {chapter_line}, the turning point gains momentum.",
                 "The lead character applies what they learned, and the team adjusts with patience.",
                 *common_tail,
             ],
             5: [
-                f"In {chapter_line}, the journey reaches a meaningful resolution: {beat_sentence}",
+                f"In {chapter_line}, the journey reaches a meaningful resolution.",
                 "By the end, the challenge is solved in a hopeful way, and everyone celebrates progress together.",
                 "The final beat feels motivating: effort, support, and courage make future dreams feel possible.",
             ],

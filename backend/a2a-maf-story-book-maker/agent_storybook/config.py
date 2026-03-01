@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     replicate_output_format: str = "webp"
     replicate_input_fidelity: str = "high"
     replicate_output_compression: int = 90
+    scene_image_timeout_seconds: float = Field(default=70.0, gt=1.0)
+    scene_image_retry_count: int = Field(default=1, ge=0, le=5)
 
     character_backend_base_url: str = "http://127.0.0.1:8000"
     character_backend_rpc_path: str = "/a2a"
@@ -60,6 +62,9 @@ class Settings(BaseSettings):
     def validate_credentials(self) -> "Settings":
         self.openai_model = self._normalize_openai_model(self.openai_model)
         self.openai_vision_model = self._normalize_openai_model(self.openai_vision_model)
+
+        if not self.character_backend_use_protocol:
+            raise ValueError("A2A-only mode: CHARACTER_BACKEND_USE_PROTOCOL must be true.")
 
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required (used by MAF and vision analysis).")

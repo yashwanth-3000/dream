@@ -3,10 +3,11 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, User, ChevronRight, Clapperboard, Gamepad2 } from "lucide-react";
+import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, Clapperboard, Gamepad2, RotateCw } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
-import { dashboardCharacters } from "@/lib/dashboard-data";
+import { dashboardCharacters, dashboardStories, getDashboardStoryPages } from "@/lib/dashboard-data";
+import { StoryBook } from "@/components/dashboard/story-book";
 import {
   GAMEPLAY_BACKGROUNDS,
   GAMEPLAY_CATEGORY_OPTIONS,
@@ -51,17 +52,13 @@ interface MessageGroup {
 
 const TITLE_WORDS = ["What", "shall", "we", "dream", "up?"];
 
+// 5 images — 2:3 portrait, matching the story book's per-page illustration ratio
 const DREAM_STAGE_IMAGES = [
-  "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1465101046530-73398c7f28ca?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1474487548417-781cb71495f3?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=360&h=640&auto=format&fit=crop&q=80",
-  "https://images.unsplash.com/photo-1490750967868-88aa4f44baee?w=360&h=640&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=480&h=720&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1475274047050-1d0c55b91e0a?w=480&h=720&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=480&h=720&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=480&h=720&auto=format&fit=crop&q=80",
+  "https://images.unsplash.com/photo-1470770903676-69b98201ea1c?w=480&h=720&auto=format&fit=crop&q=80",
 ];
 
 const COMMON_THINKING_STEPS: ThinkingStep[] = [
@@ -101,7 +98,7 @@ const COMMON_THINKING_STEPS: ThinkingStep[] = [
 
 const STORY_IMAGE_STEP: ThinkingStep = {
   title: "Generating scene images",
-  detail: "Creating 9:16 frames one by one so you can preview the visual style as the story comes together.",
+  detail: "Creating 2:3 portrait illustrations one by one so you can preview the visual style as the story comes together.",
   imageUrls: DREAM_STAGE_IMAGES,
 };
 
@@ -173,7 +170,11 @@ const VIDEO_GAMEPLAY_THINKING_STEPS: ThinkingStep[] = [
   },
 ];
 
-const STORY_CHARACTER_OPTIONS = dashboardCharacters.slice(0, 5);
+const STORY_CHARACTER_OPTIONS = dashboardCharacters;
+
+// Mock story result — used when story mode completes
+const MOCK_STORY = dashboardStories[0];
+const MOCK_STORY_PAGES = getDashboardStoryPages(MOCK_STORY.id);
 const DEFAULT_GAMEPLAY_CATEGORY: GameplayCategory = GAMEPLAY_CATEGORY_OPTIONS[0]?.id ?? "minecraft";
 const DEFAULT_GAMEPLAY_BACKGROUND_ID = getDefaultGameplayBackgroundId(DEFAULT_GAMEPLAY_CATEGORY);
 
@@ -291,6 +292,7 @@ export default function ChatPage() {
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const characterCarouselRef = useRef<HTMLDivElement>(null);
   const thinkingStartRef = useRef<number>(0);
   const activeStoryCharacterSelectionRef = useRef<CharacterSelection | null>(null);
   const activeVideoTypeRef = useRef<VideoGenerationType | null>(null);
@@ -442,15 +444,28 @@ export default function ChatPage() {
 
   const handlePickPendingStoryCharacter = useCallback((characterId: string) => {
     if (isThinkingStreamActive || isClosingLogs) return;
-    setPendingStoryCharacterId(characterId);
     setPendingUseAiStoryCharacter(false);
+    setPendingStoryCharacterId((previous) => (previous === characterId ? "" : characterId));
   }, [isThinkingStreamActive, isClosingLogs]);
 
   const handlePickPendingAiChoice = useCallback(() => {
     if (isThinkingStreamActive || isClosingLogs) return;
     setPendingStoryCharacterId("");
-    setPendingUseAiStoryCharacter(true);
+    setPendingUseAiStoryCharacter((previous) => !previous);
   }, [isThinkingStreamActive, isClosingLogs]);
+
+  const handleClearPendingStoryChoice = useCallback(() => {
+    if (isThinkingStreamActive || isClosingLogs) return;
+    setPendingStoryCharacterId("");
+    setPendingUseAiStoryCharacter(false);
+  }, [isThinkingStreamActive, isClosingLogs]);
+
+  const scrollCharacterCarousel = useCallback((dir: 1 | -1) => {
+    const el = characterCarouselRef.current;
+    if (!el) return;
+    // scroll 3 cards at a time (80px card + 7px gap)
+    el.scrollBy({ left: dir * (80 * 3 + 7 * 2), behavior: "smooth" });
+  }, []);
 
   const handleConfirmStoryCharacterChoice = useCallback(() => {
     if (isThinkingStreamActive || isClosingLogs) return;
@@ -854,7 +869,7 @@ export default function ChatPage() {
                         <div className={styles.userAvatar}><User size={12} /></div>
                       )}
 
-                      <div className={`${styles.bubbleStack} ${group.role === "user" ? styles.bubbleStackUser : ""}`}>
+                      <div className={`${styles.bubbleStack} ${group.role === "user" ? styles.bubbleStackUser : ""} ${group.role === "assistant" && group.messages.some(m => m.mode === "story") ? styles.bubbleStackStory : ""}`}>
                         {group.role === "user" && (
                           <div className={`${styles.senderLabel} ${styles.senderLabelUser}`}>You</div>
                         )}
@@ -921,6 +936,41 @@ export default function ChatPage() {
                         {group.messages.map((msg, mi) => {
                           const isFirst = mi === 0;
                           const isLast = mi === group.messages.length - 1;
+
+                          // Story mode: embed the full story book + action row
+                          if (msg.role === "assistant" && msg.mode === "story") {
+                            return (
+                              <motion.div
+                                key={msg.id}
+                                initial={{ opacity: 0, y: 16 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.52, ease: easeOutExpo }}
+                                className={styles.storyResult}
+                              >
+                                {/* Full embedded story book */}
+                                <div className={styles.storyResultBook}>
+                                  <StoryBook
+                                    title={MOCK_STORY.title}
+                                    ageBand={MOCK_STORY.ageBand}
+                                    pages={MOCK_STORY_PAGES}
+                                    cover={MOCK_STORY.cover}
+                                  />
+                                </div>
+
+                                {/* Extra actions */}
+                                <div className={styles.storyResultActions}>
+                                  <button type="button" className={styles.storyResultRegenerateBtn}>
+                                    <RotateCw size={12} strokeWidth={2.5} className={styles.storyResultRegenerateIcon} />
+                                    Regenerate
+                                  </button>
+                                  <button type="button" className={styles.storyResultActionBtn}>
+                                    Share
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          }
+
                           return (
                             <div
                               key={msg.id}
@@ -988,8 +1038,47 @@ export default function ChatPage() {
                                   ? "Character locked. Continuing with story generation."
                                   : "Choose a character card, then continue. Thinking starts after confirmation."}
                               </p>
-                              <div className={styles.dreamingCharacterGrid}>
-                                {STORY_CHARACTER_OPTIONS.map((char, index) => {
+                              <div className={styles.dreamingCarouselWrapper}>
+                                <button
+                                  type="button"
+                                  onClick={() => scrollCharacterCarousel(-1)}
+                                  className={styles.dreamingCarouselArrow}
+                                  aria-label="Scroll left"
+                                  tabIndex={-1}
+                                  disabled={isThinkingStreamActive || isClosingLogs}
+                                >
+                                  <ChevronLeft size={12} strokeWidth={2.5} />
+                                </button>
+                                <div className={styles.dreamingCharacterCarousel} ref={characterCarouselRef}>
+                                {/* "Let AI Decide" card */}
+                                {(() => {
+                                  const aiActive = isThinkingStreamActive
+                                    ? activeStoryCharacterSelection === null && hasActiveStoryCharacterChoice
+                                    : pendingUseAiStoryCharacter;
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={handlePickPendingAiChoice}
+                                      className={`${styles.dreamingCharacterCard} ${styles.dreamingAiCard} ${
+                                        aiActive ? styles.dreamingCharacterCardActive : ""
+                                      }`}
+                                      data-active={aiActive || undefined}
+                                      aria-pressed={pendingUseAiStoryCharacter}
+                                      disabled={isThinkingStreamActive || isClosingLogs}
+                                    >
+                                      <div className={styles.dreamingAiCardInner}>
+                                        <Sparkles size={15} />
+                                        <span>AI</span>
+                                        <span>Picks</span>
+                                      </div>
+                                      {aiActive && (
+                                        <span className={styles.dreamingCharacterCardCheck}>✓</span>
+                                      )}
+                                    </button>
+                                  );
+                                })()}
+
+                                {STORY_CHARACTER_OPTIONS.map((char) => {
                                   const active = isThinkingStreamActive
                                     ? activeStoryCharacterSelection?.type === "existing" &&
                                       activeStoryCharacterId === char.id
@@ -1002,14 +1091,14 @@ export default function ChatPage() {
                                       className={`${styles.dreamingCharacterCard} ${
                                         active ? styles.dreamingCharacterCardActive : ""
                                       }`}
+                                      data-active={active || undefined}
                                       aria-pressed={active}
                                       disabled={isThinkingStreamActive || isClosingLogs}
                                     >
                                       {/* eslint-disable-next-line @next/next/no-img-element */}
                                       <img src={char.avatar} alt={char.name} loading="lazy" />
-                                      <span className={styles.dreamingCharacterCardIndex}>{index + 1}</span>
-                                      {active && !isThinkingStreamActive && (
-                                        <span className={styles.dreamingCharacterCardSelected}>Selected</span>
+                                      {active && (
+                                        <span className={styles.dreamingCharacterCardCheck}>✓</span>
                                       )}
                                       <span className={styles.dreamingCharacterCardMeta}>
                                         <span className={styles.dreamingCharacterCardName}>{char.name}</span>
@@ -1018,6 +1107,17 @@ export default function ChatPage() {
                                     </button>
                                   );
                                 })}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => scrollCharacterCarousel(1)}
+                                  className={styles.dreamingCarouselArrow}
+                                  aria-label="Scroll right"
+                                  tabIndex={-1}
+                                  disabled={isThinkingStreamActive || isClosingLogs}
+                                >
+                                  <ChevronRight size={12} strokeWidth={2.5} />
+                                </button>
                               </div>
                               <div className={styles.dreamingCharacterActions}>
                                 <button
@@ -1027,40 +1127,28 @@ export default function ChatPage() {
                                   disabled={!hasPendingStoryChoice || isThinkingStreamActive || isClosingLogs}
                                 >
                                   {pendingUseAiStoryCharacter
-                                    ? "Continue with AI creativity"
+                                    ? "Continue with AI"
                                     : pendingStoryCharacter
                                       ? `Continue with ${pendingStoryCharacter.name}`
-                                      : "Select character to continue"}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handlePickPendingAiChoice}
-                                  className={`${styles.dreamingCharacterSecondaryButton} ${
-                                    pendingUseAiStoryCharacter && !isThinkingStreamActive
-                                      ? styles.dreamingCharacterSecondaryButtonActive
-                                      : ""
-                                  }`}
-                                  disabled={isThinkingStreamActive || isClosingLogs}
-                                >
-                                  No character, let AI decide
+                                      : "Pick a character to continue"}
                                 </button>
                                 <Link
                                   href="/dashboard/characters/new-character"
                                   className={styles.dreamingCharacterSecondaryButton}
                                 >
-                                  Create new in dashboard
+                                  + Create character
                                 </Link>
                               </div>
                               <p className={styles.dreamingCharacterStatus}>
                                 {!hasActiveStoryCharacterChoice
                                   ? pendingUseAiStoryCharacter
-                                    ? "AI creativity selected. Tap continue."
+                                    ? "AI creativity selected — tap Continue."
                                     : pendingStoryCharacter
-                                      ? `Ready with ${pendingStoryCharacter.name}. Tap continue.`
-                                      : "Waiting for your character selection."
+                                      ? `${pendingStoryCharacter.name} selected — tap Continue.`
+                                      : "Scroll to pick a character, or let AI decide."
                                   : activeStoryCharacterSelection?.type === "existing" && activeStoryCharacter
-                                    ? `Selected ${activeStoryCharacter.name}.`
-                                    : "Selected AI creativity (no fixed character)."}
+                                    ? `${activeStoryCharacter.name} locked in.`
+                                    : "AI creativity locked in."}
                               </p>
                             </div>
                           </div>

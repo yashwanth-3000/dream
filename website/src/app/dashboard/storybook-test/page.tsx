@@ -1,17 +1,22 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   BookOpenText,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   ExternalLink,
   FlaskConical,
   Loader2,
   Plus,
+  RotateCw,
   Send,
+  Sparkles,
   Trash2,
 } from "lucide-react";
 
@@ -19,9 +24,10 @@ import { StoryBook } from "@/components/dashboard/story-book";
 import type { StoryPage } from "@/lib/dashboard-data";
 
 import styles from "../dashboard.module.css";
+import chatStyles from "../../chat/chat-page.module.css";
 
 type WorkflowChoice = "" | "reference_enriched" | "prompt_only";
-type ApiTarget = "main" | "backend";
+type ApiTarget = "main";
 type RequestState = "idle" | "loading" | "success" | "error";
 type HealthState = "idle" | "loading" | "ok" | "error";
 
@@ -84,6 +90,31 @@ type StoryPageCard = {
   prompt: string;
 };
 
+type LiveLogLevel = "info" | "success" | "error";
+
+type LiveLogEntry = {
+  id: number;
+  level: LiveLogLevel;
+  source: string;
+  message: string;
+  data?: unknown;
+};
+
+type LiveTimelineStep = {
+  key: string;
+  title: string;
+  detail: string;
+  imageUrls: string[];
+  data?: unknown;
+};
+
+type ParsedProgressEvent = {
+  stage: string;
+  message: string;
+  rendered: string;
+  data?: unknown;
+};
+
 const EMPTY_WORLD_REFERENCE: WorldReferenceInput = {
   title: "",
   description: "",
@@ -131,7 +162,15 @@ function unwrapStorybookPayload(payload: unknown): unknown {
   return payload;
 }
 
-function SpreadSideCard({ side, pageTitle }: { side?: SpreadSide; pageTitle: string }) {
+function SpreadSideCard({
+  side,
+  pageTitle,
+  onExpandImage,
+}: {
+  side?: SpreadSide;
+  pageTitle: string;
+  onExpandImage?: (imageUrl: string) => void;
+}) {
   if (!side) {
     return (
       <div
@@ -171,9 +210,15 @@ function SpreadSideCard({ side, pageTitle }: { side?: SpreadSide; pageTitle: str
 
       {hasImage ? (
         <div className="mt-2 w-full rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
-          <div className="flex w-full aspect-[4/3] items-center justify-center overflow-hidden rounded-md">
+          <motion.button
+            type="button"
+            className="flex w-full aspect-[4/3] cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
+            onClick={() => side.image_url && onExpandImage?.(side.image_url)}
+          >
             <img src={side.image_url} alt={`${pageTitle} visual`} className="h-full w-full rounded object-contain" />
-          </div>
+          </motion.button>
           <a
             href={side.image_url}
             target="_blank"
@@ -211,8 +256,63 @@ function StatusChip({ label, tone }: { label: string; tone: "neutral" | "ok" | "
   );
 }
 
+function formatStageTitle(stage: string) {
+  const normalized = stage.trim().replace(/[_-]+/g, " ");
+  if (!normalized) return "Progress";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function formatJsonForDisplay(value: unknown): string {
+  const tryParseStringifiedJson = (text: string): unknown => {
+    const trimmed = text.trim();
+    if (!trimmed) return text;
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return text;
+      }
+    }
+    return text;
+  };
+
+  const normalize = (input: unknown): unknown => {
+    if (typeof input === "string") {
+      const maybeParsed = tryParseStringifiedJson(input);
+      if (maybeParsed !== input) {
+        return normalize(maybeParsed);
+      }
+      const unescaped = input
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\"/g, '"');
+      return unescaped;
+    }
+    if (Array.isArray(input)) {
+      return input.map((entry) => normalize(entry));
+    }
+    if (input && typeof input === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(input as Record<string, unknown>)) {
+        out[key] = normalize(val);
+      }
+      return out;
+    }
+    return input;
+  };
+
+  try {
+    return JSON.stringify(normalize(value), null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export default function DashboardStorybookTestPage() {
-  const [apiTarget, setApiTarget] = useState<ApiTarget>("main");
+  const apiTarget: ApiTarget = "main";
   const [prompt, setPrompt] = useState("");
   const [tone, setTone] = useState("");
   const [ageBand, setAgeBand] = useState("");
@@ -231,6 +331,13 @@ export default function DashboardStorybookTestPage() {
   const [lastPayload, setLastPayload] = useState<unknown>(null);
   const [responseBody, setResponseBody] = useState<unknown>(null);
   const [copyState, setCopyState] = useState<"idle" | "done">("idle");
+  const [liveLogs, setLiveLogs] = useState<LiveLogEntry[]>([]);
+  const [liveTimelineSteps, setLiveTimelineSteps] = useState<LiveTimelineStep[]>([]);
+  const [timelineExpanded, setTimelineExpanded] = useState(true);
+  const [dreamedForSeconds, setDreamedForSeconds] = useState(0);
+  const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
+  const [openTimelineJsonByKey, setOpenTimelineJsonByKey] = useState<Record<string, boolean>>({});
+  const [openLogJsonById, setOpenLogJsonById] = useState<Record<number, boolean>>({});
 
   const payloadJson = useMemo(() => JSON.stringify(lastPayload, null, 2), [lastPayload]);
   const responseJson = useMemo(() => JSON.stringify(responseBody, null, 2), [responseBody]);
@@ -358,6 +465,27 @@ export default function DashboardStorybookTestPage() {
 
   const canSubmit = requestState !== "loading" && prompt.trim().length > 0;
 
+  const hasActiveRun = requestState !== "idle" || liveLogs.length > 0;
+
+  useEffect(() => {
+    if (!expandedImageUrl) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setExpandedImageUrl(null);
+      }
+    };
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [expandedImageUrl]);
+
   const checkHealth = useCallback(async () => {
     setHealthState("loading");
     setHealthMessage("");
@@ -480,53 +608,488 @@ export default function DashboardStorybookTestPage() {
     };
   }
 
+  function pushLiveLog(
+    level: LiveLogLevel,
+    source: string,
+    message: string,
+    data?: unknown
+  ) {
+    const trimmed = message.trim();
+    if (!trimmed) return;
+    setLiveLogs((prev) => [
+      ...prev,
+      {
+        id: Date.now() + prev.length,
+        level,
+        source,
+        message: trimmed,
+        data,
+      },
+    ]);
+  }
+
+  function parseEmbeddedProgressData(message: string) {
+    const marker = "| data=";
+    const markerIndex = message.indexOf(marker);
+    if (markerIndex < 0) {
+      return { cleanMessage: message.trim(), data: undefined as unknown };
+    }
+
+    const cleanMessage = message.slice(0, markerIndex).trim();
+    const rawData = message.slice(markerIndex + marker.length).trim();
+    if (!rawData) {
+      return { cleanMessage, data: undefined as unknown };
+    }
+
+    try {
+      return { cleanMessage, data: JSON.parse(rawData) as unknown };
+    } catch {
+      return { cleanMessage, data: rawData as unknown };
+    }
+  }
+
+  function normalizeProgressEvent(eventObj: Record<string, unknown>): ParsedProgressEvent {
+    const stageRaw = typeof eventObj.stage === "string" ? eventObj.stage.trim() : "";
+    const stage = stageRaw || "progress";
+    const rawMessage =
+      typeof eventObj.message === "string" && eventObj.message.trim()
+        ? eventObj.message.trim()
+        : "Progress update received.";
+    const embedded = parseEmbeddedProgressData(rawMessage);
+    const message = embedded.cleanMessage || "Progress update received.";
+    const eventData =
+      eventObj.data !== undefined
+        ? eventObj.data
+        : embedded.data;
+
+    return {
+      stage,
+      message,
+      rendered: `[${stage.replace(/_/g, " ")}] ${message}`,
+      data: eventData,
+    };
+  }
+
+  function upsertTimelineStep(
+    key: string,
+    title: string,
+    detail: string,
+    imageUrl?: string,
+    data?: unknown
+  ) {
+    setLiveTimelineSteps((prev) => {
+      const existingIndex = prev.findIndex((step) => step.key === key);
+      if (existingIndex < 0) {
+        return [
+          ...prev,
+          {
+            key,
+            title,
+            detail,
+            imageUrls: imageUrl ? [imageUrl] : [],
+            data,
+          },
+        ];
+      }
+
+      const next = [...prev];
+      const current = next[existingIndex];
+      const nextImageUrls =
+        imageUrl && !current.imageUrls.includes(imageUrl)
+          ? [...current.imageUrls, imageUrl]
+          : current.imageUrls;
+
+      next[existingIndex] = {
+        ...current,
+        title,
+        detail,
+        imageUrls: nextImageUrls,
+        data: data ?? current.data,
+      };
+      return next;
+    });
+  }
+
+  function pushTimelineProgress(progressEvent: ParsedProgressEvent) {
+    const stage = progressEvent.stage || "progress";
+    const message = progressEvent.message || "Progress update received.";
+    const data =
+      typeof progressEvent.data === "object" && progressEvent.data !== null
+        ? (progressEvent.data as Record<string, unknown>)
+        : null;
+
+    if (stage === "scene_image_generated") {
+      const imageUrl = typeof data?.image_url === "string" ? data.image_url : "";
+      const sceneIndex = typeof data?.scene_index === "number" ? Number(data.scene_index) : null;
+      const sceneType = typeof data?.scene_type === "string" ? data.scene_type : "";
+
+      setLiveTimelineSteps((prev) => {
+        const key = "scene_image_generation";
+        const index = prev.findIndex((step) => step.key === key);
+
+        const makeImageItem = () => ({
+          scene_index: sceneIndex,
+          scene_type: sceneType || (sceneIndex === 0 ? "cover" : "page"),
+          image_url: imageUrl,
+        });
+
+        if (index < 0) {
+          const images = imageUrl ? [makeImageItem()] : [];
+          return [
+            ...prev,
+            {
+              key,
+              title: "Scene image generation",
+              detail: imageUrl
+                ? `${images.length}/6 images generated. ${message}`
+                : message,
+              imageUrls: imageUrl ? [imageUrl] : [],
+              data: {
+                generated_count: images.length,
+                total_expected: 6,
+                images,
+              },
+            },
+          ];
+        }
+
+        const next = [...prev];
+        const current = next[index];
+        const currentData =
+          current.data && typeof current.data === "object"
+            ? (current.data as Record<string, unknown>)
+            : {};
+        const existingItemsRaw = Array.isArray(currentData.images) ? currentData.images : [];
+        const existingItems = existingItemsRaw.filter(
+          (item): item is { scene_index: number | null; scene_type: string; image_url: string } =>
+            Boolean(item) && typeof item === "object" && typeof (item as { image_url?: unknown }).image_url === "string"
+        );
+
+        const exists = imageUrl
+          ? existingItems.some((item) => item.image_url === imageUrl)
+          : false;
+        const nextItems =
+          imageUrl && !exists
+            ? [...existingItems, makeImageItem()]
+            : existingItems;
+
+        const nextImageUrls =
+          imageUrl && !current.imageUrls.includes(imageUrl)
+            ? [...current.imageUrls, imageUrl]
+            : current.imageUrls;
+
+        next[index] = {
+          ...current,
+          title: "Scene image generation",
+          detail: `${nextItems.length}/6 images generated. ${message}`,
+          imageUrls: nextImageUrls,
+          data: {
+            generated_count: nextItems.length,
+            total_expected: 6,
+            latest_scene_index: sceneIndex,
+            latest_message: message,
+            images: nextItems,
+          },
+        };
+        return next;
+      });
+      return;
+    }
+
+    if (stage === "character_generation_complete") {
+      const name = typeof data?.name === "string" ? data.name.trim() : "";
+      const key = name ? `character_generation_complete:${name}` : "character_generation_complete";
+      const title = name ? `Character ready: ${name}` : formatStageTitle(stage);
+      const generatedImages = Array.isArray(data?.generated_images)
+        ? data.generated_images.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        : [];
+
+      upsertTimelineStep(key, title, message, generatedImages[0], data ?? undefined);
+      for (const imageUrl of generatedImages.slice(1)) {
+        upsertTimelineStep(key, title, message, imageUrl, undefined);
+      }
+      return;
+    }
+
+    if (stage === "character_branch_complete") {
+      const characters = Array.isArray(data?.characters)
+        ? data.characters
+        : [];
+      if (characters.length > 0) {
+        for (const character of characters) {
+          if (!character || typeof character !== "object") continue;
+          const characterObj = character as Record<string, unknown>;
+          const name = typeof characterObj.name === "string" ? characterObj.name.trim() : "Character";
+          const brief = typeof characterObj.brief === "string" ? characterObj.brief : "";
+          const images = Array.isArray(characterObj.generated_images)
+            ? characterObj.generated_images.filter(
+                (value): value is string => typeof value === "string" && value.trim().length > 0
+              )
+            : [];
+          const key = `character_generation_complete:${name}`;
+          const title = `Character ready: ${name}`;
+          const detail = brief || message;
+          const dataPayload = {
+            name,
+            brief,
+            generated_images: images,
+          };
+          upsertTimelineStep(key, title, detail, images[0], dataPayload);
+          for (const imageUrl of images.slice(1)) {
+            upsertTimelineStep(key, title, detail, imageUrl, undefined);
+          }
+        }
+      }
+      return;
+    }
+
+    upsertTimelineStep(
+      stage || "progress",
+      formatStageTitle(stage),
+      message,
+      undefined,
+      progressEvent.data
+    );
+  }
+
+  function pushTimelineStatus(eventObj: Record<string, unknown>) {
+    const state = typeof eventObj.state === "string" ? eventObj.state.trim().toLowerCase() : "";
+    const message =
+      typeof eventObj.message === "string" && eventObj.message.trim()
+        ? eventObj.message.trim()
+        : "Status update received.";
+    const key = state ? `status:${state}` : "status:update";
+    const title = state ? `A2A status: ${state}` : "A2A status update";
+    upsertTimelineStep(key, title, message);
+  }
+
+  function toggleTimelineJson(key: string) {
+    setOpenTimelineJsonByKey((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }
+
+  function toggleLogJson(id: number) {
+    setOpenLogJsonById((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  }
+
+  function normalizeFinalEnvelope(event: Record<string, unknown>) {
+    const backendEndpoint =
+      typeof event.backend_endpoint === "string"
+        ? event.backend_endpoint
+        : typeof event.endpoint === "string"
+          ? event.endpoint
+          : "";
+
+    const statusValue = event.backend_status_code ?? event.status_code;
+    const backendStatusCode =
+      typeof statusValue === "number"
+        ? statusValue
+        : Number.isFinite(Number(statusValue))
+          ? Number(statusValue)
+          : 200;
+
+    const backendResponse =
+      "backend_response" in event ? event.backend_response : event.payload;
+
+    return {
+      backend_endpoint: backendEndpoint,
+      backend_status_code: backendStatusCode,
+      backend_response: backendResponse ?? null,
+    };
+  }
+
   async function sendRequest() {
     if (!canSubmit) return;
+
+    const runStartedAtMs = Date.now();
+    const syncElapsed = (endAtMs = Date.now()) => {
+      const elapsedMs = Math.max(0, endAtMs - runStartedAtMs);
+      setDreamedForSeconds(Math.max(1, Math.round(elapsedMs / 1000)));
+    };
 
     setRequestState("loading");
     setErrorMessage("");
     setResponseStatus(null);
+    setResponseBody(null);
+    setCopyState("idle");
+    setLiveLogs([]);
+    setLiveTimelineSteps([]);
+    setTimelineExpanded(true);
+    setDreamedForSeconds(0);
+    setExpandedImageUrl(null);
+    setOpenTimelineJsonByKey({});
+    setOpenLogJsonById({});
 
     try {
       const payload = await buildPayload();
       setLastPayload(toPayloadForDisplay(payload));
+      pushLiveLog("info", "ui", "Request payload prepared. Opening stream...");
 
-      const response = await fetch(`/api/storybook-test?target=${apiTarget}`, {
+      const response = await fetch(`/api/storybook-test?target=${apiTarget}&stream=1`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-      const text = await response.text();
-      let parsed: unknown = null;
-      if (text.trim()) {
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = { raw: text };
+      setResponseStatus(response.status);
+
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/x-ndjson")) {
+        const text = await response.text();
+        let parsed: unknown = null;
+        if (text.trim()) {
+          try {
+            parsed = JSON.parse(text);
+          } catch {
+            parsed = { raw: text };
+          }
         }
+        setResponseBody(parsed);
+
+        if (!response.ok) {
+          const detail =
+            parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
+              ? String((parsed as { detail?: unknown }).detail ?? "")
+              : "";
+          setErrorMessage(
+            detail
+              ? `Request failed with status ${response.status}: ${detail}`
+              : `Request failed with status ${response.status}.`
+          );
+          syncElapsed();
+          setRequestState("error");
+          return;
+        }
+
+        pushLiveLog("success", "ui", "Request completed (non-stream fallback).");
+        upsertTimelineStep("final_response", "Final response", "Final response received from backend.");
+        syncElapsed();
+        setRequestState("success");
+        return;
       }
 
-      setResponseStatus(response.status);
-      setResponseBody(parsed);
-
-      if (!response.ok) {
-        const detail =
-          parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
-            ? String((parsed as { detail?: unknown }).detail ?? "")
-            : "";
-        setErrorMessage(
-          detail
-            ? `Request failed with status ${response.status}: ${detail}`
-            : `Request failed with status ${response.status}.`
-        );
+      if (!response.body) {
+        setErrorMessage("Stream was requested, but no response body was returned.");
+        syncElapsed();
         setRequestState("error");
         return;
       }
 
+      pushLiveLog("info", "ui", "Stream connected. Waiting for backend updates...");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalEnvelope: unknown = null;
+      let streamError: string | null = null;
+
+      const consumeLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        let event: unknown;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
+          pushLiveLog("error", "ui", `Could not parse stream line: ${trimmed}`);
+          return;
+        }
+
+        if (!event || typeof event !== "object") return;
+        const eventObj = event as Record<string, unknown>;
+        const eventType = String(eventObj.type ?? "").toLowerCase();
+        const source = typeof eventObj.source === "string" ? eventObj.source : "backend";
+        syncElapsed();
+
+        if (eventType === "progress") {
+          const normalizedProgress = normalizeProgressEvent(eventObj);
+          pushLiveLog("info", source, normalizedProgress.rendered, normalizedProgress.data);
+          pushTimelineProgress(normalizedProgress);
+          return;
+        }
+
+        if (eventType === "status") {
+          const state = typeof eventObj.state === "string" ? eventObj.state.trim() : "";
+          const message =
+            typeof eventObj.message === "string" && eventObj.message.trim()
+              ? eventObj.message.trim()
+              : "Status update received.";
+          const rendered = state ? `[${state}] ${message}` : message;
+          pushLiveLog("info", source, rendered);
+          pushTimelineStatus(eventObj);
+          return;
+        }
+
+        if (eventType === "update") {
+          const message =
+            typeof eventObj.message === "string"
+              ? eventObj.message
+              : `Update received (${eventType}).`;
+          pushLiveLog("info", source, message);
+          return;
+        }
+
+        if (eventType === "final") {
+          finalEnvelope = normalizeFinalEnvelope(eventObj);
+          setResponseBody(finalEnvelope);
+          pushLiveLog("success", source, "Final response received from backend.");
+          upsertTimelineStep("final_response", "Final response", "Final response received from backend.");
+          syncElapsed();
+          return;
+        }
+
+        if (eventType === "error") {
+          streamError =
+            typeof eventObj.detail === "string"
+              ? eventObj.detail
+              : typeof eventObj.message === "string"
+                ? eventObj.message
+                : "Stream failed with an unknown error.";
+          pushLiveLog("error", source, streamError);
+          upsertTimelineStep("stream_error", "Stream error", streamError);
+          syncElapsed();
+          return;
+        }
+
+        pushLiveLog("info", source, `Event: ${trimmed}`);
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) consumeLine(line);
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) consumeLine(buffer);
+
+      if (streamError) {
+        setErrorMessage(streamError);
+        syncElapsed();
+        setRequestState("error");
+        return;
+      }
+
+      if (!finalEnvelope) {
+        setErrorMessage("Stream ended before a final backend response was received.");
+        syncElapsed();
+        setRequestState("error");
+        return;
+      }
+
+      syncElapsed();
       setRequestState("success");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Request failed.");
+      syncElapsed();
       setRequestState("error");
     }
   }
@@ -561,27 +1124,14 @@ export default function DashboardStorybookTestPage() {
           <strong style={{ color: "#2b180a" }}>Target</strong>
           <button
             type="button"
-            onClick={() => setApiTarget("main")}
             className="rounded-full border px-3 py-1 text-xs font-semibold"
             style={{
               borderColor: "#dbc9b7",
-              background: apiTarget === "main" ? "#f0e8dc" : "#fffaf4",
+              background: "#f0e8dc",
               color: "#2b180a",
             }}
           >
-            Main (8010)
-          </button>
-          <button
-            type="button"
-            onClick={() => setApiTarget("backend")}
-            className="rounded-full border px-3 py-1 text-xs font-semibold"
-            style={{
-              borderColor: "#dbc9b7",
-              background: apiTarget === "backend" ? "#f0e8dc" : "#fffaf4",
-              color: "#2b180a",
-            }}
-          >
-            Storybook (8020)
+            Main (8010) via A2A
           </button>
           <button
             type="button"
@@ -606,10 +1156,7 @@ export default function DashboardStorybookTestPage() {
                     : "neutral"
             }
           />
-          <StatusChip
-            label={apiTarget === "main" ? "Main -> Storybook via A2A" : "Storybook backend direct"}
-            tone="neutral"
-          />
+          <StatusChip label="Main -> Storybook via A2A" tone="ok" />
         </div>
         {healthMessage ? (
           <pre
@@ -750,9 +1297,15 @@ export default function DashboardStorybookTestPage() {
                     />
                     {entry.previewUrl ? (
                       <div className="mt-2 rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
-                        <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-md">
+                        <motion.button
+                          type="button"
+                          className="flex min-h-40 w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
+                          onClick={() => setExpandedImageUrl(entry.previewUrl)}
+                        >
                           <img src={entry.previewUrl} alt="world reference preview" className="max-h-56 max-w-full object-contain" />
-                        </div>
+                        </motion.button>
                       </div>
                     ) : null}
                   </div>
@@ -821,9 +1374,15 @@ export default function DashboardStorybookTestPage() {
                     />
                     {entry.previewUrl ? (
                       <div className="mt-2 rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
-                        <div className="flex min-h-40 items-center justify-center overflow-hidden rounded-md">
+                        <motion.button
+                          type="button"
+                          className="flex min-h-40 w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
+                          onClick={() => setExpandedImageUrl(entry.previewUrl)}
+                        >
                           <img src={entry.previewUrl} alt="character drawing preview" className="max-h-56 max-w-full object-contain" />
-                        </div>
+                        </motion.button>
                       </div>
                     ) : null}
                   </div>
@@ -844,7 +1403,7 @@ export default function DashboardStorybookTestPage() {
             }}
           >
             {requestState === "loading" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            Send Request
+            Send Request (Live)
           </button>
         </div>
 
@@ -887,6 +1446,245 @@ export default function DashboardStorybookTestPage() {
                   tone="neutral"
                 />
               ) : null}
+            </div>
+
+            {hasActiveRun ? (
+              <motion.div
+                className="mt-3 rounded-xl border p-3"
+                style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className={chatStyles.messageGroup}>
+                  <div className={chatStyles.aiAvatar}>
+                    <Sparkles size={13} />
+                  </div>
+
+                  <div className={`${chatStyles.bubbleStack} ${chatStyles.bubbleStackStory}`}>
+                    <div className={chatStyles.thoughtSummaryWrap}>
+                      <button
+                        type="button"
+                        className={chatStyles.thoughtSummary}
+                        onClick={() => setTimelineExpanded((previous) => !previous)}
+                      >
+                        Dreamed for {dreamedForSeconds}s
+                        <ChevronRight
+                          size={11}
+                          className={timelineExpanded ? chatStyles.chevronOpen : chatStyles.chevronClosed}
+                        />
+                      </button>
+                    </div>
+
+                    <AnimatePresence initial={false}>
+                      {timelineExpanded ? (
+                        <motion.div
+                          key="timeline-open"
+                          className={chatStyles.thoughtLogPanel}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <p className={chatStyles.thoughtLogTitle}>Dreaming</p>
+
+                          {liveTimelineSteps.length === 0 ? (
+                            <p className={chatStyles.thoughtLogStepDetail}>Waiting for first backend step...</p>
+                          ) : (
+                            <AnimatePresence initial={false}>
+                              {liveTimelineSteps.map((step, index) => {
+                                const isLastStep = index === liveTimelineSteps.length - 1;
+                                return (
+                                  <motion.div
+                                    key={step.key}
+                                    className={chatStyles.thoughtLogStep}
+                                    initial={{ opacity: 0, y: 12 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -6 }}
+                                    layout="position"
+                                    transition={{
+                                      duration: 0.24,
+                                      delay: Math.min(index * 0.035, 0.2),
+                                      ease: [0.22, 1, 0.36, 1],
+                                    }}
+                                  >
+                                    <div className={chatStyles.thoughtLogBulletCol}>
+                                      <motion.span
+                                        className={chatStyles.thoughtLogBullet}
+                                        initial={{ scale: 0.75, opacity: 0.5 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        transition={{ duration: 0.2 }}
+                                      />
+                                      {!isLastStep ? <span className={chatStyles.thoughtLogLine} /> : null}
+                                    </div>
+                                    <div className={chatStyles.thoughtLogStepContent}>
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                          <p className={chatStyles.thoughtLogStepTitle}>{step.title}</p>
+                                          <p className={chatStyles.thoughtLogStepDetail}>{step.detail}</p>
+                                        </div>
+                                        {step.data !== undefined ? (
+                                          <button
+                                            type="button"
+                                            className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold"
+                                            style={{ borderColor: "#dbc9b7", background: "#fffaf4", color: "#7a5a45" }}
+                                            onClick={() => toggleTimelineJson(step.key)}
+                                          >
+                                            JSON
+                                            <ChevronDown
+                                              size={11}
+                                              className={openTimelineJsonByKey[step.key] ? "rotate-180 transition-transform" : "transition-transform"}
+                                            />
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                      {step.data !== undefined ? (
+                                        openTimelineJsonByKey[step.key] ? (
+                                          <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
+                                            {formatJsonForDisplay(step.data)}
+                                          </pre>
+                                        ) : null
+                                      ) : null}
+
+                                      {step.imageUrls.length > 0 ? (
+                                        <div className={chatStyles.thoughtLogImageGrid}>
+                                          {step.imageUrls.map((imageUrl, imageIndex) => (
+                                            <motion.button
+                                              type="button"
+                                              key={`${step.key}-img-${imageIndex}`}
+                                              className={chatStyles.thoughtLogImageCard}
+                                              initial={{ opacity: 0, scale: 0.9 }}
+                                              animate={{ opacity: 1, scale: 1 }}
+                                              transition={{ duration: 0.24 }}
+                                              onClick={() => setExpandedImageUrl(imageUrl)}
+                                            >
+                                              <img src={imageUrl} alt={`Generated visual ${imageIndex + 1}`} loading="lazy" />
+                                              <span className={chatStyles.thoughtLogImageIndex}>{imageIndex + 1}</span>
+                                            </motion.button>
+                                          ))}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </motion.div>
+                                );
+                              })}
+                            </AnimatePresence>
+                          )}
+
+                          {requestState === "loading" ? (
+                            <div className={chatStyles.dreamingSpinnerRow}>
+                              <span className={chatStyles.dreamingSpinnerIndent}>
+                                <span className={chatStyles.dreamingSpinner} />
+                              </span>
+                              <span className={chatStyles.dreamingFinalizingText}>Finalizing the story...</span>
+                            </div>
+                          ) : null}
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+
+                    {(requestState === "success" || requestState === "loading") ? (
+                      <div className={chatStyles.storyResult}>
+                        {exactBookPreview ? (
+                          <div className={chatStyles.storyResultBook}>
+                            <StoryBook
+                              title={exactBookPreview.title}
+                              ageBand={exactBookPreview.ageBand}
+                              pages={exactBookPreview.pages}
+                              cover={exactBookPreview.cover}
+                            />
+                          </div>
+                        ) : (
+                          <div className={`${chatStyles.bubble} ${chatStyles.bubbleAi}`}>
+                            Storybook preview will appear here as soon as the final response is ready.
+                          </div>
+                        )}
+
+                        <div className={chatStyles.storyResultActions}>
+                          <button type="button" className={chatStyles.storyResultRegenerateBtn} onClick={sendRequest} disabled={!canSubmit}>
+                            <RotateCw size={12} strokeWidth={2.5} className={chatStyles.storyResultRegenerateIcon} />
+                            Regenerate
+                          </button>
+                          <button type="button" className={chatStyles.storyResultActionBtn} onClick={copyResponse}>
+                            {copyState === "done" ? "Copied" : "Copy JSON"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </motion.div>
+            ) : null}
+
+            <div className="mt-3 rounded-xl border p-3" style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}>
+              <p className="text-xs font-semibold" style={{ color: "#9a7a65" }}>
+                Live backend logs
+              </p>
+              {liveLogs.length === 0 ? (
+                <p className="mt-2 text-[11px]" style={{ color: "#9a7a65" }}>
+                  No events yet. Submit a request to see step-by-step backend updates.
+                </p>
+              ) : (
+                <div
+                  className="mt-2 max-h-56 overflow-auto rounded-lg border p-2"
+                  style={{ borderColor: "#dbc9b7", background: "#fcf6ef" }}
+                >
+                  <ul className="space-y-1">
+                    {liveLogs.map((log, index) => (
+                      <motion.li
+                        key={log.id}
+                        className="break-words rounded px-2 py-1 text-[11px]"
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{
+                          duration: 0.18,
+                          delay: Math.min(index * 0.01, 0.12),
+                          ease: [0.22, 1, 0.36, 1],
+                        }}
+                        style={{
+                          background:
+                            log.level === "error"
+                              ? "#feefef"
+                              : log.level === "success"
+                                ? "#edf9ee"
+                                : "#f8efe5",
+                          color:
+                            log.level === "error"
+                              ? "#981b1b"
+                              : log.level === "success"
+                                ? "#1f6a32"
+                                : "#7a5a45",
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="min-w-0 flex-1 break-words">
+                            <strong>[{log.source}]</strong> {log.message}
+                          </p>
+                          {log.data !== undefined ? (
+                            <button
+                              type="button"
+                              className="inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold"
+                              style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                              onClick={() => toggleLogJson(log.id)}
+                            >
+                              JSON
+                              <ChevronDown
+                                size={11}
+                                className={openLogJsonById[log.id] ? "rotate-180 transition-transform" : "transition-transform"}
+                              />
+                            </button>
+                          ) : null}
+                        </div>
+                        {log.data !== undefined && openLogJsonById[log.id] ? (
+                          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
+                            {formatJsonForDisplay(log.data)}
+                          </pre>
+                        ) : null}
+                      </motion.li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {Object.keys(generationSources).length > 0 ? (
@@ -971,11 +1769,15 @@ export default function DashboardStorybookTestPage() {
                 Each card below maps one right-page story entry to its left-page generated illustration.
               </p>
               <div className="mt-3 space-y-3">
-                {storyPages.map((page) => (
-                  <article
+                {storyPages.map((page, index) => (
+                  <motion.article
                     key={`story-page-${page.pageNumber}`}
                     className="min-w-0 rounded-xl border p-3"
                     style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.25 }}
+                    transition={{ duration: 0.24, delay: Math.min(index * 0.03, 0.15) }}
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusChip label={`Page ${page.pageNumber} of 5`} tone="neutral" />
@@ -991,13 +1793,19 @@ export default function DashboardStorybookTestPage() {
                     ) : null}
                     {page.imageUrl ? (
                       <div className="mt-2 w-full rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
-                        <div className="flex w-full items-center justify-center overflow-hidden rounded-md">
+                        <motion.button
+                          type="button"
+                          className="flex w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
+                          onClick={() => setExpandedImageUrl(page.imageUrl)}
+                        >
                           <img
                             src={page.imageUrl}
                             alt={`Page ${page.pageNumber} illustration`}
                             className="max-h-[320px] w-auto max-w-full rounded object-contain"
                           />
-                        </div>
+                        </motion.button>
                         <a
                           href={page.imageUrl}
                           target="_blank"
@@ -1013,7 +1821,7 @@ export default function DashboardStorybookTestPage() {
                         No image URL found for this page.
                       </p>
                     )}
-                  </article>
+                  </motion.article>
                 ))}
               </div>
             </div>
@@ -1026,10 +1834,14 @@ export default function DashboardStorybookTestPage() {
               </h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {generatedImages.map((url, index) => (
-                  <article
+                  <motion.article
                     key={`img-${index}`}
                     className="min-w-0 rounded-xl border p-2"
                     style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.25 }}
+                    transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.15) }}
                   >
                     <div className="flex items-center justify-between px-1">
                       <p className="text-[11px] font-semibold" style={{ color: "#7a5a45" }}>
@@ -1046,11 +1858,17 @@ export default function DashboardStorybookTestPage() {
                       </a>
                     </div>
                     <div className="mt-2 w-full rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
-                      <div className="flex w-full aspect-[4/3] items-center justify-center overflow-hidden rounded-md">
+                      <motion.button
+                        type="button"
+                        className="flex w-full aspect-[4/3] cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        onClick={() => setExpandedImageUrl(url)}
+                      >
                         <img src={url} alt={`scene ${index + 1}`} className="h-full w-full rounded object-contain" />
-                      </div>
+                      </motion.button>
                     </div>
-                  </article>
+                  </motion.article>
                 ))}
               </div>
             </div>
@@ -1063,7 +1881,15 @@ export default function DashboardStorybookTestPage() {
               </h3>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {characters.map((character, index) => (
-                  <article key={`char-${index}`} className="min-w-0 rounded-xl border p-3" style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}>
+                  <motion.article
+                    key={`char-${index}`}
+                    className="min-w-0 rounded-xl border p-3"
+                    style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.25 }}
+                    transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.15) }}
+                  >
                     <p className="text-xs font-semibold" style={{ color: "#2b180a" }}>
                       {character.name || `Character ${index + 1}`}
                     </p>
@@ -1083,13 +1909,19 @@ export default function DashboardStorybookTestPage() {
                                 Image {imageIndex + 1}
                               </p>
                             </div>
-                            <div className="flex w-full aspect-[3/4] items-center justify-center overflow-hidden rounded-md">
+                            <motion.button
+                              type="button"
+                              className="flex w-full aspect-[3/4] cursor-zoom-in items-center justify-center overflow-hidden rounded-md"
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.99 }}
+                              onClick={() => setExpandedImageUrl(imageUrl)}
+                            >
                               <img
                                 src={imageUrl}
                                 alt={`${character.name || "character"} image ${imageIndex + 1}`}
                                 className="h-full w-full rounded object-contain"
                               />
-                            </div>
+                            </motion.button>
                             <a
                               href={imageUrl}
                               target="_blank"
@@ -1103,7 +1935,7 @@ export default function DashboardStorybookTestPage() {
                         ))}
                       </div>
                     ) : null}
-                  </article>
+                  </motion.article>
                 ))}
               </div>
             </div>
@@ -1116,10 +1948,14 @@ export default function DashboardStorybookTestPage() {
               </h3>
               <div className="mt-3 space-y-3">
                 {spreads.map((spread, index) => (
-                  <article
+                  <motion.article
                     key={`spread-${index}`}
                     className="rounded-xl border p-3"
                     style={{ borderColor: "#dbc9b7", background: "#fffaf4" }}
+                    initial={{ opacity: 0, y: 10 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.25 }}
+                    transition={{ duration: 0.22, delay: Math.min(index * 0.03, 0.15) }}
                   >
                     <p className="break-words text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "#7a5a45" }}>
                       Spread {spread.spread_index ?? index}
@@ -1129,10 +1965,10 @@ export default function DashboardStorybookTestPage() {
                       Left: {spread.left?.kind || "n/a"} | Right: {spread.right?.kind || "n/a"}
                     </p>
                     <div className="mt-2 grid gap-2 lg:grid-cols-2">
-                      <SpreadSideCard side={spread.left} pageTitle="Left page" />
-                      <SpreadSideCard side={spread.right} pageTitle="Right page" />
+                      <SpreadSideCard side={spread.left} pageTitle="Left page" onExpandImage={setExpandedImageUrl} />
+                      <SpreadSideCard side={spread.right} pageTitle="Right page" onExpandImage={setExpandedImageUrl} />
                     </div>
-                  </article>
+                  </motion.article>
                 ))}
               </div>
             </div>
@@ -1171,22 +2007,45 @@ export default function DashboardStorybookTestPage() {
         </div>
       </div>
 
-      {exactBookPreview ? (
-        <div className="mt-6 space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: "#9a7a65" }}>
-            Exact Book UI Preview
-          </p>
-          <p className="text-xs" style={{ color: "#9a7a65" }}>
-            Same component as the real story reader (`/dashboard/stories/[id]`), rendered with this test response.
-          </p>
-          <StoryBook
-            title={exactBookPreview.title}
-            ageBand={exactBookPreview.ageBand}
-            pages={exactBookPreview.pages}
-            cover={exactBookPreview.cover}
-          />
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {expandedImageUrl ? (
+          <motion.div
+            key="image-modal"
+            className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setExpandedImageUrl(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ duration: 0.2 }}
+              className="max-h-[92vh] max-w-[92vw] overflow-hidden rounded-2xl border bg-[#fffaf4] p-2"
+              style={{ borderColor: "#dbc9b7" }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-2 flex items-center justify-end">
+                <button
+                  type="button"
+                  className="rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{ borderColor: "#dbc9b7", background: "#fcf6ef", color: "#2b180a" }}
+                  onClick={() => setExpandedImageUrl(null)}
+                >
+                  Close
+                </button>
+              </div>
+              <img
+                src={expandedImageUrl}
+                alt="Expanded generated visual"
+                className="max-h-[82vh] max-w-[88vw] rounded object-contain"
+              />
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
     </section>
   );
 }

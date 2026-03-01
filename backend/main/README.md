@@ -4,7 +4,7 @@ This `backend/main/` service is the orchestration layer between UI/clients and s
 
 It currently routes to:
 - `backend/a2a-crew-ai-character-maker` for character workflows
-- `backend/maf-story-book-maker` for short storybook workflows
+- `backend/a2a-maf-story-book-maker` for short storybook workflows
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Service health plus character backend connectivity snapshot.
 A2A health probe for character backend.
 
 ### `GET /api/v1/orchestrate/storybook-health`
-A2A health probe for storybook backend (`maf-story-book-maker`).
+A2A health probe for storybook backend (`a2a-maf-story-book-maker`).
 
 ### `POST /api/v1/orchestrate/character`
 Character orchestration entrypoint.
@@ -63,7 +63,7 @@ python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ### 2) Storybook backend (8020)
 
 ```bash
-cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/maf-story-book-maker
+cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/a2a-maf-story-book-maker
 source .venv/bin/activate
 python -m uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
 ```
