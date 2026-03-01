@@ -424,6 +424,28 @@ class A2ABackendClient:
                         "message": fallback_message,
                     }
         except Exception as exc:
+            raw_error = str(exc)
+            if (
+                "Invalid SSE response or protocol error" in raw_error
+                and "application/json" in raw_error
+            ):
+                probe_detail = ""
+                try:
+                    async with httpx.AsyncClient(timeout=timeout) as probe_http_client:
+                        probe_transport = JsonRpcTransport(
+                            httpx_client=probe_http_client,
+                            url=self._settings.a2a_story_rpc_url,
+                        )
+                        await probe_transport.send_message(request_params)
+                except Exception as probe_exc:  # pragma: no cover - defensive probe for clearer diagnostics
+                    probe_detail = f" JSON-RPC detail: {probe_exc}"
+
+                raise A2ABackendError(
+                    f"A2A story streaming call failed for {self._settings.a2a_story_rpc_url}: {exc}. "
+                    "The backend returned JSON instead of SSE, which usually means the request was rejected before streaming "
+                    f"(commonly payload too large).{probe_detail}"
+                ) from exc
+
             raise A2ABackendError(
                 f"A2A story streaming call failed for {self._settings.a2a_story_rpc_url}: {exc}"
             ) from exc

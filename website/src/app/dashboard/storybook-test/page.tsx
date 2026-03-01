@@ -153,6 +153,81 @@ function fileToDataUrl(file: File) {
   });
 }
 
+function estimateDataUrlBytes(dataUrl: string): number {
+  const commaIndex = dataUrl.indexOf(",");
+  const base64 = commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl;
+  const paddingMatch = base64.match(/=+$/);
+  const padding = paddingMatch ? paddingMatch[0].length : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+async function fileToOptimizedDataUrl(file: File, maxBytes = 650_000): Promise<string> {
+  const originalDataUrl = await fileToDataUrl(file);
+  const originalBytes = estimateDataUrlBytes(originalDataUrl);
+  if (originalBytes <= maxBytes) {
+    return originalDataUrl;
+  }
+
+  if (typeof window === "undefined" || !file.type.startsWith("image/")) {
+    return originalDataUrl;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to decode uploaded image for optimization."));
+      img.src = objectUrl;
+    });
+
+    const maxSide = 1400;
+    const baseScale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const baseWidth = Math.max(320, Math.round(image.naturalWidth * baseScale));
+    const baseHeight = Math.max(320, Math.round(image.naturalHeight * baseScale));
+
+    let bestDataUrl = originalDataUrl;
+    let bestBytes = originalBytes;
+
+    const qualities = [0.86, 0.78, 0.7, 0.62, 0.54, 0.46];
+    for (let shrinkStep = 0; shrinkStep < 5; shrinkStep += 1) {
+      const shrinkFactor = Math.pow(0.86, shrinkStep);
+      const targetWidth = Math.max(256, Math.round(baseWidth * shrinkFactor));
+      const targetHeight = Math.max(256, Math.round(baseHeight * shrinkFactor));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+      if (!context) continue;
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+      for (const quality of qualities) {
+        const candidateDataUrl = canvas.toDataURL("image/jpeg", quality);
+        const candidateBytes = estimateDataUrlBytes(candidateDataUrl);
+
+        if (candidateBytes < bestBytes) {
+          bestDataUrl = candidateDataUrl;
+          bestBytes = candidateBytes;
+        }
+
+        if (candidateBytes <= maxBytes) {
+          return candidateDataUrl;
+        }
+      }
+    }
+
+    return bestDataUrl;
+  } catch {
+    return originalDataUrl;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function unwrapStorybookPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object") return payload;
   const backendResponse = (payload as { backend_response?: unknown }).backend_response;
@@ -558,7 +633,7 @@ export default function DashboardStorybookTestPage() {
         worldReferences.map(async (entry) => ({
           title: cleanText(entry.title),
           description: cleanText(entry.description),
-          image_data: entry.file ? await fileToDataUrl(entry.file) : undefined,
+          image_data: entry.file ? await fileToOptimizedDataUrl(entry.file) : undefined,
         }))
       )
     ).filter(hasAnyValue);
@@ -568,7 +643,7 @@ export default function DashboardStorybookTestPage() {
         drawings.map(async (entry) => ({
           description: cleanText(entry.description),
           notes: cleanText(entry.notes),
-          image_data: entry.file ? await fileToDataUrl(entry.file) : undefined,
+          image_data: entry.file ? await fileToOptimizedDataUrl(entry.file) : undefined,
         }))
       )
     ).filter(hasAnyValue);
@@ -1512,8 +1587,20 @@ export default function DashboardStorybookTestPage() {
                                       <motion.span
                                         className={chatStyles.thoughtLogBullet}
                                         initial={{ scale: 0.75, opacity: 0.5 }}
-                                        animate={{ scale: 1, opacity: 1 }}
-                                        transition={{ duration: 0.2 }}
+                                        animate={
+                                          isLastStep && requestState === "loading"
+                                            ? {
+                                                scale: [1, 1.5, 1],
+                                                opacity: [1, 0.6, 1],
+                                                backgroundColor: ["#c97d42", "#e8943d", "#c97d42"],
+                                              }
+                                            : { scale: 1, opacity: 1 }
+                                        }
+                                        transition={
+                                          isLastStep && requestState === "loading"
+                                            ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" }
+                                            : { duration: 0.2 }
+                                        }
                                       />
                                       {!isLastStep ? <span className={chatStyles.thoughtLogLine} /> : null}
                                     </div>
@@ -1531,20 +1618,32 @@ export default function DashboardStorybookTestPage() {
                                             onClick={() => toggleTimelineJson(step.key)}
                                           >
                                             JSON
-                                            <ChevronDown
-                                              size={11}
-                                              className={openTimelineJsonByKey[step.key] ? "rotate-180 transition-transform" : "transition-transform"}
-                                            />
+                                            <motion.span
+                                              animate={{ rotate: openTimelineJsonByKey[step.key] ? 180 : 0 }}
+                                              transition={{ duration: 0.22, ease: "easeInOut" }}
+                                              style={{ display: "inline-flex", transformOrigin: "center" }}
+                                            >
+                                              <ChevronDown size={11} />
+                                            </motion.span>
                                           </button>
                                         ) : null}
                                       </div>
-                                      {step.data !== undefined ? (
-                                        openTimelineJsonByKey[step.key] ? (
-                                          <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
-                                            {formatJsonForDisplay(step.data)}
-                                          </pre>
-                                        ) : null
-                                      ) : null}
+                                      <AnimatePresence initial={false}>
+                                        {step.data !== undefined && openTimelineJsonByKey[step.key] && (
+                                          <motion.div
+                                            key={`json-tl-${step.key}`}
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: "auto", opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                                            style={{ overflow: "hidden" }}
+                                          >
+                                            <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
+                                              {formatJsonForDisplay(step.data)}
+                                            </pre>
+                                          </motion.div>
+                                        )}
+                                      </AnimatePresence>
 
                                       {step.imageUrls.length > 0 ? (
                                         <div className={chatStyles.thoughtLogImageGrid}>
@@ -1572,12 +1671,23 @@ export default function DashboardStorybookTestPage() {
                           )}
 
                           {requestState === "loading" ? (
-                            <div className={chatStyles.dreamingSpinnerRow}>
+                            <motion.div
+                              className={chatStyles.dreamingSpinnerRow}
+                              initial={{ opacity: 0, x: -6 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                            >
                               <span className={chatStyles.dreamingSpinnerIndent}>
                                 <span className={chatStyles.dreamingSpinner} />
                               </span>
-                              <span className={chatStyles.dreamingFinalizingText}>Finalizing the story...</span>
-                            </div>
+                              <motion.span
+                                className={chatStyles.dreamingFinalizingText}
+                                animate={{ opacity: [1, 0.5, 1] }}
+                                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                              >
+                                Finalizing the story...
+                              </motion.span>
+                            </motion.div>
                           ) : null}
                         </motion.div>
                       ) : null}
@@ -1668,18 +1778,32 @@ export default function DashboardStorybookTestPage() {
                               onClick={() => toggleLogJson(log.id)}
                             >
                               JSON
-                              <ChevronDown
-                                size={11}
-                                className={openLogJsonById[log.id] ? "rotate-180 transition-transform" : "transition-transform"}
-                              />
+                              <motion.span
+                                animate={{ rotate: openLogJsonById[log.id] ? 180 : 0 }}
+                                transition={{ duration: 0.22, ease: "easeInOut" }}
+                                style={{ display: "inline-flex", transformOrigin: "center" }}
+                              >
+                                <ChevronDown size={11} />
+                              </motion.span>
                             </button>
                           ) : null}
                         </div>
-                        {log.data !== undefined && openLogJsonById[log.id] ? (
-                          <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
-                            {formatJsonForDisplay(log.data)}
-                          </pre>
-                        ) : null}
+                        <AnimatePresence initial={false}>
+                          {log.data !== undefined && openLogJsonById[log.id] && (
+                            <motion.div
+                              key={`json-log-${log.id}`}
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                              style={{ overflow: "hidden" }}
+                            >
+                              <pre className="mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-words rounded border bg-[#f9f1e7] p-2 font-mono text-[10px] leading-4" style={{ borderColor: "#dbc9b7" }}>
+                                {formatJsonForDisplay(log.data)}
+                              </pre>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </motion.li>
                     ))}
                   </ul>
