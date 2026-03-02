@@ -14,9 +14,9 @@ const settingRows = [
     defaultValue: true,
   },
   {
-    id: "auto-subtitles",
-    title: "Auto Subtitles",
-    description: "Generate subtitles for every video scene automatically.",
+    id: "read-aloud-voice",
+    title: "Read-Aloud Voice",
+    description: "Attach text-to-voice narration so stories can be read out loud for accessibility.",
     defaultValue: true,
   },
   {

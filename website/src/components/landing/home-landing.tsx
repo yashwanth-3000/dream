@@ -29,20 +29,20 @@ const serviceSteps = [
     cta: "Generate story",
   },
   {
-    title: "Video",
+    title: "Quiz",
     number: "03",
-    body: "Transform each chapter into short animated scenes so kids can both read and watch their stories in one flow.",
+    body: "After reading, parents can ask chat to \"create a quiz based on this storybook\" and get age-appropriate questions instantly.",
     image:
       "https://framerusercontent.com/images/3jSoIlDJyMfLx6JTWfHwuwwhjSw.png?scale-down-to=2048&width=2144&height=730",
-    cta: "Create video",
+    cta: "Create quiz",
   },
   {
-    title: "Replay",
+    title: "Read Aloud",
     number: "04",
-    body: "Save favorite worlds, revisit characters, and continue the same universe over bedtime sessions and classroom activities.",
+    body: "Attach text-to-voice narration to read every story out loud for accessibility, early readers, and bedtime routines.",
     image:
       "https://framerusercontent.com/images/xS3VRUcNazVQ09WqJiWUYi39XeI.jpg?width=1200&height=900",
-    cta: "Open library",
+    cta: "Play narration",
   },
 ];
 
@@ -55,22 +55,34 @@ const processSteps = [
   },
   {
     number: "02",
-    title: "Generate Story + Video",
+    title: "Generate Storybook",
     timeline: "2-3 mins",
-    copy: "Dream writes the narrative, creates matching visuals, and assembles short animated scenes with read-aloud pacing.",
+    copy: "Dream writes a complete kid-safe storybook with matching visuals, clear pacing, and optional lesson-focused structure.",
   },
   {
     number: "03",
-    title: "Save, Share, Replay",
+    title: "Read, Reflect, Quiz",
     timeline: "Anytime",
-    copy: "Reuse characters, export episodes, and keep building the same world so every session feels connected and magical.",
+    copy: "Reuse characters, ask chat for a quiz based on the storybook, and turn on read-aloud voice for reflection and comprehension.",
   },
 ];
 
 const faqItems = [
   {
     q: "What is Dream, exactly?",
-    a: "Dream is a kid-safe text-to-story and text-to-video platform. You write a prompt and Dream creates story chapters and short animated scenes from it.",
+    a: "Dream is a kid-safe storybook platform. You write a prompt, Dream creates a personalized storybook, and parents can ask chat to generate quizzes from it.",
+  },
+  {
+    q: "Why is Dream storybook-first?",
+    a: "Many kids are stuck in high-speed screen routines that fragment attention. Dream resets the pattern with complete stories, active reading, and parent-led quiz reflection so creativity and confidence grow over time.",
+  },
+  {
+    q: "Can parents create quizzes from a finished storybook?",
+    a: "Yes. In chat, simply type: \"Create a quiz based on this storybook.\" Dream generates age-appropriate questions with answer checks.",
+  },
+  {
+    q: "Do you support read-aloud accessibility?",
+    a: "Yes. Dream includes attached text-to-voice narration so stories can be read out loud for accessibility and emerging readers.",
   },
   {
     q: "Is Dream safe for children?",
@@ -101,7 +113,7 @@ const team = [
   },
   {
     name: "David Park",
-    role: "Animation Engineer",
+    role: "Storybook Experience Engineer",
     image:
       "https://framerusercontent.com/images/RoOV7tIiyQQk02qpHtIeMdUpMA.png?width=1024&height=2000",
   },
@@ -276,7 +288,7 @@ export default function HomeLanding() {
                 },
               }}
             >
-              {"From imagination to story and video.".split(" ").map((word, index) => (
+              {"From imagination to finished storybooks.".split(" ").map((word, index) => (
                 <motion.span
                   key={`${word}-${index}`}
                   variants={{
@@ -299,9 +311,11 @@ export default function HomeLanding() {
             </motion.h1>
 
             <p className={styles.heroCopy}>
-              Dream turns one text prompt into a kid-safe story and short animated
-              video. Create magical worlds, keep character memory, and bring
-              bedtime ideas to life in minutes.
+              Dream turns one text prompt into a kid-safe storybook with reusable
+              characters, parent-ready quizzes, and read-aloud voice support.
+              Each session becomes a meaningful family ritual where kids build
+              original characters, think through story choices, and strengthen
+              focus through active reading.
             </p>
 
             <div className={styles.heroActions}>
@@ -405,9 +419,9 @@ export default function HomeLanding() {
             <p className={styles.sectionKicker}>What Dream is</p>
             <AnimatedSubheading text="The storytelling studio for kids." />
             <p className={styles.sectionCopy}>
-              Dream is built for text-to-story and text-to-video creation in one
-              place. Families and classrooms use it to generate safe narratives,
-              scenes, and replayable worlds from a single prompt.
+              Dream is built for storybook-first creation in one place. Families
+              and classrooms use it to generate safe narratives, deepen
+              creativity, and continue with quizzes and read-aloud support.
             </p>
           </motion.div>
 
@@ -425,8 +439,8 @@ export default function HomeLanding() {
                 <p>Stories generated with Dream</p>
               </article>
               <article className={styles.metricCard}>
-                <h3>32k+</h3>
-                <p>Short videos created from prompts</p>
+                <h3>48k+</h3>
+                <p>Quizzes generated from finished storybooks</p>
               </article>
               <article className={styles.metricCard}>
                 <h3>4.9/5</h3>
@@ -440,7 +454,8 @@ export default function HomeLanding() {
                 <p className={styles.hiringOpen}>Families + classrooms + creators</p>
                 <p className={styles.hiringCopy}>
                   Dream combines safe generation, consistent character memory,
-                  story progression, and instant visual output in one workflow.
+                  story progression, quiz support, and read-aloud accessibility
+                  in one workflow.
                 </p>
               </div>
               <a href="/chat" className={styles.ctaDarkSmall}>
@@ -487,11 +502,13 @@ export default function HomeLanding() {
               </div>
               <h3 className={styles.modeTitle}>Chat with Dream</h3>
               <p className={styles.modeDesc}>
-                Just describe what you want in plain language. Dream handles story, video, and characters — all in one conversation. No setup, no steps.
+                Just describe what you want in plain language. Dream handles
+                storybooks, characters, and parent quiz generation in one
+                conversation. No setup, no steps.
               </p>
               <ul className={styles.modeFeatures}>
                 <li>All-in-one conversational AI</li>
-                <li>Story + video generated together</li>
+                <li>Storybook + quiz flow in chat</li>
                 <li>Best for families &amp; first sessions</li>
               </ul>
               <a href="/chat" className={styles.modeCta}>
@@ -517,11 +534,13 @@ export default function HomeLanding() {
               </div>
               <h3 className={styles.modeTitleWarm}>Dream Studio</h3>
               <p className={styles.modeDescWarm}>
-                Take full control with dedicated dashboards. Manage your character vault, browse the story library, and run video jobs independently.
+                Take full control with dedicated dashboards. Manage your
+                character vault, browse the story library, and tune read-aloud
+                accessibility settings.
               </p>
               <ul className={styles.modeFeaturesWarm}>
                 <li>Character vault &amp; memory</li>
-                <li>Story &amp; video libraries</li>
+                <li>Storybook library</li>
                 <li>Best for classrooms &amp; creators</li>
               </ul>
               <a href="/dashboard" className={styles.modeCtaWarm}>
@@ -541,10 +560,11 @@ export default function HomeLanding() {
             custom={0.02}
           >
             <p className={styles.sectionKicker}>Dream Studio</p>
-            <AnimatedSubheading text="We handle prompt to story to video for you." />
+            <AnimatedSubheading text="We handle prompt to storybook to quiz for you." />
             <p className={styles.sectionCopy}>
               Move from idea to finished content quickly with controls for age,
-              tone, pacing, character consistency, and visual continuity.
+              tone, pacing, character consistency, quiz difficulty, and
+              read-aloud voice.
             </p>
           </motion.div>
 
@@ -628,8 +648,8 @@ export default function HomeLanding() {
           >
             <p className={styles.quoteBody}>
               &ldquo;My daughter writes one prompt, and Dream gives us a full
-              bedtime adventure plus a short video recap. We use it every night
-              now.&rdquo;
+              bedtime adventure plus a quick quiz and read-aloud playback. We
+              use it every night now.&rdquo;
             </p>
             <div>
               <p className={styles.quoteName}>Sarah Chen</p>
@@ -727,7 +747,7 @@ export default function HomeLanding() {
                 {[
                   "Unstable story continuity",
                   "No kid-focused safety layer",
-                  "Separate tools for text and video",
+                  "Fast-feed content over deep reading",
                   "Hard to reuse characters",
                 ].map((item) => (
                   <li key={item} className={styles.compareItem}>
@@ -751,16 +771,17 @@ export default function HomeLanding() {
                 <span className={styles.compareBadgeWarm}>Dream</span>
                 <h3 className={styles.compareTitle}>One studio, safe by default.</h3>
                 <p className={styles.compareDesc}>
-                  Story, video, and character memory in a single flow — built for kids and families.
+                  Storybooks, quizzes, and character memory in a single flow
+                  built for kids and families.
                 </p>
               </div>
               <div className={styles.compareDivider} />
               <ul className={styles.compareList}>
                 {[
                   "Child-safe generation defaults",
-                  "Text-to-story + text-to-video together",
+                  "Parent quiz generation in chat",
                   "Persistent character memory",
-                  "Fast creation for parents and teachers",
+                  "Read-aloud voice accessibility",
                 ].map((item) => (
                   <li key={item} className={styles.compareItem}>
                     <span className={styles.iconGood}><Check size={10} strokeWidth={3} /></span>
@@ -786,8 +807,8 @@ export default function HomeLanding() {
               <AnimatedSubheading text="A class turned prompts into literacy wins." />
               <p className={styles.sectionCopy}>
                 A second-grade teacher used Dream weekly for reading circles.
-                Students created characters, generated chapters, then watched short
-                video episodes for recap and retention.
+                Students created characters, generated chapters, then used
+                read-aloud narration and chat quizzes for recap and retention.
               </p>
               <div className={styles.caseStats}>
                 <div>
@@ -891,7 +912,7 @@ export default function HomeLanding() {
           <div className={styles.footerBrandBlock}>
             <h2 className={`${styles.footerBrand} ${styles.displayFont}`}>Dream</h2>
             <p className={styles.footerTagline}>
-              Text-to-story and text-to-video<br />magic for kids.
+              Storybook-first AI<br />for kids.
             </p>
             <a
               href="https://github.com/yashwanth-3000/Dream"
@@ -921,9 +942,9 @@ export default function HomeLanding() {
           <div>
             <p className={styles.colTitle}>Product</p>
             <Link href="/chat" className={styles.footerLink}>AI Chat</Link>
-            <Link href="/dashboard/create" className={styles.footerLink}>Create Story & Video</Link>
+            <Link href="/dashboard/create" className={styles.footerLink}>Create Storybook</Link>
             <Link href="/dashboard/stories" className={styles.footerLink}>Story Library</Link>
-            <Link href="/dashboard/videos" className={styles.footerLink}>Video Studio</Link>
+            <Link href="/chat" className={styles.footerLink}>Quiz in Chat</Link>
             <Link href="/dashboard/characters" className={styles.footerLink}>Character Vault</Link>
             <Link href="/dashboard/jobs" className={styles.footerLink}>Generation Jobs</Link>
           </div>

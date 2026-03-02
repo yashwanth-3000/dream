@@ -126,8 +126,8 @@ export default function DashboardVideosPage() {
     >
       <div className="flex items-start justify-between">
         <div className="space-y-1">
-          <h2 className={`${styles.halant} text-2xl`}>All Videos</h2>
-          <p className="text-sm" style={{ color: "#9a7a65" }}>Generated text-to-video outputs for your recent jobs.</p>
+          <h2 className={`${styles.halant} text-2xl`}>Legacy Videos</h2>
+          <p className="text-sm" style={{ color: "#9a7a65" }}>Archived video outputs from earlier experiments.</p>
         </div>
         <button
           type="button"
@@ -147,7 +147,7 @@ export default function DashboardVideosPage() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2" style={{ color: "#9a7a65" }} />
           <input
-            placeholder="Search video title or id..."
+            placeholder="Search legacy video title or id..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-full py-2.5 pl-10 pr-4 text-sm font-medium outline-none transition"
@@ -392,8 +392,8 @@ export default function DashboardVideosPage() {
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
           {jobs.length === 0
-            ? "No video jobs yet. Video generation will be available soon."
-            : "No videos found for the current filters."}
+            ? "No legacy video jobs found."
+            : "No legacy videos found for the current filters."}
         </div>
       )}
     </motion.section>

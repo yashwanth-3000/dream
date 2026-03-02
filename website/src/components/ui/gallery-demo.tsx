@@ -82,7 +82,7 @@ export default function GalleryDemo() {
       />
       <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-center px-3 mix-blend-exclusion text-white">
         <h1 className="font-serif text-2xl tracking-tight md:text-5xl">
-          <span className="italic">Dream big.</span> Build magical stories and videos.
+          <span className="italic">Dream big.</span> Build magical storybooks.
         </h1>
       </div>
 

@@ -7,7 +7,6 @@ import { Github, Menu, X } from "lucide-react";
 
 const NAV_LINKS = [
   { label: "Chat", href: "/chat" },
-  { label: "Study Reels", href: "/study-reels" },
   { label: "Dashboard", href: "/dashboard" },
   { label: "About", href: "/about" },
 ] as const;

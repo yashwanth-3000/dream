@@ -76,8 +76,8 @@ const modeConfig: Record<
   JobType,
   { label: string; icon: typeof BookOpenText }
 > = {
-  story: { label: "Story Mode", icon: BookOpenText },
-  video: { label: "Video Mode", icon: Video },
+  story: { label: "Storybook Mode", icon: BookOpenText },
+  video: { label: "Legacy Video Mode", icon: Video },
   character: { label: "Character Mode", icon: UserRound },
 };
 

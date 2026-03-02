@@ -326,28 +326,34 @@ const PromptInputAction: React.FC<PromptInputActionProps> = ({ tooltip, children
 };
 
 // ── Modes ─────────────────────────────────────────────────────────────────────
-const MODES = [
+export type ModeId = "search" | "story" | "video";
+
+const MODE_CONFIG: Record<
+  ModeId,
   {
-    id: "search",
+    label: string;
+    description: string;
+    activeClass: string;
+  }
+> = {
+  search: {
     label: "Search",
     description: "Explore ideas and ask anything",
     activeClass: "bg-sky-50 border-sky-300 text-sky-700",
   },
-  {
-    id: "story",
+  story: {
     label: "Story",
-    description: "Craft a magical kid-safe narrative",
+    description: "Craft a magical kid-safe storybook narrative",
     activeClass: "bg-amber-50 border-amber-300 text-amber-700",
   },
-  {
-    id: "video",
+  video: {
     label: "Video",
-    description: "Generate an animated video scene",
+    description: "Legacy video mode",
     activeClass: "bg-violet-50 border-violet-300 text-violet-700",
   },
-] as const;
+};
 
-export type ModeId = (typeof MODES)[number]["id"];
+const VISIBLE_MODES: ModeId[] = ["search", "story"];
 
 export interface CharacterSelection {
   type: "existing" | "create";
@@ -387,7 +393,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   const promptBoxRef = React.useRef<HTMLDivElement>(null);
   const activeMode = mode !== undefined ? mode : internalActiveMode;
 
-  const activeModeConfig = activeMode ? MODES.find(m => m.id === activeMode) ?? null : null;
+  const activeModeConfig = activeMode ? MODE_CONFIG[activeMode] ?? null : null;
 
   const toggleMode = (id: ModeId) => {
     const nextMode = activeMode === id ? null : id;
@@ -527,8 +533,10 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
 
             {/* Mode buttons */}
             <div className="flex items-center">
-              {MODES.map((mode, i) => (
-                <React.Fragment key={mode.id}>
+              {VISIBLE_MODES.map((modeId, i) => {
+                const mode = MODE_CONFIG[modeId];
+                return (
+                <React.Fragment key={modeId}>
                   {i > 0 && (
                     <div className="relative h-6 w-[1.5px] mx-1">
                       <div className="absolute inset-0 bg-gradient-to-t from-transparent via-primary/40 to-transparent rounded-full" />
@@ -536,16 +544,16 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
                   )}
                   <button
                     type="button"
-                    onClick={() => toggleMode(mode.id)}
+                    onClick={() => toggleMode(modeId)}
                     className={cn(
                       "rounded-full transition-all flex items-center gap-1 px-2.5 py-1 border h-8 text-xs font-medium",
-                      activeMode === mode.id
+                      activeMode === modeId
                         ? mode.activeClass
                         : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5"
                     )}
                   >
                     <AnimatePresence initial={false}>
-                      {activeMode === mode.id ? (
+                      {activeMode === modeId ? (
                         <motion.span
                           key="active"
                           initial={{ width: 0, opacity: 0 }}
@@ -562,7 +570,8 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
                     </AnimatePresence>
                   </button>
                 </React.Fragment>
-              ))}
+                );
+              })}
             </div>
           </div>
 

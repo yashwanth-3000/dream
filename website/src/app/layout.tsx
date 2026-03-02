@@ -20,9 +20,9 @@ const halant = Halant({
 });
 
 export const metadata: Metadata = {
-  title: "Dream | Text to Story and Video for Kids",
+  title: "Dream | Storybook AI for Kids",
   description:
-    "Dream helps kids turn dream characters into safe, magical stories and videos from simple text prompts.",
+    "Dream helps kids turn simple prompts into safe storybooks with parent-ready quizzes and read-aloud voice support.",
 };
 
 export default function RootLayout({

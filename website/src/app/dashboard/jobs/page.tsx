@@ -56,12 +56,12 @@ const modeConfig: Record<
   { label: string; icon: React.ComponentType<{ className?: string }>; badgeClass: string }
 > = {
   story: {
-    label: "Story Mode",
+    label: "Storybook Mode",
     icon: BookOpenText,
     badgeClass: "bg-emerald-100 text-emerald-900 border-emerald-300",
   },
   video: {
-    label: "Video Mode",
+    label: "Legacy Video Mode",
     icon: Clapperboard,
     badgeClass: "bg-violet-100 text-violet-900 border-violet-300",
   },
@@ -469,7 +469,7 @@ export default function DashboardJobsPage() {
           className="rounded-2xl border-dashed p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          No jobs yet. Create your first story, video, or character to get started.
+          No jobs yet. Create your first storybook or character to get started.
         </div>
       )}
 

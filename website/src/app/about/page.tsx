@@ -62,7 +62,7 @@ const VALUES = [
 const TEAM = [
   { name: "Marcus Chen",    role: "Story Systems Lead"       },
   { name: "Amira Hassan",   role: "Child Safety Specialist"  },
-  { name: "David Park",     role: "Animation Engineer"       },
+  { name: "David Park",     role: "Storybook Experience Engineer" },
   { name: "Elena Martinez", role: "Learning Experience"      },
 ];
 

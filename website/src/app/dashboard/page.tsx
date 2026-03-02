@@ -1,16 +1,31 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, CheckCircle2, Clock3, XCircle } from "lucide-react";
 
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";
-import { dashboardJobs, formatRelativeTime } from "@/lib/dashboard-data";
+import { fetchJobs, getAssetUrl, type Job } from "@/lib/jobs";
 import styles from "./dashboard.module.css";
 
-function previewItemsForJob(job: (typeof dashboardJobs)[number]) {
-  const urls = Array.isArray(job.files) ? job.files.filter((x) => typeof x === "string" && x.trim()) : [];
-  return urls.slice(0, 3).map((url, idx) => ({
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `${Math.max(diffMins, 1)}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
+function previewItemsForJob(job: Job) {
+  return job.assets.slice(0, 3).map((asset, idx) => ({
     id: idx + 1,
     name: idx === 0 ? "Cover" : idx === 1 ? "Scene" : `Image ${idx + 1}`,
-    image: url,
+    image: getAssetUrl(job.id, asset.filename),
   }));
 }
 
@@ -19,7 +34,7 @@ const QUICK_LINKS = [
     href: "/dashboard/create",
     kicker: "Launch",
     title: "New Dream",
-    body: "Create a fresh story or short video from one prompt.",
+    body: "Create a fresh storybook from one prompt.",
     cta: "Open Create",
   },
   {
@@ -30,11 +45,11 @@ const QUICK_LINKS = [
     cta: "Open Stories",
   },
   {
-    href: "/dashboard/videos",
-    kicker: "Studio",
-    title: "Videos",
-    body: "Review generated scenes and kid-friendly video moments.",
-    cta: "Open Videos",
+    href: "/chat",
+    kicker: "Quizzes",
+    title: "Parent Quiz Chat",
+    body: "Ask chat to create a quiz based on any finished storybook.",
+    cta: "Open Chat",
   },
   {
     href: "/dashboard/characters",
@@ -46,7 +61,30 @@ const QUICK_LINKS = [
 ];
 
 export default function DashboardOverviewPage() {
-  const recent = [...dashboardJobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const [jobs, setJobs] = useState<Job[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      const data = await fetchJobs();
+      if (!active) return;
+      setJobs(data);
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const recent = useMemo(
+    () =>
+      [...jobs]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, 5),
+    [jobs]
+  );
 
   return (
     <div className="space-y-5">
@@ -101,8 +139,8 @@ export default function DashboardOverviewPage() {
                     {icon}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold" style={{ color: "#2b180a" }}>{job.productName}</p>
-                    <p className="text-xs" style={{ color: "#9a7a65" }}>{formatRelativeTime(job.createdAt)}</p>
+                    <p className="truncate text-sm font-semibold" style={{ color: "#2b180a" }}>{job.title}</p>
+                    <p className="text-xs" style={{ color: "#9a7a65" }}>{formatRelativeTime(job.created_at)}</p>
                   </div>
                 </div>
                 <div className="hidden sm:block">{preview.length ? <AnimatedTooltip items={preview} /> : null}</div>
