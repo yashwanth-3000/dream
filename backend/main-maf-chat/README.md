@@ -9,7 +9,10 @@ The central orchestration layer for the Dream platform. Built on Microsoft Agent
 - `gpt-4o-mini` (MAF agents) — question classification, kid-safe answering, character action routing
 - Exa MCP (`web_search_exa`) — real-time web search grounding in chat search mode
 
----
+
+### Architecture
+
+<img src="main-maf.svg" alt="Main MAF Orchestrator architecture diagram" width="100%" />
 
 ## How It Works
 
