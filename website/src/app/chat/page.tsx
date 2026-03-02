@@ -32,12 +32,21 @@ interface GameplaySelection {
   backgroundName: string;
 }
 
+interface SearchReference {
+  title: string;
+  url: string;
+  author?: string;
+  publishedDate?: string;
+  snippet?: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
   backendJson?: Record<string, unknown> | null;
+  references?: SearchReference[];
   basePrompt?: string;
   mode?: ModeId | "normal";
   characterSelection?: CharacterSelection | null;
@@ -254,6 +263,132 @@ function formatJsonForDisplay(value: unknown): string {
   }
 }
 
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&mdash;/g, "—")
+    .replace(/&ndash;/g, "–")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#039;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function extractHostname(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.replace(/^www\./i, "");
+  } catch {
+    return rawUrl;
+  }
+}
+
+const REFERENCE_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+function formatReferenceDate(rawDate?: string): string | null {
+  const value = (rawDate || "")
+    .replace(/^published\s*date\s*:\s*/i, "")
+    .replace(/^date\s*:\s*/i, "")
+    .trim();
+  if (!value) return null;
+  const dateToken = extractDateToken(value) || value;
+  const parsed = new Date(dateToken);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return REFERENCE_DATE_FORMATTER.format(parsed);
+}
+
+function normalizeReferenceAuthor(rawAuthor?: string): string | null {
+  const clean = decodeHtmlEntities((rawAuthor || "").trim());
+  if (!clean) return null;
+  if (/^(published\s*date|date)\s*:/i.test(clean)) return null;
+  const dateToken = extractDateToken(clean);
+  if (!dateToken) return clean;
+  const leftover = clean
+    .replace(dateToken, "")
+    .replace(/[•|\-:,()\s]+/g, "")
+    .trim();
+  return leftover ? clean : null;
+}
+
+function referenceLogoUrl(rawUrl: string): string {
+  return `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(rawUrl)}`;
+}
+
+function normalizeSnippet(raw: string, maxLen = 220): string {
+  const clean = decodeHtmlEntities(raw).replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, maxLen - 1)}…`;
+}
+
+function extractDateToken(value: string): string | null {
+  const clean = value.trim();
+  if (!clean) return null;
+
+  const isoMatch = clean.match(/\d{4}-\d{2}-\d{2}(?:T[0-9:.+-]+Z?)?/i);
+  if (isoMatch?.[0]) return isoMatch[0];
+
+  const naturalDateMatch = clean.match(
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\s+\d{1,2},\s+\d{4}\b/i,
+  );
+  if (naturalDateMatch?.[0]) return naturalDateMatch[0];
+
+  return null;
+}
+
+function extractMcpReferences(mcpOutput: unknown): SearchReference[] {
+  if (!mcpOutput || typeof mcpOutput !== "object") return [];
+  const rawOutput = (mcpOutput as Record<string, unknown>).output;
+  if (typeof rawOutput !== "string" || !rawOutput.trim()) return [];
+
+  const text = rawOutput.replace(/\r\n/g, "\n");
+  const refs: SearchReference[] = [];
+  const seen = new Set<string>();
+  const entryRegex = /Title:[^\S\n]*(.+?)\n(?:Author:[^\S\n]*(.*?)\n)?(?:Published Date:[^\S\n]*(.*?)\n)?URL:[^\S\n]*(https?:\/\/\S+)\n(?:Text:[^\S\n]*([\s\S]*?))?(?=\nTitle:\s|$)/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = entryRegex.exec(text)) !== null) {
+    const title = decodeHtmlEntities((match[1] || "").trim());
+    let author = decodeHtmlEntities((match[2] || "").trim());
+    let publishedDate = (match[3] || "")
+      .replace(/^published\s*date\s*:\s*/i, "")
+      .replace(/^date\s*:\s*/i, "")
+      .trim();
+    const url = (match[4] || "").trim();
+    const snippetRaw = match[5] || "";
+    const snippet = normalizeSnippet(snippetRaw);
+
+    if (!publishedDate && /^(published\s*date|date)\s*:/i.test(author)) {
+      publishedDate = author;
+      author = "";
+    }
+    if (!publishedDate) {
+      const inferred = extractDateToken(decodeHtmlEntities(snippetRaw));
+      if (inferred) publishedDate = inferred;
+    }
+
+    if (!title || !url) continue;
+    const dedupeKey = url.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    refs.push({
+      title,
+      url,
+      author: author || undefined,
+      publishedDate: publishedDate || undefined,
+      snippet: snippet || undefined,
+    });
+    if (refs.length >= 8) break;
+  }
+
+  return refs;
+}
+
 function buildChatSuccessThinkingSteps(meta: {
   category?: string;
   safety?: string;
@@ -437,6 +572,7 @@ export default function ChatPage() {
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [openJsonByKey, setOpenJsonByKey] = useState<Record<string, boolean>>({});
+  const [expandedReferencesByMessage, setExpandedReferencesByMessage] = useState<Record<string, boolean>>({});
   const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const characterCarouselRef = useRef<HTMLDivElement>(null);
@@ -482,6 +618,13 @@ export default function ChatPage() {
     setOpenJsonByKey((prev) => ({
       ...prev,
       [key]: !prev[key],
+    }));
+  }, []);
+
+  const toggleExpandedReferencesForMessage = useCallback((messageId: string) => {
+    setExpandedReferencesByMessage((prev) => ({
+      ...prev,
+      [messageId]: !prev[messageId],
     }));
   }, []);
 
@@ -830,6 +973,7 @@ export default function ChatPage() {
     mode: ModeId | "normal",
     overrideThinkingSteps?: ThinkingStep[],
     backendJson?: Record<string, unknown> | null,
+    references?: SearchReference[],
   ) => {
     const duration = Math.max(1, Math.round((Date.now() - thinkingStartRef.current) / 1000));
     const sourceSteps = (overrideThinkingSteps && overrideThinkingSteps.length > 0)
@@ -852,6 +996,7 @@ export default function ChatPage() {
         content: assistantContent,
         timestamp: new Date(),
         backendJson: backendJson ?? null,
+        references: references ?? [],
         mode,
         thinkingSteps: finalThinkingSteps,
         thinkingDuration: duration,
@@ -935,6 +1080,7 @@ export default function ChatPage() {
       const successPayload = (parsed && typeof parsed === "object")
         ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
         : ({ answer } as Record<string, unknown>);
+      const references = extractMcpReferences(parsed.mcp_output);
 
       const successSteps = buildChatSuccessThinkingSteps({
         category: parsed.category,
@@ -950,7 +1096,7 @@ export default function ChatPage() {
         durationMs: Math.max(1, Date.now() - requestStartedAt),
       });
 
-      finalizeBackendAssistantReply(answer, mode, successSteps, successPayload);
+      finalizeBackendAssistantReply(answer, mode, successSteps, successPayload, references);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown chat backend error.";
       const errorSteps = buildChatErrorThinkingSteps(
@@ -967,7 +1113,7 @@ export default function ChatPage() {
           ?? { detail }
         )
         : { detail };
-      finalizeBackendAssistantReply(detail, mode, errorSteps, errorPayload);
+      finalizeBackendAssistantReply(detail, mode, errorSteps, errorPayload, []);
     }
   }, [finalizeBackendAssistantReply]);
 
@@ -1341,6 +1487,108 @@ export default function ChatPage() {
                               }`}
                             >
                               <div>{msg.content}</div>
+                              {msg.role === "assistant" && (msg.references?.length ?? 0) > 0 ? (
+                                <div className={styles.referenceSection}>
+                                  {/* Header — click to toggle full list */}
+                                  <button
+                                    type="button"
+                                    className={styles.referenceHeaderRow}
+                                    onClick={() => toggleExpandedReferencesForMessage(msg.id)}
+                                  >
+                                    <span className={styles.referenceHeaderLabel}>Sources</span>
+                                    <div className={styles.referenceHeaderRight}>
+                                      <span className={styles.referenceHeaderCount}>{msg.references?.length}</span>
+                                      <span className={styles.referenceHeaderViewAll}>
+                                        {expandedReferencesByMessage[msg.id] ? "hide" : "view all"}
+                                      </span>
+                                      <ChevronDown
+                                        size={10}
+                                        className={styles.referenceHeaderChevron}
+                                        style={{ transform: expandedReferencesByMessage[msg.id] ? "rotate(180deg)" : "rotate(0)" }}
+                                      />
+                                    </div>
+                                  </button>
+
+                                  {/* Source strip — plain text links with · separators */}
+                                  <div className={styles.referenceStrip}>
+                                    {msg.references?.map((ref, index) => (
+                                      <React.Fragment key={`${msg.id}-pill-${index}`}>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <a
+                                          href={ref.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className={styles.referenceStripPill}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <span className={styles.referenceStripPillLogo}>
+                                            <img
+                                              src={referenceLogoUrl(ref.url)}
+                                              alt=""
+                                              className={styles.referenceStripPillLogoImg}
+                                              onError={(e) => { e.currentTarget.style.display = "none"; }}
+                                            />
+                                            <span className={styles.referenceStripPillFallback}>
+                                              {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                            </span>
+                                          </span>
+                                          <span className={styles.referenceStripPillText}>{extractHostname(ref.url)}</span>
+                                        </a>
+                                        {index < (msg.references?.length ?? 0) - 1 && (
+                                          <span className={styles.referenceStripSep}>·</span>
+                                        )}
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
+
+                                  {/* Expanded 2-column card grid */}
+                                  <AnimatePresence initial={false}>
+                                    {expandedReferencesByMessage[msg.id] && (
+                                      <motion.div
+                                        key={`refs-${msg.id}`}
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: "auto", opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.22, ease: "easeOut" }}
+                                        style={{ overflow: "hidden" }}
+                                      >
+                                        <div className={styles.referenceList}>
+                                          {msg.references?.map((ref, index) => (
+                                            <a
+                                              key={`${msg.id}-ref-${index}`}
+                                              href={ref.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className={styles.referenceCard}
+                                            >
+                                              {/* favicon */}
+                                              <span className={styles.referenceLogo}>
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img
+                                                  src={referenceLogoUrl(ref.url)}
+                                                  alt=""
+                                                  className={styles.referenceLogoImg}
+                                                  onError={(event) => { event.currentTarget.style.display = "none"; }}
+                                                />
+                                                <span className={styles.referenceLogoFallback}>
+                                                  {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                                </span>
+                                              </span>
+                                              {/* single-line text: title · domain */}
+                                              <span className={styles.referenceInline}>
+                                                <span className={styles.referenceTitle}>{ref.title}</span>
+                                                <span className={styles.referenceMeta}>
+                                                  · {[formatReferenceDate(ref.publishedDate), extractHostname(ref.url)].filter(Boolean).join(" · ")}
+                                                </span>
+                                              </span>
+                                            </a>
+                                          ))}
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })}
