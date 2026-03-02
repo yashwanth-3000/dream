@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 
+import { createJob, type Job } from "@/lib/jobs";
 import styles from "../dashboard.module.css";
 
 type WorkflowChoice = "" | "reference_enriched" | "prompt_only";
@@ -164,6 +165,7 @@ export default function DashboardApiTestPage() {
   const [lastImagePrompt, setLastImagePrompt] = useState<PromptPack | null>(null);
   const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
   const [copiedImageUrl, setCopiedImageUrl] = useState<string | null>(null);
+  const [currentJob, setCurrentJob] = useState<Job | null>(null);
 
   const responseJson = useMemo(() => JSON.stringify(responseBody, null, 2), [responseBody]);
   const payloadJson = useMemo(() => JSON.stringify(lastPayload, null, 2), [lastPayload]);
@@ -445,7 +447,21 @@ export default function DashboardApiTestPage() {
       const payload = await buildPayloadForAction("create");
       setLastPayload(toPayloadForDisplay(payload));
 
-      const response = await fetch(`/api/character-test${apiRouteQuery}`, {
+      let jobIdParam = "";
+      try {
+        const job = await createJob({
+          type: "character",
+          title: prompt.trim().slice(0, 80) || "Character Creation",
+          user_prompt: prompt.trim(),
+          input_payload: toPayloadForDisplay(payload) as Record<string, unknown>,
+          triggered_by: "api-test",
+          engine: "a2a-crew-ai-character-maker",
+        });
+        setCurrentJob(job);
+        jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
+      } catch { /* job tracking is best-effort */ }
+
+      const response = await fetch(`/api/character-test${apiRouteQuery}${jobIdParam}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -483,7 +499,21 @@ export default function DashboardApiTestPage() {
       const payload = await buildPayloadForAction("regenerate");
       setLastPayload(toPayloadForDisplay(payload));
 
-      const response = await fetch(`/api/character-test${apiRouteQuery}`, {
+      let jobIdParam = "";
+      try {
+        const job = await createJob({
+          type: "character",
+          title: "Image Regeneration",
+          user_prompt: String(payload.positive_prompt || ""),
+          input_payload: toPayloadForDisplay(payload) as Record<string, unknown>,
+          triggered_by: "api-test",
+          engine: "a2a-crew-ai-character-maker",
+        });
+        setCurrentJob(job);
+        jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
+      } catch { /* job tracking is best-effort */ }
+
+      const response = await fetch(`/api/character-test${apiRouteQuery}${jobIdParam}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -950,6 +980,19 @@ export default function DashboardApiTestPage() {
               <p className="mt-1">{responseData?.workflow_used || "-"}</p>
             </div>
           </div>
+
+          {currentJob ? (
+            <a
+              href={`/dashboard/jobs/${currentJob.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition hover:opacity-80"
+              style={{ borderColor: "#dbc9b7", background: "#fdf8f3", color: "#2b180a" }}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              View Job: <span className="font-mono text-[10px]" style={{ color: "#9a7a65" }}>{currentJob.id.slice(0, 8)}…</span>
+            </a>
+          ) : null}
 
           {orchestratorEnvelope?.backend_response ? (
             <div className="rounded-xl border p-3 text-xs" style={{ borderColor: "#dbc9b7", background: "#fdf8f3", color: "#2b180a" }}>

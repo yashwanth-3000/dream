@@ -2,13 +2,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import {
   Copy,
   Check,
   Heart,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   User,
@@ -22,21 +23,77 @@ import {
   subscribeStoredCharacters,
   type StoredCharacter,
 } from "@/lib/custom-characters";
-import { dashboardCharacters } from "@/lib/dashboard-data";
+import { fetchJobs, getAssetUrl, type Job } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
-type CharacterRecord = (typeof dashboardCharacters)[number] | StoredCharacter;
+interface CharacterCard {
+  id: string;
+  name: string;
+  role: string;
+  mood: string;
+  ageBand: string;
+  avatar: string;
+  description?: string;
+  source: "job" | "local";
+  jobId?: string;
+}
+
+function jobToCard(job: Job): CharacterCard {
+  const backstory = job.result_payload?.backstory as {
+    name?: string;
+    archetype?: string;
+    era?: string;
+    origin?: string;
+    narrative_backstory?: string;
+    goals?: string[];
+    flaws?: string[];
+    visual_signifiers?: string[];
+  } | undefined;
+
+  const avatar =
+    job.assets.length > 0
+      ? getAssetUrl(job.id, job.assets[0].filename)
+      : (job.result_payload?.image_url as string) || "";
+
+  return {
+    id: job.id,
+    name: backstory?.name || job.title || "Unnamed Character",
+    role: backstory?.archetype || "",
+    mood: backstory?.era || backstory?.origin || "",
+    ageBand: (job.input_payload?.age_band as string) || "All",
+    avatar,
+    description: backstory?.narrative_backstory,
+    source: "job",
+    jobId: job.id,
+  };
+}
+
+function localToCard(c: StoredCharacter): CharacterCard {
+  return {
+    id: c.id,
+    name: c.name,
+    role: c.role,
+    mood: c.mood,
+    ageBand: c.ageBand,
+    avatar: c.avatar,
+    description: "description" in c ? (c as { description?: string }).description : undefined,
+    source: "local",
+  };
+}
 
 const AGE_TABS = ["All", "4-7", "5-8", "5-10", "6-9"] as const;
 const easing = [0.22, 1, 0.36, 1] as const;
 
 export default function DashboardCharactersPage() {
+  const [jobCharacters, setJobCharacters] = useState<CharacterCard[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("All");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [selectedCharacter, setSelectedCharacter] = useState<CharacterRecord | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterCard | null>(null);
   const [copiedId, setCopiedId] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const prefersReducedMotion = useReducedMotion();
 
@@ -46,14 +103,37 @@ export default function DashboardCharactersPage() {
     getStoredCharactersServerSnapshot,
   );
 
-  const allCharacters = useMemo<CharacterRecord[]>(
-    () => [...customCharacters, ...dashboardCharacters],
+  const loadCharacters = useCallback(async () => {
+    try {
+      const data = await fetchJobs({ type: "character" });
+      setJobCharacters(data.map(jobToCard));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadCharacters(); } finally { setRefreshing(false); }
+  }, [loadCharacters]);
+
+  useEffect(() => {
+    loadCharacters();
+  }, [loadCharacters]);
+
+  const localCards = useMemo<CharacterCard[]>(
+    () => customCharacters.map(localToCard),
     [customCharacters],
   );
 
-  const localCharacterIds = useMemo(
-    () => new Set(customCharacters.map((char) => char.id)),
+  const localIds = useMemo(
+    () => new Set(customCharacters.map((c) => c.id)),
     [customCharacters],
+  );
+
+  const allCharacters = useMemo<CharacterCard[]>(
+    () => [...localCards, ...jobCharacters],
+    [localCards, jobCharacters],
   );
 
   const filtered = useMemo(() => {
@@ -96,16 +176,29 @@ export default function DashboardCharactersPage() {
             </p>
           </div>
 
-          <Link
-            href="/dashboard/characters/new-character"
-            className="group inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition md:text-sm"
-            style={{ background: "#2b180a", color: "#f5e6d5" }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
-          >
-            <Plus className="size-4 transition-transform group-hover:rotate-90" />
-            New Character
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition md:text-sm"
+              style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+              onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.background = "#ede7dd"; }}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+            >
+              <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+            </button>
+            <Link
+              href="/dashboard/characters/new-character"
+              className="group inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition md:text-sm"
+              style={{ background: "#2b180a", color: "#f5e6d5" }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+            >
+              <Plus className="size-4 transition-transform group-hover:rotate-90" />
+              New Character
+            </Link>
+          </div>
         </div>
 
         {/* ── Toolbar ── */}
@@ -181,138 +274,164 @@ export default function DashboardCharactersPage() {
           </motion.div>
         )}
 
+        {/* ── Loading ── */}
+        {loading && (
+          <div className="mt-12 flex items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#dbc9b7] border-t-[#c9924e]" />
+          </div>
+        )}
+
         {/* ── Character Grid ── */}
-        <div className="mt-6">
-          <motion.div
-            layout
-            className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
-          >
-            <AnimatePresence mode="popLayout">
-              {filtered.map((char, index) => {
-                const isLocal = localCharacterIds.has(char.id);
-                const isHovered = hoveredId === char.id;
+        {!loading && (
+          <div className="mt-6">
+            <motion.div
+              layout
+              className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
+            >
+              <AnimatePresence mode="popLayout">
+                {filtered.map((char, index) => {
+                  const isLocal = localIds.has(char.id);
+                  const isHovered = hoveredId === char.id;
 
-                return (
-                  <motion.div
-                    key={char.id}
-                    layout
-                    initial={prefersReducedMotion ? false : { opacity: 0, y: 12, scale: 0.985 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
-                    whileHover={
-                      prefersReducedMotion
-                        ? undefined
-                        : {
-                            y: -6,
-                            scale: 1.015,
-                            transition: { type: "spring", stiffness: 380, damping: 28 },
-                          }
-                    }
-                    whileTap={prefersReducedMotion ? undefined : { scale: 0.995 }}
-                    transition={
-                      prefersReducedMotion
-                        ? { duration: 0 }
-                        : { duration: 0.3, delay: index * 0.04, ease: easing }
-                    }
-                    className="group relative cursor-pointer"
-                    onMouseEnter={() => setHoveredId(char.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                    onClick={() => setSelectedCharacter(char)}
-                  >
-                    <div
-                      className={cn(
-                        "relative aspect-[3/4] overflow-hidden rounded-2xl shadow-sm transition-all duration-300",
-                        isHovered
-                          ? "shadow-xl ring-2 ring-[#c9924e]/50 ring-offset-2"
-                          : "hover:shadow-lg",
-                      )}
-                      style={{ background: "#ede7dd" }}
+                  return (
+                    <motion.div
+                      key={char.id}
+                      layout
+                      initial={prefersReducedMotion ? false : { opacity: 0, y: 12, scale: 0.985 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 10 }}
+                      whileHover={
+                        prefersReducedMotion
+                          ? undefined
+                          : {
+                              y: -6,
+                              scale: 1.015,
+                              transition: { type: "spring", stiffness: 380, damping: 28 },
+                            }
+                      }
+                      whileTap={prefersReducedMotion ? undefined : { scale: 0.995 }}
+                      transition={
+                        prefersReducedMotion
+                          ? { duration: 0 }
+                          : { duration: 0.3, delay: index * 0.04, ease: easing }
+                      }
+                      className="group relative cursor-pointer"
+                      onMouseEnter={() => setHoveredId(char.id)}
+                      onMouseLeave={() => setHoveredId(null)}
+                      onClick={() => setSelectedCharacter(char)}
                     >
-                      <img
-                        src={char.avatar}
-                        alt={char.name}
-                        className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.08]"
-                      />
-
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                      <motion.div
-                        aria-hidden="true"
-                        initial={false}
-                        animate={
-                          prefersReducedMotion
-                            ? { opacity: 0 }
-                            : { opacity: isHovered ? 1 : 0, x: isHovered ? 0 : -8 }
-                        }
-                        transition={{ duration: 0.24, ease: easing }}
-                        className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-[#c9924e]/30 via-transparent to-white/30 mix-blend-screen"
-                      />
-
-                      {isLocal && (
-                        <motion.span
-                          initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.86, y: -4 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          transition={
-                            prefersReducedMotion
-                              ? { duration: 0 }
-                              : { duration: 0.24, ease: easing, delay: 0.05 }
-                          }
-                          className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm"
-                          style={{ background: "#2b180a", color: "#f5e6d5" }}
-                        >
-                          New
-                        </motion.span>
-                      )}
-
-                      <motion.button
-                        type="button"
-                        initial={false}
-                        animate={
-                          prefersReducedMotion
-                            ? { opacity: isHovered ? 1 : 0 }
-                            : { opacity: isHovered ? 1 : 0, scale: isHovered ? 1 : 0.82, y: isHovered ? 0 : -4 }
-                        }
-                        whileHover={prefersReducedMotion ? undefined : { scale: 1.08 }}
-                        whileTap={prefersReducedMotion ? undefined : { scale: 0.94 }}
-                        transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.16, ease: easing }}
-                        onClick={(e) => e.stopPropagation()}
+                      <div
                         className={cn(
-                          "absolute right-2.5 top-2.5 flex size-8 items-center justify-center rounded-full text-white backdrop-blur-md transition",
-                          !isHovered && "pointer-events-none",
+                          "relative aspect-[3/4] overflow-hidden rounded-2xl shadow-sm transition-all duration-300",
+                          isHovered
+                            ? "shadow-xl ring-2 ring-[#c9924e]/50 ring-offset-2"
+                            : "hover:shadow-lg",
                         )}
-                        style={{ background: "rgba(0,0,0,0.3)" }}
-                        aria-label="Favorite"
+                        style={{ background: "#ede7dd" }}
                       >
-                        <Heart className="size-3.5" />
-                      </motion.button>
+                        {char.avatar ? (
+                          <img
+                            src={char.avatar}
+                            alt={char.name}
+                            className="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.08]"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center">
+                            <User className="size-12" style={{ color: "#9a7a65" }} />
+                          </div>
+                        )}
 
-                      <motion.div
-                        className="absolute inset-x-0 bottom-0 p-3"
-                        initial={false}
-                        animate={prefersReducedMotion ? { y: 0 } : { y: isHovered ? -2 : 0 }}
-                        transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2, ease: easing }}
-                      >
-                        <p className="truncate text-sm font-bold leading-tight text-white drop-shadow-sm">
-                          {char.name}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs font-medium text-white/70">
-                          {char.role}
-                        </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
-                            {char.ageBand}
-                          </span>
-                        </div>
-                      </motion.div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-          </motion.div>
-        </div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                        <motion.div
+                          aria-hidden="true"
+                          initial={false}
+                          animate={
+                            prefersReducedMotion
+                              ? { opacity: 0 }
+                              : { opacity: isHovered ? 1 : 0, x: isHovered ? 0 : -8 }
+                          }
+                          transition={{ duration: 0.24, ease: easing }}
+                          className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-[#c9924e]/30 via-transparent to-white/30 mix-blend-screen"
+                        />
+
+                        {isLocal && (
+                          <motion.span
+                            initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.86, y: -4 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            transition={
+                              prefersReducedMotion
+                                ? { duration: 0 }
+                                : { duration: 0.24, ease: easing, delay: 0.05 }
+                            }
+                            className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm"
+                            style={{ background: "#2b180a", color: "#f5e6d5" }}
+                          >
+                            New
+                          </motion.span>
+                        )}
+
+                        {char.source === "job" && (
+                          <motion.span
+                            initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.86, y: -4 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm"
+                            style={{ background: "#065f46", color: "#d1fae5" }}
+                          >
+                            Job
+                          </motion.span>
+                        )}
+
+                        <motion.button
+                          type="button"
+                          initial={false}
+                          animate={
+                            prefersReducedMotion
+                              ? { opacity: isHovered ? 1 : 0 }
+                              : { opacity: isHovered ? 1 : 0, scale: isHovered ? 1 : 0.82, y: isHovered ? 0 : -4 }
+                          }
+                          whileHover={prefersReducedMotion ? undefined : { scale: 1.08 }}
+                          whileTap={prefersReducedMotion ? undefined : { scale: 0.94 }}
+                          transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.16, ease: easing }}
+                          onClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            "absolute right-2.5 top-2.5 flex size-8 items-center justify-center rounded-full text-white backdrop-blur-md transition",
+                            !isHovered && "pointer-events-none",
+                          )}
+                          style={{ background: "rgba(0,0,0,0.3)" }}
+                          aria-label="Favorite"
+                        >
+                          <Heart className="size-3.5" />
+                        </motion.button>
+
+                        <motion.div
+                          className="absolute inset-x-0 bottom-0 p-3"
+                          initial={false}
+                          animate={prefersReducedMotion ? { y: 0 } : { y: isHovered ? -2 : 0 }}
+                          transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2, ease: easing }}
+                        >
+                          <p className="truncate text-sm font-bold leading-tight text-white drop-shadow-sm">
+                            {char.name}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs font-medium text-white/70">
+                            {char.role}
+                          </p>
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                              {char.ageBand}
+                            </span>
+                          </div>
+                        </motion.div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </motion.div>
+          </div>
+        )}
 
         {/* ── Empty state ── */}
-        {filtered.length === 0 && (
+        {!loading && filtered.length === 0 && (
           <div className="mt-10 flex flex-col items-center py-16 text-center">
             <div
               className="mb-3 flex size-12 items-center justify-center rounded-full"
@@ -321,7 +440,11 @@ export default function DashboardCharactersPage() {
               <User className="size-5" style={{ color: "#9a7a65" }} />
             </div>
             <p className="text-sm font-semibold" style={{ color: "#9a7a65" }}>No characters found</p>
-            <p className="mt-1 text-xs" style={{ color: "#c4a88e" }}>Try adjusting your search or filters</p>
+            <p className="mt-1 text-xs" style={{ color: "#c4a88e" }}>
+              {allCharacters.length === 0
+                ? "Generate a character from the API Test page."
+                : "Try adjusting your search or filters"}
+            </p>
           </div>
         )}
       </motion.div>
@@ -353,11 +476,17 @@ export default function DashboardCharactersPage() {
                 >
                   {/* Hero banner */}
                   <div className="relative h-52 shrink-0 overflow-hidden sm:h-60">
-                    <img
-                      src={selectedCharacter.avatar}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
+                    {selectedCharacter.avatar ? (
+                      <img
+                        src={selectedCharacter.avatar}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center" style={{ background: "#ede7dd" }}>
+                        <User className="size-16" style={{ color: "#9a7a65" }} />
+                      </div>
+                    )}
                     <div
                       className="absolute inset-0"
                       style={{ background: "linear-gradient(to top, #fdf8f3 0%, rgba(253,248,243,0.3) 40%, transparent 100%)" }}
@@ -384,13 +513,18 @@ export default function DashboardCharactersPage() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.28, delay: 0.05, ease: easing }}
                   >
-                    {/* Avatar + name */}
                     <div className="flex items-end gap-4">
                       <div
                         className="size-20 shrink-0 overflow-hidden rounded-2xl shadow-lg"
                         style={{ border: "4px solid #fdf8f3" }}
                       >
-                        <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="h-full w-full object-cover" />
+                        {selectedCharacter.avatar ? (
+                          <img src={selectedCharacter.avatar} alt={selectedCharacter.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center" style={{ background: "#ede7dd" }}>
+                            <User className="size-8" style={{ color: "#9a7a65" }} />
+                          </div>
+                        )}
                       </div>
                       <div className="min-w-0 pb-1">
                         <h2 className="truncate text-lg font-black tracking-tight" style={{ color: "#2b180a" }}>
@@ -402,7 +536,6 @@ export default function DashboardCharactersPage() {
                       </div>
                     </div>
 
-                    {/* Meta pills */}
                     <div className="mt-4 flex flex-wrap gap-2">
                       <span
                         className="rounded-full px-3 py-1.5 text-xs font-medium"
@@ -410,33 +543,49 @@ export default function DashboardCharactersPage() {
                       >
                         {`Ages ${selectedCharacter.ageBand}`}
                       </span>
-                      <span
-                        className="max-w-full truncate rounded-full px-3 py-1.5 text-xs font-medium"
-                        style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
-                        title={selectedCharacter.mood}
-                      >
-                        {selectedCharacter.mood}
-                      </span>
+                      {selectedCharacter.mood && (
+                        <span
+                          className="max-w-full truncate rounded-full px-3 py-1.5 text-xs font-medium"
+                          style={{ border: "1px solid #dbc9b7", background: "#f0e8dc", color: "#2b180a" }}
+                          title={selectedCharacter.mood}
+                        >
+                          {selectedCharacter.mood}
+                        </span>
+                      )}
                     </div>
 
-                    {"description" in selectedCharacter && selectedCharacter.description ? (
+                    {selectedCharacter.description && (
                       <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                         <p className="text-sm leading-relaxed" style={{ color: "#6f5a4a" }}>
                           {selectedCharacter.description}
                         </p>
                       </div>
-                    ) : (
-                      <div className="mt-4" />
                     )}
 
-                    {/* Actions */}
+                    {!selectedCharacter.description && <div className="mt-4" />}
+
                     <div className="mt-5 flex shrink-0 flex-wrap gap-2 border-t pt-4" style={{ borderColor: "#dbc9b7" }}>
+                      {selectedCharacter.jobId && (
+                        <Link
+                          href={`/dashboard/jobs/${selectedCharacter.jobId}`}
+                          className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition"
+                          style={{ background: "#2b180a", color: "#f5e6d5" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
+                          onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
+                        >
+                          View Job
+                        </Link>
+                      )}
                       <motion.button
                         type="button"
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
                         className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition"
-                        style={{ background: "#2b180a", color: "#f5e6d5" }}
+                        style={{
+                          background: selectedCharacter.jobId ? "#fdf8f3" : "#2b180a",
+                          color: selectedCharacter.jobId ? "#2b180a" : "#f5e6d5",
+                          border: selectedCharacter.jobId ? "1px solid #dbc9b7" : "none",
+                        }}
                         onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.88")}
                         onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
                       >

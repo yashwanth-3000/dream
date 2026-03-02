@@ -1,12 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Clock3, Filter, MoreVertical, Search, CheckCircle2, XCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronDown,
+  Clock,
+  Clock3,
+  Filter,
+  MoreVertical,
+  RefreshCw,
+  Search,
+  CheckCircle2,
+  XCircle,
+  BookOpenText,
+  Clapperboard,
+  UserRound,
+} from "lucide-react";
 import { motion } from "framer-motion";
 
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";
-import { dashboardJobs, formatRelativeTime, type JobStatus } from "@/lib/dashboard-data";
+import { fetchJobs, getAssetUrl, type Job, type JobType, type JobStatus } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
@@ -16,6 +29,11 @@ const statusConfig: Record<
   JobStatus,
   { label: string; icon: React.ComponentType<{ className?: string }>; badgeClass: string }
 > = {
+  queued: {
+    label: "Queued",
+    icon: Clock,
+    badgeClass: "bg-blue-100 text-blue-900 border-blue-300",
+  },
   processing: {
     label: "Processing",
     icon: Clock3,
@@ -33,21 +51,86 @@ const statusConfig: Record<
   },
 };
 
-function previewItemsForJob(job: (typeof dashboardJobs)[number]) {
-  const urls = Array.isArray(job.files) ? job.files.filter((x) => typeof x === "string" && x.trim()) : [];
-  return urls.slice(0, 3).map((url, idx) => ({
+const modeConfig: Record<
+  JobType,
+  { label: string; icon: React.ComponentType<{ className?: string }>; badgeClass: string }
+> = {
+  story: {
+    label: "Story Mode",
+    icon: BookOpenText,
+    badgeClass: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  },
+  video: {
+    label: "Video Mode",
+    icon: Clapperboard,
+    badgeClass: "bg-violet-100 text-violet-900 border-violet-300",
+  },
+  character: {
+    label: "Character Mode",
+    icon: UserRound,
+    badgeClass: "bg-rose-100 text-rose-900 border-rose-300",
+  },
+};
+
+function previewItemsForJob(job: Job) {
+  const labelsByType: Record<JobType, string[]> = {
+    story: ["Cover", "Scene", "Image"],
+    video: ["Thumbnail", "Frame", "Frame"],
+    character: ["Portrait", "Style", "Turnaround"],
+  };
+  const labels = labelsByType[job.type];
+  return job.assets.slice(0, 3).map((asset, idx) => ({
     id: idx + 1,
-    name: idx === 0 ? "Cover" : idx === 1 ? "Scene" : `Image ${idx + 1}`,
-    image: url,
+    name: idx === 0 ? labels[0] : idx === 1 ? labels[1] : `${labels[2]} ${idx + 1}`,
+    image: getAssetUrl(job.id, asset.filename),
   }));
 }
 
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `${Math.max(diffMins, 1)}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 export default function DashboardJobsPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"all" | JobStatus>("all");
+  const [selectedMode, setSelectedMode] = useState<"all" | JobType>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const data = await fetchJobs();
+      setJobs(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadJobs();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadJobs]);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
 
   useEffect(() => {
     const onWindowClick = (event: MouseEvent) => {
@@ -64,15 +147,44 @@ export default function DashboardJobsPage() {
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return dashboardJobs.filter((job) => {
+    return jobs.filter((job) => {
       const matchesSearch =
         !q ||
-        job.productName.toLowerCase().includes(q) ||
+        job.title.toLowerCase().includes(q) ||
         job.id.toLowerCase().includes(q);
       const matchesStatus = selectedStatus === "all" || job.status === selectedStatus;
-      return matchesSearch && matchesStatus;
+      const matchesMode = selectedMode === "all" || job.type === selectedMode;
+      return matchesSearch && matchesStatus && matchesMode;
     });
-  }, [searchQuery, selectedStatus]);
+  }, [jobs, searchQuery, selectedStatus, selectedMode]);
+
+  if (loading) {
+    return (
+      <motion.section
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: easeOutExpo }}
+        className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
+        style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
+      >
+        <div className="space-y-1">
+          <div className="h-7 w-32 animate-pulse rounded-lg" style={{ background: "#e9e0d5" }} />
+          <div className="h-4 w-64 animate-pulse rounded-lg" style={{ background: "#e9e0d5" }} />
+        </div>
+        <div className="flex gap-2">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-8 w-24 animate-pulse rounded-full" style={{ background: "#e9e0d5" }} />
+          ))}
+        </div>
+        <div className="h-10 w-full animate-pulse rounded-full" style={{ background: "#e9e0d5" }} />
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-16 w-full animate-pulse rounded-2xl" style={{ background: "#e9e0d5" }} />
+          ))}
+        </div>
+      </motion.section>
+    );
+  }
 
   return (
     <motion.section
@@ -82,9 +194,47 @@ export default function DashboardJobsPage() {
       className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
       style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
     >
-      <div className="space-y-1">
-        <h2 className={`${styles.halant} text-2xl`}>All Jobs</h2>
-        <p className="text-sm" style={{ color: "#9a7a65" }}>Track status, assets, and links for every generation job.</p>
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <h2 className={`${styles.halant} text-2xl`}>All Jobs</h2>
+          <p className="text-sm" style={{ color: "#9a7a65" }}>Track status, assets, and links for every generation job.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition"
+          style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+          onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.background = "#ede7dd"; }}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {/* ── Mode Tabs ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        {([
+          { value: "all", label: "All Modes" },
+          { value: "story", label: modeConfig.story.label },
+          { value: "video", label: modeConfig.video.label },
+          { value: "character", label: modeConfig.character.label },
+        ] as const).map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => setSelectedMode(tab.value)}
+            className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+            style={{
+              background: selectedMode === tab.value ? "#2b180a" : "#fcf6ef",
+              color: selectedMode === tab.value ? "#f5e6d5" : "#2b180a",
+              borderColor: selectedMode === tab.value ? "#2b180a" : "#dbc9b7",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* ── Search & Filter ── */}
@@ -118,7 +268,7 @@ export default function DashboardJobsPage() {
               className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl shadow-lg"
               style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
             >
-              {(["all", "processing", "completed", "failed"] as const).map((s) => (
+              {(["all", "queued", "processing", "completed", "failed"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
@@ -157,7 +307,7 @@ export default function DashboardJobsPage() {
           <table className="w-full">
             <thead style={{ borderBottom: "1px solid #dbc9b7", background: "rgb(240 232 220 / 0.5)" }}>
               <tr>
-                {["Product", "Status", "Assets", "Created", "Actions"].map((h, i) => (
+                {["Product", "Status", "Mode", "Assets", "Actions"].map((h, i) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wide ${i === 4 ? "text-right" : "text-left"}`}
@@ -171,6 +321,7 @@ export default function DashboardJobsPage() {
             <tbody style={{ borderTop: "none" }}>
               {filtered.map((job) => {
                 const StatusIcon = statusConfig[job.status].icon;
+                const ModeIcon = modeConfig[job.type].icon;
                 const preview = previewItemsForJob(job);
                 return (
                   <motion.tr
@@ -185,7 +336,7 @@ export default function DashboardJobsPage() {
                   >
                     <td className="px-4 py-3.5">
                       <div className="space-y-1">
-                        <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.productName}</p>
+                        <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.title}</p>
                         <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id}</p>
                       </div>
                     </td>
@@ -196,9 +347,14 @@ export default function DashboardJobsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
+                      <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", modeConfig[job.type].badgeClass)}>
+                        <ModeIcon className="size-3.5" />
+                        {modeConfig[job.type].label}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5">
                       {preview.length ? <AnimatedTooltip items={preview} /> : <span className="text-xs" style={{ color: "#9a7a65" }}>—</span>}
                     </td>
-                    <td className="px-4 py-3.5 text-sm" style={{ color: "#9a7a65" }}>{formatRelativeTime(job.createdAt)}</td>
                     <td className="px-4 py-3.5 text-right">
                       <div className="relative inline-flex items-center gap-2" data-row-menu>
                         <Link
@@ -265,6 +421,7 @@ export default function DashboardJobsPage() {
       <div className="space-y-3 lg:hidden">
         {filtered.map((job) => {
           const StatusIcon = statusConfig[job.status].icon;
+          const ModeIcon = modeConfig[job.type].icon;
           const preview = previewItemsForJob(job);
           return (
             <motion.div
@@ -278,7 +435,7 @@ export default function DashboardJobsPage() {
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.productName}</h3>
+                    <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.title}</h3>
                     <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id}</p>
                   </div>
                   <Link
@@ -293,9 +450,9 @@ export default function DashboardJobsPage() {
                   <StatusIcon className="size-3.5" />
                   {statusConfig[job.status].label}
                 </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Created</p>
-                  <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{formatRelativeTime(job.createdAt)}</p>
+                <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", modeConfig[job.type].badgeClass)}>
+                  <ModeIcon className="size-3.5" />
+                  {modeConfig[job.type].label}
                 </div>
                 <div>
                   <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Assets</p>
@@ -307,7 +464,16 @@ export default function DashboardJobsPage() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {jobs.length === 0 && (
+        <div
+          className="rounded-2xl border-dashed p-12 text-center text-sm"
+          style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
+        >
+          No jobs yet. Create your first story, video, or character to get started.
+        </div>
+      )}
+
+      {jobs.length > 0 && filtered.length === 0 && (
         <div
           className="rounded-2xl border-dashed p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}

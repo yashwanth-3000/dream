@@ -2,6 +2,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV DREAM_DATA_DIR=/app/data
 
 WORKDIR /app
 
@@ -9,6 +10,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY agent_orchestrator ./agent_orchestrator
+
+RUN mkdir -p /app/data/assets
 
 EXPOSE 8080
 

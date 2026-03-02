@@ -23,6 +23,7 @@ import {
 import { StoryBook } from "@/components/dashboard/story-book";
 import type { StoryPage } from "@/lib/dashboard-data";
 
+import { createJob, type Job } from "@/lib/jobs";
 import styles from "../dashboard.module.css";
 import chatStyles from "../../chat/chat-page.module.css";
 
@@ -413,6 +414,7 @@ export default function DashboardStorybookTestPage() {
   const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
   const [openTimelineJsonByKey, setOpenTimelineJsonByKey] = useState<Record<string, boolean>>({});
   const [openLogJsonById, setOpenLogJsonById] = useState<Record<number, boolean>>({});
+  const [currentJob, setCurrentJob] = useState<Job | null>(null);
 
   const payloadJson = useMemo(() => JSON.stringify(lastPayload, null, 2), [lastPayload]);
   const responseJson = useMemo(() => JSON.stringify(responseBody, null, 2), [responseBody]);
@@ -1005,7 +1007,22 @@ export default function DashboardStorybookTestPage() {
       setLastPayload(toPayloadForDisplay(payload));
       pushLiveLog("info", "ui", "Request payload prepared. Opening stream...");
 
-      const response = await fetch(`/api/storybook-test?target=${apiTarget}&stream=1`, {
+      let jobIdParam = "";
+      try {
+        const job = await createJob({
+          type: "story",
+          title: prompt.trim().slice(0, 80) || "Storybook Creation",
+          user_prompt: prompt.trim(),
+          input_payload: toPayloadForDisplay(payload) as Record<string, unknown>,
+          triggered_by: "storybook-test",
+          engine: "a2a-maf-story-book-maker",
+        });
+        setCurrentJob(job);
+        jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
+        pushLiveLog("info", "ui", `Job created: ${job.id}`);
+      } catch { /* job tracking is best-effort */ }
+
+      const response = await fetch(`/api/storybook-test?target=${apiTarget}&stream=1${jobIdParam}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -1520,6 +1537,18 @@ export default function DashboardStorybookTestPage() {
                   label={`Per-scene refs: ${sceneReferenceCounts.join("/")}`}
                   tone="neutral"
                 />
+              ) : null}
+              {currentJob ? (
+                <a
+                  href={`/dashboard/jobs/${currentJob.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition hover:opacity-80"
+                  style={{ borderColor: "#dbc9b7", background: "#fdf8f3", color: "#2b180a" }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Job: <span className="font-mono text-[10px]" style={{ color: "#9a7a65" }}>{currentJob.id.slice(0, 8)}…</span>
+                </a>
               ) : null}
             </div>
 

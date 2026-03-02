@@ -1,26 +1,32 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Filter, MoreVertical, Search, CheckCircle2, XCircle, PlayCircle, Clapperboard, Timer } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Filter, MoreVertical, RefreshCw, Search, CheckCircle2, XCircle, PlayCircle, Clapperboard, Clock3 } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { dashboardVideos } from "@/lib/dashboard-data";
+import { fetchJobs, getAssetUrl, type Job, type JobStatus } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
 const easeOutExpo = [0.22, 1, 0.36, 1] as const;
 
-type VideoStatus = "Ready" | "Failed";
+type VideoDisplayStatus = "Ready" | "Processing" | "Failed";
 
 const statusConfig: Record<
-  VideoStatus,
+  VideoDisplayStatus,
   { label: string; icon: React.ComponentType<{ className?: string }>; badgeClass: string }
 > = {
   Ready: {
     label: "Ready",
     icon: CheckCircle2,
     badgeClass: "bg-sky-100 text-sky-900 border-sky-300",
+  },
+  Processing: {
+    label: "Processing",
+    icon: Clock3,
+    badgeClass: "bg-amber-100 text-amber-900 border-amber-300",
   },
   Failed: {
     label: "Failed",
@@ -29,37 +35,86 @@ const statusConfig: Record<
   },
 };
 
+function mapStatus(s: JobStatus): VideoDisplayStatus {
+  if (s === "completed") return "Ready";
+  if (s === "failed") return "Failed";
+  return "Processing";
+}
+
+function getCoverUrl(job: Job): string {
+  if (job.assets.length > 0) return getAssetUrl(job.id, job.assets[0].filename);
+  const images = job.result_payload?.generated_images as string[] | undefined;
+  return images?.[0] || "";
+}
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `${Math.max(diffMins, 1)}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 export default function DashboardVideosPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState<"all" | VideoStatus>("all");
+  const [selectedStatus, setSelectedStatus] = useState<"all" | VideoDisplayStatus>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
+
+  const loadVideos = useCallback(async () => {
+    try {
+      const data = await fetchJobs({ type: "video" });
+      setJobs(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadVideos(); } finally { setRefreshing(false); }
+  }, [loadVideos]);
+
+  useEffect(() => {
+    loadVideos();
+  }, [loadVideos]);
 
   useEffect(() => {
     const onWindowClick = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!filterRef.current?.contains(target)) setFilterOpen(false);
-
       const inRowMenu = (event.target as HTMLElement | null)?.closest("[data-row-menu]");
       if (!inRowMenu) setRowMenuOpen("");
     };
-
     window.addEventListener("mousedown", onWindowClick);
     return () => window.removeEventListener("mousedown", onWindowClick);
   }, []);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return dashboardVideos.filter((video) => {
-      const matchesSearch =
-        !q ||
-        video.title.toLowerCase().includes(q) ||
-        video.id.toLowerCase().includes(q);
-      const matchesStatus = selectedStatus === "all" || video.status === selectedStatus;
+    return jobs.filter((job) => {
+      const matchesSearch = !q || job.title.toLowerCase().includes(q) || job.id.toLowerCase().includes(q);
+      const matchesStatus = selectedStatus === "all" || mapStatus(job.status) === selectedStatus;
       return matchesSearch && matchesStatus;
     });
-  }, [searchQuery, selectedStatus]);
+  }, [jobs, searchQuery, selectedStatus]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#dbc9b7] border-t-[#c9924e]" />
+      </div>
+    );
+  }
 
   return (
     <motion.section
@@ -69,12 +124,25 @@ export default function DashboardVideosPage() {
       className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
       style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
     >
-      <div className="space-y-1">
-        <h2 className={`${styles.halant} text-2xl`}>All Videos</h2>
-        <p className="text-sm" style={{ color: "#9a7a65" }}>Generated text-to-video outputs for your recent story jobs.</p>
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <h2 className={`${styles.halant} text-2xl`}>All Videos</h2>
+          <p className="text-sm" style={{ color: "#9a7a65" }}>Generated text-to-video outputs for your recent jobs.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition"
+          style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+          onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.background = "#ede7dd"; }}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
       </div>
 
-      {/* ── Search & Filter ── */}
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2" style={{ color: "#9a7a65" }} />
@@ -105,14 +173,11 @@ export default function DashboardVideosPage() {
               className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl shadow-lg"
               style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
             >
-              {(["all", "Ready", "Failed"] as const).map((s) => (
+              {(["all", "Ready", "Processing", "Failed"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
-                  onClick={() => {
-                    setSelectedStatus(s);
-                    setFilterOpen(false);
-                  }}
+                  onClick={() => { setSelectedStatus(s); setFilterOpen(false); }}
                   className="w-full px-4 py-2.5 text-left text-sm font-medium transition"
                   style={{
                     color: selectedStatus === s ? "#8b5e3c" : "#2b180a",
@@ -141,7 +206,7 @@ export default function DashboardVideosPage() {
           <table className="w-full">
             <thead style={{ borderBottom: "1px solid #dbc9b7", background: "rgb(240 232 220 / 0.5)" }}>
               <tr>
-                {["Video", "Status", "Duration", "Actions"].map((h, i) => (
+                {["Video", "Status", "Created", "Actions"].map((h, i) => (
                   <th
                     key={h}
                     className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wide ${i === 3 ? "text-right" : "text-left"}`}
@@ -153,13 +218,15 @@ export default function DashboardVideosPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((video) => {
-                const StatusIcon = statusConfig[video.status as VideoStatus]?.icon ?? Clapperboard;
-                const badgeClass = statusConfig[video.status as VideoStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+              {filtered.map((job) => {
+                const displayStatus = mapStatus(job.status);
+                const StatusIcon = statusConfig[displayStatus]?.icon ?? Clapperboard;
+                const badgeClass = statusConfig[displayStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+                const cover = getCoverUrl(job);
 
                 return (
                   <motion.tr
-                    key={video.id}
+                    key={job.id}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.24 }}
@@ -171,50 +238,48 @@ export default function DashboardVideosPage() {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-3">
                         <div className="relative">
-                          <img src={video.cover} alt={video.title} className="h-10 w-16 rounded-lg object-cover shadow-sm" />
-                          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
-                            <PlayCircle className="size-4 text-white/90" />
-                          </div>
+                          {cover ? (
+                            <>
+                              <img src={cover} alt={job.title} className="h-10 w-16 rounded-lg object-cover shadow-sm" />
+                              <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
+                                <PlayCircle className="size-4 text-white/90" />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex h-10 w-16 items-center justify-center rounded-lg" style={{ background: "#ede7dd" }}>
+                              <Clapperboard className="size-4" style={{ color: "#9a7a65" }} />
+                            </div>
+                          )}
                         </div>
                         <div className="space-y-1">
-                          <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{video.title}</p>
-                          <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{video.id}</p>
+                          <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.title}</p>
+                          <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id.slice(0, 8)}…</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", badgeClass)}>
                         <StatusIcon className="size-3.5" />
-                        {video.status}
+                        {displayStatus}
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
-                      <span className="inline-flex items-center gap-1.5 text-sm" style={{ color: "#9a7a65" }}>
-                        <Timer className="size-3.5" />
-                        {video.length}
-                      </span>
+                      <span className="text-sm" style={{ color: "#9a7a65" }}>{formatRelativeTime(job.created_at)}</span>
                     </td>
                     <td className="px-4 py-3.5 text-right">
                       <div className="relative inline-flex items-center gap-2" data-row-menu>
-                        <button
-                          type="button"
-                          className={cn(
-                            "inline-flex items-center justify-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition",
-                            video.status !== "Ready" && "opacity-50 cursor-not-allowed"
-                          )}
-                          style={{
-                            background: video.status === "Ready" ? "#2b180a" : "#fcf6ef",
-                            color: video.status === "Ready" ? "#f5e6d5" : "#9a7a65",
-                            border: video.status === "Ready" ? "none" : "1px solid #dbc9b7",
-                          }}
-                          disabled={video.status === "Failed"}
+                        <Link
+                          href={`/dashboard/jobs/${job.id}`}
+                          className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition"
+                          style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
                         >
-                          <PlayCircle className="size-3.5" />
-                          Play
-                        </button>
+                          View
+                        </Link>
                         <button
                           type="button"
-                          onClick={() => setRowMenuOpen((v) => (v === video.id ? "" : video.id))}
+                          onClick={() => setRowMenuOpen((v) => (v === job.id ? "" : job.id))}
                           className="inline-flex size-8 items-center justify-center rounded-full transition"
                           style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
@@ -223,33 +288,30 @@ export default function DashboardVideosPage() {
                         >
                           <MoreVertical className="size-4" />
                         </button>
-                        {rowMenuOpen === video.id && (
+                        {rowMenuOpen === job.id && (
                           <div
                             className="absolute right-0 top-10 z-50 w-44 overflow-hidden rounded-xl shadow-lg"
                             style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
                           >
-                            <button
-                              type="button"
-                              className="w-full px-3 py-2 text-left text-sm font-medium transition"
+                            <Link
+                              href={`/dashboard/jobs/${job.id}`}
+                              className="block px-3 py-2 text-left text-sm font-medium transition"
                               style={{ color: "#2b180a" }}
                               onMouseEnter={(e) => (e.currentTarget.style.background = "#f0e8dc")}
                               onMouseLeave={(e) => (e.currentTarget.style.background = "")}
                               onClick={() => setRowMenuOpen("")}
                             >
-                              Edit Scene
-                            </button>
+                              View Job
+                            </Link>
                             <button
                               type="button"
                               className="w-full px-3 py-2 text-left text-sm font-medium transition"
                               style={{ color: "#2b180a" }}
                               onMouseEnter={(e) => (e.currentTarget.style.background = "#f0e8dc")}
                               onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                              onClick={async () => {
-                                await navigator.clipboard.writeText(video.id);
-                                setRowMenuOpen("");
-                              }}
+                              onClick={async () => { await navigator.clipboard.writeText(job.id); setRowMenuOpen(""); }}
                             >
-                              Copy Video ID
+                              Copy Job ID
                             </button>
                           </div>
                         )}
@@ -265,13 +327,15 @@ export default function DashboardVideosPage() {
 
       {/* ── Mobile Cards ── */}
       <div className="space-y-3 lg:hidden">
-        {filtered.map((video) => {
-          const StatusIcon = statusConfig[video.status as VideoStatus]?.icon ?? Clapperboard;
-          const badgeClass = statusConfig[video.status as VideoStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+        {filtered.map((job) => {
+          const displayStatus = mapStatus(job.status);
+          const StatusIcon = statusConfig[displayStatus]?.icon ?? Clapperboard;
+          const badgeClass = statusConfig[displayStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+          const cover = getCoverUrl(job);
 
           return (
             <motion.div
-              key={video.id}
+              key={job.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.26 }}
@@ -282,43 +346,39 @@ export default function DashboardVideosPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <img src={video.cover} alt={video.title} className="h-10 w-16 rounded-lg object-cover shadow-sm" />
-                      <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
-                        <PlayCircle className="size-4 text-white/90" />
-                      </div>
+                      {cover ? (
+                        <>
+                          <img src={cover} alt={job.title} className="h-10 w-16 rounded-lg object-cover shadow-sm" />
+                          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20">
+                            <PlayCircle className="size-4 text-white/90" />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex h-10 w-16 items-center justify-center rounded-lg" style={{ background: "#ede7dd" }}>
+                          <Clapperboard className="size-4" style={{ color: "#9a7a65" }} />
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-1">
-                      <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{video.title}</h3>
-                      <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{video.id}</p>
+                      <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{job.title}</h3>
+                      <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id.slice(0, 8)}…</p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className={cn(
-                      "inline-flex items-center justify-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold transition",
-                      video.status !== "Ready" && "opacity-50 cursor-not-allowed"
-                    )}
-                    style={{
-                      background: video.status === "Ready" ? "#2b180a" : "#fcf6ef",
-                      color: video.status === "Ready" ? "#f5e6d5" : "#9a7a65",
-                      border: video.status === "Ready" ? "none" : "1px solid #dbc9b7",
-                    }}
-                    disabled={video.status === "Failed"}
+                  <Link
+                    href={`/dashboard/jobs/${job.id}`}
+                    className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold"
+                    style={{ background: "#fdf8f3", border: "1px solid #dbc9b7", color: "#2b180a" }}
                   >
-                    <PlayCircle className="size-3.5" />
-                    Play
-                  </button>
+                    View
+                  </Link>
                 </div>
                 <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", badgeClass)}>
                   <StatusIcon className="size-3.5" />
-                  {video.status}
+                  {displayStatus}
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Duration</p>
-                  <p className="mt-1 inline-flex items-center gap-1.5 font-medium" style={{ color: "#2b180a" }}>
-                    <Timer className="size-3.5" />
-                    {video.length}
-                  </p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Created</p>
+                  <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{formatRelativeTime(job.created_at)}</p>
                 </div>
               </div>
             </motion.div>
@@ -331,7 +391,9 @@ export default function DashboardVideosPage() {
           className="rounded-2xl p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          No videos found for the current filters.
+          {jobs.length === 0
+            ? "No video jobs yet. Video generation will be available soon."
+            : "No videos found for the current filters."}
         </div>
       )}
     </motion.section>

@@ -95,6 +95,35 @@ export const dashboardJobs: Job[] = [
       "https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=700&auto=format&fit=crop&q=70",
     ],
   },
+  {
+    id: "job_dream_006",
+    productId: "char_002",
+    productName: "Spider-Man Character Creation",
+    status: "completed",
+    createdAt: "2026-02-11T10:34:00.000Z",
+    triggeredBy: "User",
+    variants: ["Character Creation", "Portrait", "Style"],
+    engine: "Dream Character Forge",
+    files: [
+      "https://images.unsplash.com/photo-1521714161819-15534968fc5f?w=700&auto=format&fit=crop&q=70",
+      "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=700&auto=format&fit=crop&q=70",
+      "https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?w=700&auto=format&fit=crop&q=70",
+    ],
+  },
+  {
+    id: "job_dream_007",
+    productId: "char_011",
+    productName: "Rapunzel Character Creation",
+    status: "processing",
+    createdAt: "2026-02-11T10:37:00.000Z",
+    triggeredBy: "Agent",
+    variants: ["Character Creation", "Turnaround"],
+    engine: "Dream Character Forge",
+    files: [
+      "https://images.unsplash.com/photo-1513151233558-d860c5398176?w=700&auto=format&fit=crop&q=70",
+      "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=700&auto=format&fit=crop&q=70",
+    ],
+  },
 ];
 
 export const dashboardJobLogs: Record<string, JobLog[]> = {
@@ -123,6 +152,16 @@ export const dashboardJobLogs: Record<string, JobLog[]> = {
     { ts: "10:30:03", level: "success", message: "Prompt generated." },
     { ts: "10:30:11", level: "info", message: "Building character style sheet." },
     { ts: "10:30:19", level: "info", message: "Generating first visual frame." },
+  ],
+  job_dream_006: [
+    { ts: "10:34:02", level: "success", message: "Character prompt generated from style references." },
+    { ts: "10:34:14", level: "success", message: "Portrait render completed." },
+    { ts: "10:34:25", level: "success", message: "Style variant set exported." },
+  ],
+  job_dream_007: [
+    { ts: "10:37:04", level: "success", message: "Character prompt generated." },
+    { ts: "10:37:16", level: "info", message: "Generating turnaround angles (2/4)." },
+    { ts: "10:37:27", level: "info", message: "Applying consistency pass to facial features." },
   ],
 };
 

@@ -92,8 +92,11 @@ async function forwardCharacterRequest(request: Request, action: "create" | "reg
     bodyPayload.mode = action;
   }
 
+  const jobId = url.searchParams.get("job_id") || "";
+  const jobQuery = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(`${baseUrl}${path}${jobQuery}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(bodyPayload),

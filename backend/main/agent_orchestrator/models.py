@@ -98,3 +98,48 @@ class ServiceHealthResponse(BaseModel):
     backend_connected: bool
     backend_health: dict[str, Any] | None = None
     backend_error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Job system models
+# ---------------------------------------------------------------------------
+
+JobType = Literal["character", "story", "video"]
+JobStatus = Literal["queued", "processing", "completed", "failed"]
+
+
+class JobCreateRequest(BaseModel):
+    type: JobType
+    title: str = ""
+    user_prompt: str = ""
+    input_payload: dict[str, Any] = Field(default_factory=dict)
+    triggered_by: str = "user"
+    engine: str = ""
+
+
+class JobResponse(BaseModel):
+    id: str
+    type: str
+    status: str
+    title: str
+    user_prompt: str
+    input_payload: dict[str, Any] = Field(default_factory=dict)
+    result_payload: dict[str, Any] = Field(default_factory=dict)
+    progress: float = 0.0
+    current_step: str = ""
+    error_message: str = ""
+    triggered_by: str = "user"
+    engine: str = ""
+    assets: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class JobEventResponse(BaseModel):
+    id: str
+    job_id: str
+    event_type: str
+    level: str
+    message: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""

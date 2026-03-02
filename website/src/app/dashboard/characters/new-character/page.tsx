@@ -36,6 +36,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import { appendStoredCharacter } from "@/lib/custom-characters";
+import { createJob } from "@/lib/jobs";
 import { dashboardCharacters } from "@/lib/dashboard-data";
 import { cn } from "@/lib/utils";
 
@@ -863,7 +864,20 @@ export default function DashboardNewCharacterPage() {
         character_drawings: drawingsPayload,
       };
 
-      const response = await fetch(CHARACTER_API_ROUTE, {
+      let jobIdParam = "";
+      try {
+        const job = await createJob({
+          type: "character",
+          title: name || "New Character",
+          user_prompt: buildUserPrompt(draft, name, description),
+          input_payload: { name, role: draft.role, ageBand: draft.ageBand, mood: draft.mood },
+          triggered_by: "character-builder",
+          engine: "a2a-crew-ai-character-maker",
+        });
+        jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
+      } catch { /* job tracking is best-effort */ }
+
+      const response = await fetch(`${CHARACTER_API_ROUTE}${jobIdParam}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(requestPayload),

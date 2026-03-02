@@ -81,9 +81,12 @@ export async function POST(request: Request) {
     ? ({ ...(payload as Record<string, unknown>) } as Record<string, unknown>)
     : {};
 
+  const jobId = url.searchParams.get("job_id") || "";
+  const jobQuery = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+
   if (stream) {
     try {
-      const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook/stream`, {
+      const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook/stream${jobQuery}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(bodyPayload),
@@ -123,7 +126,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook`, {
+    const response = await fetch(`${baseUrl}/api/v1/orchestrate/storybook${jobQuery}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(bodyPayload),

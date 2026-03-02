@@ -10,8 +10,6 @@ required_vars=(
   AZURE_CONTAINERAPP_ENV
   AZURE_ACR_NAME
   AZURE_CONTAINERAPP_NAME
-  A2A_BACKEND_BASE_URL
-  A2A_STORY_BACKEND_BASE_URL
   OPENAI_API_KEY
   REPLICATE_API_TOKEN
 )
@@ -23,32 +21,10 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
-A2A_RPC_PATH="${A2A_RPC_PATH:-/a2a}"
-A2A_STORY_RPC_PATH="${A2A_STORY_RPC_PATH:-/a2a}"
-A2A_STORY_USE_PROTOCOL="${A2A_STORY_USE_PROTOCOL:-true}"
-IMAGE_TAG="maf-orchestrator:$(date +%Y%m%d%H%M%S)"
+CHARACTER_BACKEND_BASE_URL="${CHARACTER_BACKEND_BASE_URL:-https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io}"
+IMAGE_TAG="dream-storybook-a2a:$(date +%Y%m%d%H%M%S)"
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
-
-az group create \
-  --name "${AZURE_RESOURCE_GROUP}" \
-  --location "${AZURE_LOCATION}" \
-  --output none
-
-if ! az acr show --name "${AZURE_ACR_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" >/dev/null 2>&1; then
-  az acr create \
-    --name "${AZURE_ACR_NAME}" \
-    --resource-group "${AZURE_RESOURCE_GROUP}" \
-    --sku Basic \
-    --admin-enabled true \
-    --output none
-fi
-
-az acr update \
-  --name "${AZURE_ACR_NAME}" \
-  --resource-group "${AZURE_RESOURCE_GROUP}" \
-  --admin-enabled true \
-  --output none
 
 ACR_LOGIN_SERVER="$(az acr show --name "${AZURE_ACR_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" --query loginServer -o tsv)"
 
@@ -58,14 +34,6 @@ az acr build \
   --image "${IMAGE_TAG}" \
   "${ROOT_DIR}" \
   --output none
-
-if ! az containerapp env show --name "${AZURE_CONTAINERAPP_ENV}" --resource-group "${AZURE_RESOURCE_GROUP}" >/dev/null 2>&1; then
-  az containerapp env create \
-    --name "${AZURE_CONTAINERAPP_ENV}" \
-    --resource-group "${AZURE_RESOURCE_GROUP}" \
-    --location "${AZURE_LOCATION}" \
-    --output none
-fi
 
 ACR_USER="$(az acr credential show --name "${AZURE_ACR_NAME}" --query username -o tsv)"
 ACR_PASS="$(az acr credential show --name "${AZURE_ACR_NAME}" --query passwords[0].value -o tsv)"
@@ -83,17 +51,28 @@ if az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-group "${
     --resource-group "${AZURE_RESOURCE_GROUP}" \
     --image "${IMAGE_NAME}" \
     --set-env-vars \
-      AGENT_PROVIDER=openai \
       OPENAI_API_KEY=secretref:openai-api-key \
       OPENAI_MODEL=gpt-4o-mini \
+      OPENAI_TEMPERATURE=0.6 \
+      OPENAI_VISION_MODEL=gpt-4.1-mini \
+      OPENAI_VISION_MAX_TOKENS=500 \
       REPLICATE_API_TOKEN=secretref:replicate-api-token \
-      A2A_BACKEND_BASE_URL="${A2A_BACKEND_BASE_URL}" \
-      A2A_RPC_PATH="${A2A_RPC_PATH}" \
-      A2A_USE_PROTOCOL=true \
-      A2A_STORY_BACKEND_BASE_URL="${A2A_STORY_BACKEND_BASE_URL}" \
-      A2A_STORY_RPC_PATH="${A2A_STORY_RPC_PATH}" \
-      A2A_STORY_USE_PROTOCOL="${A2A_STORY_USE_PROTOCOL}" \
-      DREAM_DATA_DIR=/app/data \
+      REPLICATE_MODEL=openai/gpt-image-1.5 \
+      REPLICATE_OUTPUT_COUNT=1 \
+      REPLICATE_ASPECT_RATIO=2:3 \
+      REPLICATE_QUALITY=medium \
+      REPLICATE_BACKGROUND=auto \
+      REPLICATE_MODERATION=auto \
+      REPLICATE_OUTPUT_FORMAT=webp \
+      REPLICATE_INPUT_FIDELITY=high \
+      REPLICATE_OUTPUT_COMPRESSION=90 \
+      CHARACTER_BACKEND_BASE_URL="${CHARACTER_BACKEND_BASE_URL}" \
+      CHARACTER_BACKEND_RPC_PATH=/a2a \
+      CHARACTER_BACKEND_USE_PROTOCOL=true \
+      CHARACTER_BACKEND_CREATE_PATH=/api/v1/characters/create \
+      CHARACTER_BACKEND_TIMEOUT_SECONDS=240 \
+      SCENE_IMAGE_TIMEOUT_SECONDS=70 \
+      SCENE_IMAGE_RETRY_COUNT=1 \
     --output none
 else
   az containerapp create \
@@ -112,17 +91,28 @@ else
     --max-replicas 3 \
     --secrets openai-api-key="${OPENAI_API_KEY}" replicate-api-token="${REPLICATE_API_TOKEN}" \
     --env-vars \
-      AGENT_PROVIDER=openai \
       OPENAI_API_KEY=secretref:openai-api-key \
       OPENAI_MODEL=gpt-4o-mini \
+      OPENAI_TEMPERATURE=0.6 \
+      OPENAI_VISION_MODEL=gpt-4.1-mini \
+      OPENAI_VISION_MAX_TOKENS=500 \
       REPLICATE_API_TOKEN=secretref:replicate-api-token \
-      A2A_BACKEND_BASE_URL="${A2A_BACKEND_BASE_URL}" \
-      A2A_RPC_PATH="${A2A_RPC_PATH}" \
-      A2A_USE_PROTOCOL=true \
-      A2A_STORY_BACKEND_BASE_URL="${A2A_STORY_BACKEND_BASE_URL}" \
-      A2A_STORY_RPC_PATH="${A2A_STORY_RPC_PATH}" \
-      A2A_STORY_USE_PROTOCOL="${A2A_STORY_USE_PROTOCOL}" \
-      DREAM_DATA_DIR=/app/data \
+      REPLICATE_MODEL=openai/gpt-image-1.5 \
+      REPLICATE_OUTPUT_COUNT=1 \
+      REPLICATE_ASPECT_RATIO=2:3 \
+      REPLICATE_QUALITY=medium \
+      REPLICATE_BACKGROUND=auto \
+      REPLICATE_MODERATION=auto \
+      REPLICATE_OUTPUT_FORMAT=webp \
+      REPLICATE_INPUT_FIDELITY=high \
+      REPLICATE_OUTPUT_COMPRESSION=90 \
+      CHARACTER_BACKEND_BASE_URL="${CHARACTER_BACKEND_BASE_URL}" \
+      CHARACTER_BACKEND_RPC_PATH=/a2a \
+      CHARACTER_BACKEND_USE_PROTOCOL=true \
+      CHARACTER_BACKEND_CREATE_PATH=/api/v1/characters/create \
+      CHARACTER_BACKEND_TIMEOUT_SECONDS=240 \
+      SCENE_IMAGE_TIMEOUT_SECONDS=70 \
+      SCENE_IMAGE_RETRY_COUNT=1 \
     --output none
 fi
 
@@ -130,4 +120,3 @@ FQDN="$(az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-grou
 
 echo "Deployment complete"
 echo "App URL: https://${FQDN}"
-echo "Health URL: https://${FQDN}/health"

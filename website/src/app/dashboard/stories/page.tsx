@@ -2,88 +2,148 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Filter, MoreVertical, Search, BookMarked, FileText, BookOpenText } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, Filter, MoreVertical, RefreshCw, Search, BookMarked, FileText, BookOpenText, Clock3, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";
-import { dashboardStories, dashboardStoryPages } from "@/lib/dashboard-data";
+import { fetchJobs, getAssetUrl, type Job, type JobStatus } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
 const easeOutExpo = [0.22, 1, 0.36, 1] as const;
 
-type StoryStatus = "Published" | "Draft";
+type StoryDisplayStatus = "Completed" | "Processing" | "Failed";
 
 const statusConfig: Record<
-  StoryStatus,
+  StoryDisplayStatus,
   { label: string; icon: React.ComponentType<{ className?: string }>; badgeClass: string }
 > = {
-  Published: {
-    label: "Published",
+  Completed: {
+    label: "Completed",
     icon: BookMarked,
     badgeClass: "bg-emerald-100 text-emerald-900 border-emerald-300",
   },
-  Draft: {
-    label: "Draft",
-    icon: FileText,
+  Processing: {
+    label: "Processing",
+    icon: Clock3,
     badgeClass: "bg-amber-100 text-amber-900 border-amber-300",
+  },
+  Failed: {
+    label: "Failed",
+    icon: XCircle,
+    badgeClass: "bg-rose-100 text-rose-900 border-rose-300",
   },
 };
 
-function previewItemsForStory(storyId: string) {
-  const pages = dashboardStoryPages[storyId] ?? [];
-  return pages
-    .filter((p) => p.illustration)
-    .slice(0, 3)
-    .map((p, idx) => ({
-      id: idx + 1,
-      name: p.isTitle ? "Cover" : p.chapter ?? `Page ${idx + 1}`,
-      image: p.illustration!,
-    }));
+function mapStatus(s: JobStatus): StoryDisplayStatus {
+  if (s === "completed") return "Completed";
+  if (s === "failed") return "Failed";
+  return "Processing";
 }
 
-function getPageCount(storyId: string) {
-  return dashboardStoryPages[storyId]?.length ?? 0;
+function getStoryTitle(job: Job): string {
+  const story = job.result_payload?.story as { title?: string } | undefined;
+  return story?.title || job.title || "Untitled Story";
 }
 
-function getChapterCount(storyId: string) {
-  const pages = dashboardStoryPages[storyId] ?? [];
-  return pages.filter((p) => p.chapter).length;
+function getCoverUrl(job: Job): string {
+  if (job.assets.length > 0) return getAssetUrl(job.id, job.assets[0].filename);
+  const images = job.result_payload?.generated_images as string[] | undefined;
+  return images?.[0] || "";
+}
+
+function getAgeBand(job: Job): string {
+  return (job.input_payload?.age_band as string) || "All";
+}
+
+function getPageCount(job: Job): number {
+  const story = job.result_payload?.story as { right_pages?: unknown[] } | undefined;
+  return (story?.right_pages?.length ?? 0) + 2; // title + end
+}
+
+function getSpreadsCount(job: Job): number {
+  const spreads = job.result_payload?.spreads as unknown[] | undefined;
+  return spreads?.length ?? 0;
+}
+
+function previewItemsForStory(job: Job) {
+  return job.assets.slice(0, 3).map((asset, idx) => ({
+    id: idx + 1,
+    name: idx === 0 ? "Cover" : `Scene ${idx}`,
+    image: getAssetUrl(job.id, asset.filename),
+  }));
+}
+
+function formatRelativeTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  if (diffMins < 60) return `${Math.max(diffMins, 1)}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
 }
 
 export default function DashboardStoriesPage() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatus, setSelectedStatus] = useState<"all" | StoryStatus>("all");
+  const [selectedStatus, setSelectedStatus] = useState<"all" | StoryDisplayStatus>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
+
+  const loadStories = useCallback(async () => {
+    try {
+      const data = await fetchJobs({ type: "story" });
+      setJobs(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try { await loadStories(); } finally { setRefreshing(false); }
+  }, [loadStories]);
+
+  useEffect(() => {
+    loadStories();
+  }, [loadStories]);
 
   useEffect(() => {
     const onWindowClick = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!filterRef.current?.contains(target)) setFilterOpen(false);
-
       const inRowMenu = (event.target as HTMLElement | null)?.closest("[data-row-menu]");
       if (!inRowMenu) setRowMenuOpen("");
     };
-
     window.addEventListener("mousedown", onWindowClick);
     return () => window.removeEventListener("mousedown", onWindowClick);
   }, []);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return dashboardStories.filter((story) => {
-      const matchesSearch =
-        !q ||
-        story.title.toLowerCase().includes(q) ||
-        story.id.toLowerCase().includes(q) ||
-        story.ageBand.toLowerCase().includes(q);
-      const matchesStatus = selectedStatus === "all" || story.status === selectedStatus;
+    return jobs.filter((job) => {
+      const title = getStoryTitle(job).toLowerCase();
+      const matchesSearch = !q || title.includes(q) || job.id.toLowerCase().includes(q);
+      const matchesStatus = selectedStatus === "all" || mapStatus(job.status) === selectedStatus;
       return matchesSearch && matchesStatus;
     });
-  }, [searchQuery, selectedStatus]);
+  }, [jobs, searchQuery, selectedStatus]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#dbc9b7] border-t-[#c9924e]" />
+      </div>
+    );
+  }
 
   return (
     <motion.section
@@ -93,12 +153,25 @@ export default function DashboardStoriesPage() {
       className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
       style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
     >
-      <div className="space-y-1">
-        <h2 className={`${styles.halant} text-2xl`}>All Stories</h2>
-        <p className="text-sm" style={{ color: "#9a7a65" }}>Browse, filter, and open your saved story adventures.</p>
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <h2 className={`${styles.halant} text-2xl`}>All Stories</h2>
+          <p className="text-sm" style={{ color: "#9a7a65" }}>Browse, filter, and open your generated story adventures.</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition"
+          style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+          onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.background = "#ede7dd"; }}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
       </div>
 
-      {/* ── Search & Filter ── */}
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2" style={{ color: "#9a7a65" }} />
@@ -129,14 +202,11 @@ export default function DashboardStoriesPage() {
               className="absolute right-0 z-50 mt-2 w-48 overflow-hidden rounded-2xl shadow-lg"
               style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
             >
-              {(["all", "Published", "Draft"] as const).map((s) => (
+              {(["all", "Completed", "Processing", "Failed"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
-                  onClick={() => {
-                    setSelectedStatus(s);
-                    setFilterOpen(false);
-                  }}
+                  onClick={() => { setSelectedStatus(s); setFilterOpen(false); }}
                   className="w-full px-4 py-2.5 text-left text-sm font-medium transition"
                   style={{
                     color: selectedStatus === s ? "#8b5e3c" : "#2b180a",
@@ -177,14 +247,17 @@ export default function DashboardStoriesPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((story) => {
-                const StatusIcon = statusConfig[story.status as StoryStatus]?.icon ?? BookOpenText;
-                const badgeClass = statusConfig[story.status as StoryStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
-                const preview = previewItemsForStory(story.id);
+              {filtered.map((job) => {
+                const displayStatus = mapStatus(job.status);
+                const StatusIcon = statusConfig[displayStatus]?.icon ?? BookOpenText;
+                const badgeClass = statusConfig[displayStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+                const preview = previewItemsForStory(job);
+                const cover = getCoverUrl(job);
+                const title = getStoryTitle(job);
 
                 return (
                   <motion.tr
-                    key={story.id}
+                    key={job.id}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.24 }}
@@ -195,17 +268,23 @@ export default function DashboardStoriesPage() {
                   >
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-3">
-                        <img src={story.cover} alt={story.title} className="size-10 rounded-lg object-cover shadow-sm" />
+                        {cover ? (
+                          <img src={cover} alt={title} className="size-10 rounded-lg object-cover shadow-sm" />
+                        ) : (
+                          <div className="flex size-10 items-center justify-center rounded-lg" style={{ background: "#ede7dd" }}>
+                            <BookOpenText className="size-4" style={{ color: "#9a7a65" }} />
+                          </div>
+                        )}
                         <div className="space-y-1">
-                          <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{story.title}</p>
-                          <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{story.id}</p>
+                          <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>{title}</p>
+                          <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id.slice(0, 8)}…</p>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
                       <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", badgeClass)}>
                         <StatusIcon className="size-3.5" />
-                        {story.status}
+                        {displayStatus}
                       </div>
                     </td>
                     <td className="px-4 py-3.5">
@@ -213,14 +292,14 @@ export default function DashboardStoriesPage() {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="space-y-0.5 text-sm" style={{ color: "#9a7a65" }}>
-                        <p>{getPageCount(story.id)} pages · {getChapterCount(story.id)} chapters</p>
-                        <p className="text-[11px]">Ages {story.ageBand} · {story.duration}</p>
+                        <p>{getPageCount(job)} pages · {getSpreadsCount(job)} spreads</p>
+                        <p className="text-[11px]">Ages {getAgeBand(job)} · {formatRelativeTime(job.created_at)}</p>
                       </div>
                     </td>
                     <td className="px-4 py-3.5 text-right">
                       <div className="relative inline-flex items-center gap-2" data-row-menu>
                         <Link
-                          href={`/dashboard/stories/${story.id}`}
+                          href={`/dashboard/jobs/${job.id}`}
                           className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold transition"
                           style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
@@ -230,7 +309,7 @@ export default function DashboardStoriesPage() {
                         </Link>
                         <button
                           type="button"
-                          onClick={() => setRowMenuOpen((v) => (v === story.id ? "" : story.id))}
+                          onClick={() => setRowMenuOpen((v) => (v === job.id ? "" : job.id))}
                           className="inline-flex size-8 items-center justify-center rounded-full transition"
                           style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
                           onMouseEnter={(e) => (e.currentTarget.style.background = "#ede7dd")}
@@ -239,20 +318,20 @@ export default function DashboardStoriesPage() {
                         >
                           <MoreVertical className="size-4" />
                         </button>
-                        {rowMenuOpen === story.id && (
+                        {rowMenuOpen === job.id && (
                           <div
                             className="absolute right-0 top-10 z-50 w-44 overflow-hidden rounded-xl shadow-lg"
                             style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
                           >
                             <Link
-                              href={`/dashboard/stories/${story.id}`}
+                              href={`/dashboard/jobs/${job.id}`}
                               className="block px-3 py-2 text-left text-sm font-medium transition"
                               style={{ color: "#2b180a" }}
                               onMouseEnter={(e) => (e.currentTarget.style.background = "#f0e8dc")}
                               onMouseLeave={(e) => (e.currentTarget.style.background = "")}
                               onClick={() => setRowMenuOpen("")}
                             >
-                              Read Story
+                              View Job
                             </Link>
                             <button
                               type="button"
@@ -260,12 +339,9 @@ export default function DashboardStoriesPage() {
                               style={{ color: "#2b180a" }}
                               onMouseEnter={(e) => (e.currentTarget.style.background = "#f0e8dc")}
                               onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                              onClick={async () => {
-                                await navigator.clipboard.writeText(story.id);
-                                setRowMenuOpen("");
-                              }}
+                              onClick={async () => { await navigator.clipboard.writeText(job.id); setRowMenuOpen(""); }}
                             >
-                              Copy Story ID
+                              Copy Job ID
                             </button>
                           </div>
                         )}
@@ -281,14 +357,17 @@ export default function DashboardStoriesPage() {
 
       {/* ── Mobile Cards ── */}
       <div className="space-y-3 lg:hidden">
-        {filtered.map((story) => {
-          const StatusIcon = statusConfig[story.status as StoryStatus]?.icon ?? BookOpenText;
-          const badgeClass = statusConfig[story.status as StoryStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
-          const preview = previewItemsForStory(story.id);
+        {filtered.map((job) => {
+          const displayStatus = mapStatus(job.status);
+          const StatusIcon = statusConfig[displayStatus]?.icon ?? BookOpenText;
+          const badgeClass = statusConfig[displayStatus]?.badgeClass ?? "bg-muted text-muted-foreground border-border";
+          const preview = previewItemsForStory(job);
+          const cover = getCoverUrl(job);
+          const title = getStoryTitle(job);
 
           return (
             <motion.div
-              key={story.id}
+              key={job.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.26 }}
@@ -298,14 +377,20 @@ export default function DashboardStoriesPage() {
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <img src={story.cover} alt={story.title} className="size-10 rounded-lg object-cover shadow-sm" />
+                    {cover ? (
+                      <img src={cover} alt={title} className="size-10 rounded-lg object-cover shadow-sm" />
+                    ) : (
+                      <div className="flex size-10 items-center justify-center rounded-lg" style={{ background: "#ede7dd" }}>
+                        <BookOpenText className="size-4" style={{ color: "#9a7a65" }} />
+                      </div>
+                    )}
                     <div className="space-y-1">
-                      <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{story.title}</h3>
-                      <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{story.id}</p>
+                      <h3 className="text-sm font-semibold" style={{ color: "#2b180a" }}>{title}</h3>
+                      <p className="font-mono text-[11px]" style={{ color: "#9a7a65" }}>{job.id.slice(0, 8)}…</p>
                     </div>
                   </div>
                   <Link
-                    href={`/dashboard/stories/${story.id}`}
+                    href={`/dashboard/jobs/${job.id}`}
                     className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold"
                     style={{ background: "#fdf8f3", border: "1px solid #dbc9b7", color: "#2b180a" }}
                   >
@@ -314,16 +399,16 @@ export default function DashboardStoriesPage() {
                 </div>
                 <div className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold", badgeClass)}>
                   <StatusIcon className="size-3.5" />
-                  {story.status}
+                  {displayStatus}
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Details</p>
-                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{getPageCount(story.id)} pages · {getChapterCount(story.id)} ch.</p>
+                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{getPageCount(job)} pages · {getSpreadsCount(job)} spreads</p>
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Age / Duration</p>
-                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>Ages {story.ageBand} · {story.duration}</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Created</p>
+                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{formatRelativeTime(job.created_at)}</p>
                   </div>
                 </div>
                 <div>
@@ -341,7 +426,9 @@ export default function DashboardStoriesPage() {
           className="rounded-2xl p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          No stories found for the current filters.
+          {jobs.length === 0
+            ? "No story jobs yet. Generate a story from the Storybook Test page."
+            : "No stories found for the current filters."}
         </div>
       )}
     </motion.section>
