@@ -9,6 +9,8 @@ WorkflowType = Literal["reference_enriched", "prompt_only"]
 OrchestrationMode = Literal["auto", "create", "regenerate"]
 SelectedAction = Literal["create", "regenerate"]
 SelectedBy = Literal["agent", "explicit_mode", "rule_fallback"]
+ChatRole = Literal["user", "assistant"]
+ChatMode = Literal["normal", "search"]
 
 
 class WorldReference(BaseModel):
@@ -84,6 +86,30 @@ class StoryBookOrchestrationResponse(BaseModel):
     backend_endpoint: str
     backend_status_code: int
     backend_response: dict[str, Any]
+
+
+class ChatMessage(BaseModel):
+    role: ChatRole
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ChatOrchestrationRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000, description="Kid's latest question.")
+    history: list[ChatMessage] = Field(default_factory=list, description="Recent chat history.")
+    age_band: str | None = Field(default=None, max_length=32, description="Optional age hint like 5-8.")
+    mode: ChatMode = Field(default="normal", description="Chat mode selected in UI: normal or search.")
+
+
+class ChatOrchestrationResponse(BaseModel):
+    answer: str
+    category: str
+    safety: str
+    reading_level: str
+    response_style: str
+    model: str
+    mcp_used: bool = False
+    mcp_server: str | None = None
+    mcp_output: dict[str, Any] | None = None
 
 
 class A2AHealthResponse(BaseModel):

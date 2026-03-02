@@ -47,8 +47,8 @@ yarn-error.log*
 /backend/.venv*/
 /backend/a2a-crew-ai-character-maker/.venv/
 /backend/a2a-crew-ai-character-maker/.venv*/
-/backend/main/.venv/
-/backend/main/.venv*/
+/backend/main-maf-chat/.venv/
+/backend/main-maf-chat/.venv*/
 __pycache__/
 *.pyc
 
@@ -58,11 +58,11 @@ __pycache__/
 /backend/a2a-crew-ai-character-maker/.env
 /backend/a2a-crew-ai-character-maker/.env.*
 !/backend/a2a-crew-ai-character-maker/.env.example
-/backend/main/.env
-/backend/main/.env.*
-!/backend/main/.env.example
-/backend/main/.pytest_cache/
-/backend/main/*.egg-info/
+/backend/main-maf-chat/.env
+/backend/main-maf-chat/.env.*
+!/backend/main-maf-chat/.env.example
+/backend/main-maf-chat/.pytest_cache/
+/backend/main-maf-chat/*.egg-info/
 /backend/maf-story-book-maker/.venv/
 /backend/maf-story-book-maker/.venv*/
 /backend/maf-story-book-maker/.pytest_cache/

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -13,9 +14,12 @@ from fastapi.responses import FileResponse, StreamingResponse
 from . import database as db
 from . import job_manager as jm
 from .backend_client import A2ABackendClient, A2ABackendError
+from .chat_agents import MAFChatError, MAFKidsChatOrchestrator
 from .config import Settings, get_settings
 from .maf_router import MAFRoutingAgent
 from .models import (
+    ChatOrchestrationRequest,
+    ChatOrchestrationResponse,
     CharacterOrchestrationRequest,
     CharacterOrchestrationResponse,
     JobCreateRequest,
@@ -25,6 +29,8 @@ from .models import (
     StoryBookOrchestrationRequest,
     StoryBookOrchestrationResponse,
 )
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(
     title="Dream Microsoft Agent Framework Orchestrator",
@@ -203,6 +209,64 @@ async def storybook_protocol_health(settings: Settings = Depends(get_settings)) 
                 "backend_status_code": result.status_code, "backend_response": result.payload}
     except A2ABackendError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Kid-safe chat orchestration
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/orchestrate/chat", response_model=ChatOrchestrationResponse)
+async def orchestrate_chat(
+    payload: ChatOrchestrationRequest,
+    settings: Settings = Depends(get_settings),
+) -> ChatOrchestrationResponse:
+    chat_orchestrator = MAFKidsChatOrchestrator(settings)
+    history = [item.model_dump(mode="json") for item in payload.history]
+    logger.info(
+        "chat_request_received mode=%s history_len=%d age_band=%s",
+        payload.mode,
+        len(history),
+        payload.age_band or "none",
+    )
+
+    try:
+        result = await chat_orchestrator.answer_question(
+            message=payload.message,
+            history=history,
+            age_band=payload.age_band,
+            mode=payload.mode,
+        )
+    except MAFChatError as exc:
+        logger.exception("chat_request_failed mode=%s reason=%s", payload.mode, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        detail = (
+            f"Chat orchestration failed: {exc}. "
+            f"maf_context={chat_orchestrator.import_error_context()}"
+        )
+        logger.exception("chat_request_failed_unhandled mode=%s reason=%s", payload.mode, exc)
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+    logger.info(
+        "chat_request_completed mode=%s category=%s safety=%s mcp_used=%s mcp_server=%s",
+        payload.mode,
+        result.category,
+        result.safety,
+        result.mcp_used,
+        result.mcp_server or "none",
+    )
+
+    return ChatOrchestrationResponse(
+        answer=result.answer,
+        category=result.category,
+        safety=result.safety,
+        reading_level=result.reading_level,
+        response_style=result.response_style,
+        model=result.model,
+        mcp_used=result.mcp_used,
+        mcp_server=result.mcp_server,
+        mcp_output=result.mcp_output,
+    )
 
 
 # ---------------------------------------------------------------------------

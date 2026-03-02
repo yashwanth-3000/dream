@@ -453,6 +453,26 @@
   border-radius: 4px 14px 14px 14px;
 }
 
+.outputJsonWrap {
+  margin-top: 8px;
+  border-top: 1px dashed #d9c7b5;
+  padding-top: 7px;
+}
+
+.outputJsonHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.outputJsonTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #8a6a56;
+  letter-spacing: -0.01em;
+}
+
 /* First / last bubble corner rounding for user */
 .bubbleUser {
   min-width: 64px;
@@ -1272,6 +1292,18 @@
   padding: 8px 0 8px;
 }
 
+.thoughtLogStepHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thoughtLogStepHeadMain {
+  min-width: 0;
+  flex: 1;
+}
+
 .thoughtLogStepTitle {
   font-size: 12.5px;
   font-weight: 600;
@@ -1287,6 +1319,50 @@
   line-height: 1.5;
   letter-spacing: -0.01em;
   margin: 0;
+}
+
+.jsonToggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  border: 1px solid #dbc9b7;
+  background: #fffaf4;
+  color: #7a5a45;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.jsonToggleBtn:hover {
+  background: #f8efe5;
+  border-color: #cfb69f;
+  color: #5f4028;
+}
+
+.jsonToggleChevron {
+  display: inline-flex;
+  transform-origin: center;
+}
+
+.jsonOutputPre {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 8px;
+  border: 1px solid #dbc9b7;
+  background: #f9f1e7;
+  padding: 8px;
+  color: #4d3423;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .thoughtLogImageGrid {

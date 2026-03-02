@@ -1,6 +1,6 @@
 # Dream Backend: A2A CrewAI Character Maker
 
-A self-contained multi-agent character engine that generates story-ready characters with identity consistency across scenes. Connects to the Main orchestrator (`backend/main`) through the A2A (Agent-to-Agent) Protocol.
+A self-contained multi-agent character engine that generates story-ready characters with identity consistency across scenes. Connects to the Main orchestrator (`backend/main-maf-chat`) through the A2A (Agent-to-Agent) Protocol.
 
 **Pipeline:** User prompt + optional reference images -> OpenAI Vision analysis -> CrewAI backstory + image prompt generation -> Replicate image rendering -> structured JSON response.
 

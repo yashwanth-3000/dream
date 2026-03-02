@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,13 @@ class Settings(BaseSettings):
     azure_openai_api_key: str | None = None
     azure_openai_chat_deployment_name: str | None = None
     azure_openai_api_version: str = "preview"
+
+    exa_mcp_enabled: bool = True
+    exa_mcp_required_in_search: bool = True
+    exa_mcp_base_url: str = "https://mcp.exa.ai/mcp"
+    exa_api_key: str | None = None
+    exa_mcp_tools: str | None = "web_search_exa"
+    exa_mcp_timeout_seconds: float = Field(default=45.0, gt=0.0)
 
     a2a_backend_base_url: str = "http://127.0.0.1:8000"
     a2a_rpc_path: str = "/a2a"
@@ -53,6 +61,8 @@ class Settings(BaseSettings):
         if self.agent_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required when AGENT_PROVIDER=openai.")
+            if self.exa_mcp_enabled and not self.exa_mcp_base_url.strip():
+                raise ValueError("EXA_MCP_BASE_URL is required when EXA_MCP_ENABLED=true.")
             return self
 
         if not self.azure_openai_endpoint:
@@ -63,6 +73,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AZURE_OPENAI_CHAT_DEPLOYMENT_NAME is required when AGENT_PROVIDER=azure."
             )
+        if self.exa_mcp_enabled and not self.exa_mcp_base_url.strip():
+            raise ValueError("EXA_MCP_BASE_URL is required when EXA_MCP_ENABLED=true.")
         return self
 
     @property
@@ -84,6 +96,26 @@ class Settings(BaseSettings):
     @property
     def a2a_story_rpc_url(self) -> str:
         return self._join_url(self.a2a_story_backend_base_url, self.a2a_story_rpc_path)
+
+    @property
+    def exa_mcp_tool_names(self) -> list[str]:
+        raw = (self.exa_mcp_tools or "").strip()
+        if not raw:
+            return []
+        return [name.strip() for name in raw.split(",") if name.strip()]
+
+    @property
+    def exa_mcp_url(self) -> str:
+        parsed = urlsplit(self.exa_mcp_base_url.strip())
+        query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=False))
+
+        if self.exa_api_key:
+            query_pairs["exaApiKey"] = self.exa_api_key.strip()
+        if self.exa_mcp_tool_names:
+            query_pairs["tools"] = ",".join(self.exa_mcp_tool_names)
+
+        query = urlencode(query_pairs)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
     @staticmethod
     def _join_url(base_url: str, path: str) -> str:

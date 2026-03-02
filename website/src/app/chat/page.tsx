@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, Clapperboard, Gamepad2, RotateCw } from "lucide-react";
+import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, Clapperboard, Gamepad2, RotateCw } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
 import { dashboardCharacters, dashboardStories, getDashboardStoryPages } from "@/lib/dashboard-data";
@@ -23,6 +23,7 @@ interface ThinkingStep {
   title: string;
   detail: string;
   imageUrls?: string[];
+  data?: unknown;
 }
 
 interface GameplaySelection {
@@ -36,6 +37,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  backendJson?: Record<string, unknown> | null;
   basePrompt?: string;
   mode?: ModeId | "normal";
   characterSelection?: CharacterSelection | null;
@@ -48,6 +50,20 @@ interface Message {
 interface MessageGroup {
   role: "user" | "assistant";
   messages: Message[];
+}
+
+interface ChatBackendResponse {
+  answer?: string;
+  detail?: string;
+  category?: string;
+  safety?: string;
+  reading_level?: string;
+  response_style?: string;
+  model?: string;
+  mcp_used?: boolean;
+  mcp_server?: string | null;
+  mcp_output?: unknown;
+  [key: string]: unknown;
 }
 
 const TITLE_WORDS = ["What", "shall", "we", "dream", "up?"];
@@ -170,6 +186,25 @@ const VIDEO_GAMEPLAY_THINKING_STEPS: ThinkingStep[] = [
   },
 ];
 
+const CHAT_PENDING_THINKING_STEPS: ThinkingStep[] = [
+  {
+    title: "Receiving your question",
+    detail: "The chat orchestrator accepted your message and prepared context from recent history.",
+  },
+  {
+    title: "Running question reader agent",
+    detail: "Classifying question type and required reading level with kid-safe policy checks.",
+  },
+  {
+    title: "Running response agent",
+    detail: "Generating a child-friendly answer using the selected response style.",
+  },
+  {
+    title: "Finalizing answer",
+    detail: "Validating the final response and returning it to chat.",
+  },
+];
+
 const STORY_CHARACTER_OPTIONS = dashboardCharacters;
 
 // Mock story result — used when story mode completes
@@ -187,7 +222,117 @@ const AUTO_SCROLL_THRESHOLD_PX = 120;
 function getThinkingSteps(mode: ModeId | "normal", videoType: VideoGenerationType | null = null): ThinkingStep[] {
   if (mode === "story") return STORY_THINKING_STEPS;
   if (mode === "video") return videoType === "gameplay" ? VIDEO_GAMEPLAY_THINKING_STEPS : VIDEO_NORMAL_THINKING_STEPS;
+  if (mode === "normal" || mode === "search") return CHAT_PENDING_THINKING_STEPS;
   return COMMON_THINKING_STEPS;
+}
+
+function toTitleCase(input: string | undefined, fallback: string): string {
+  const raw = (input || "").trim();
+  if (!raw) return fallback;
+  return raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatJsonForDisplay(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return trimmed;
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function buildChatSuccessThinkingSteps(meta: {
+  category?: string;
+  safety?: string;
+  readingLevel?: string;
+  responseStyle?: string;
+  model?: string;
+  mode: ModeId | "normal";
+  mcpUsed?: boolean;
+  mcpServer?: string | null;
+  mcpOutput?: unknown;
+  backendPayload: Record<string, unknown>;
+  durationMs: number;
+}): ThinkingStep[] {
+  const category = toTitleCase(meta.category, "General");
+  const safety = toTitleCase(meta.safety, "Safe");
+  const readingLevel = (meta.readingLevel || "8-10").trim();
+  const responseStyle = toTitleCase(meta.responseStyle, "Explainer");
+  const model = (meta.model || "Unknown model").trim();
+  const mcpServer = (meta.mcpServer || "").trim();
+  const seconds = (meta.durationMs / 1000).toFixed(meta.durationMs < 1000 ? 2 : 1);
+  const responsePlanDetail = meta.mode === "search"
+    ? meta.mcpUsed
+      ? `Search mode active. MCP server used: ${mcpServer || "Exa MCP"}. Style: ${responseStyle}. Model: ${model}.`
+      : `Search mode active. MCP unavailable for this run; answered with ${model} using ${responseStyle} style.`
+    : `Selected style: ${responseStyle}. Generated with ${model}.`;
+
+  return [
+    {
+      title: "Receiving your question",
+      detail: "The chat orchestrator accepted your message and prepared recent conversation context.",
+      data: { step: "request_received", mode: meta.mode },
+    },
+    {
+      title: "Question reader output",
+      detail: `Category: ${category} • Safety: ${safety} • Reading level: ${readingLevel}.`,
+      data: {
+        category: meta.category ?? "general",
+        safety: meta.safety ?? "safe",
+        reading_level: readingLevel,
+      },
+    },
+    {
+      title: "Response plan",
+      detail: responsePlanDetail,
+      data: {
+        response_style: meta.responseStyle ?? "explainer",
+        model,
+        mcp_used: Boolean(meta.mcpUsed),
+        mcp_server: mcpServer || null,
+        mcp_output: meta.mcpOutput ?? null,
+      },
+    },
+    {
+      title: "Delivered to chat",
+      detail: `Backend response completed in ${seconds}s.`,
+      data: meta.backendPayload,
+    },
+  ];
+}
+
+function buildChatErrorThinkingSteps(detail: string, durationMs: number): ThinkingStep[] {
+  const seconds = (durationMs / 1000).toFixed(durationMs < 1000 ? 2 : 1);
+  return [
+    {
+      title: "Receiving your question",
+      detail: "The chat orchestrator accepted your message.",
+      data: { step: "request_received" },
+    },
+    {
+      title: "Agent execution failed",
+      detail: detail || "The backend returned an unknown chat error.",
+      data: { error: detail || "Unknown chat backend error." },
+    },
+    {
+      title: "Returned error response",
+      detail: `Request ended after ${seconds}s. You can retry once the backend issue is resolved.`,
+      data: { duration_ms: durationMs },
+    },
+  ];
 }
 
 const blockMotion = {
@@ -267,6 +412,7 @@ function getVideoTypeStep(videoType: VideoGenerationType | null, gameplaySelecti
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAwaitingBackendReply, setIsAwaitingBackendReply] = useState(false);
   const [isClosingLogs, setIsClosingLogs] = useState(false);
   const [isThinkingStreamActive, setIsThinkingStreamActive] = useState(false);
   const [hasActiveStoryCharacterChoice, setHasActiveStoryCharacterChoice] = useState(false);
@@ -290,6 +436,7 @@ export default function ChatPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  const [openJsonByKey, setOpenJsonByKey] = useState<Record<string, boolean>>({});
   const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const characterCarouselRef = useRef<HTMLDivElement>(null);
@@ -329,6 +476,13 @@ export default function ChatPage() {
       else next.add(id);
       return next;
     });
+  }, []);
+
+  const toggleJsonPanel = useCallback((key: string) => {
+    setOpenJsonByKey((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
   }, []);
 
   const stepIntervalMs = React.useMemo(() => {
@@ -574,6 +728,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
+    if ((activeRunMode === "normal" || activeRunMode === "search") && isAwaitingBackendReply) return;
     const imageStageTotal = activeThinkingSteps.find((step) => step.imageUrls?.length)?.imageUrls?.length ?? 0;
     const closeDelayMs = 240;
     let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -631,6 +786,7 @@ export default function ChatPage() {
         setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
         setHasActiveStoryCharacterChoice(false);
         setHasActiveVideoTypeChoice(false);
+        setIsAwaitingBackendReply(false);
         activeStoryCharacterSelectionRef.current = null;
         activeVideoTypeRef.current = null;
         activeGameplaySelectionRef.current = null;
@@ -645,7 +801,7 @@ export default function ChatPage() {
       clearTimeout(finishTimer);
       if (closeTimer) clearTimeout(closeTimer);
     };
-  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, scrollToBottom]);
+  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, isAwaitingBackendReply, scrollToBottom]);
 
   const addAssistantReply = useCallback((mode: ModeId | "normal", startImmediately: boolean) => {
     const stepsForRun = getThinkingSteps(mode).map((step) => ({
@@ -669,10 +825,158 @@ export default function ChatPage() {
     }
   }, []);
 
+  const finalizeBackendAssistantReply = useCallback((
+    assistantContent: string,
+    mode: ModeId | "normal",
+    overrideThinkingSteps?: ThinkingStep[],
+    backendJson?: Record<string, unknown> | null,
+  ) => {
+    const duration = Math.max(1, Math.round((Date.now() - thinkingStartRef.current) / 1000));
+    const sourceSteps = (overrideThinkingSteps && overrideThinkingSteps.length > 0)
+      ? overrideThinkingSteps
+      : getThinkingSteps(mode);
+    const finalThinkingSteps = sourceSteps.map((step) => ({
+      ...step,
+      imageUrls: step.imageUrls ? [...step.imageUrls] : undefined,
+    }));
+    const finalImageCount = finalThinkingSteps.find((step) => step.imageUrls?.length)?.imageUrls?.length ?? 0;
+
+    setVisibleSteps(finalThinkingSteps.length);
+    setVisibleImageCount(finalImageCount);
+    setElapsedSeconds(duration);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: assistantContent,
+        timestamp: new Date(),
+        backendJson: backendJson ?? null,
+        mode,
+        thinkingSteps: finalThinkingSteps,
+        thinkingDuration: duration,
+      },
+    ]);
+    setActiveStoryMessageId(null);
+    setActiveVideoMessageId(null);
+    setActiveStoryCharacterSelection(null);
+    setActiveStoryCharacterId("");
+    setActiveVideoType(null);
+    setActiveGameplaySelection(null);
+    setPendingStoryCharacterId("");
+    setPendingUseAiStoryCharacter(false);
+    setPendingVideoType(null);
+    setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
+    setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
+    setHasActiveStoryCharacterChoice(false);
+    setHasActiveVideoTypeChoice(false);
+    setIsAwaitingBackendReply(false);
+    activeStoryCharacterSelectionRef.current = null;
+    activeVideoTypeRef.current = null;
+    activeGameplaySelectionRef.current = null;
+    setIsClosingLogs(false);
+    setIsThinkingStreamActive(false);
+    setIsLoading(false);
+    setTimeout(() => scrollToBottom("smooth", true), 60);
+  }, [scrollToBottom]);
+
+  const requestBackendAssistantReply = useCallback(async (
+    mode: ModeId | "normal",
+    message: string,
+    history: Array<{ role: "user" | "assistant"; content: string }>,
+  ) => {
+    const requestStartedAt = Date.now();
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message,
+          history,
+          mode: mode === "search" ? "search" : "normal",
+        }),
+        cache: "no-store",
+      });
+
+      const rawText = await response.text();
+      let parsed: ChatBackendResponse = {};
+      try {
+        parsed = JSON.parse(rawText) as ChatBackendResponse;
+      } catch {
+        parsed = {};
+      }
+
+      if (!response.ok) {
+        const detail = typeof parsed.detail === "string" && parsed.detail.trim()
+          ? parsed.detail.trim()
+          : `chat request failed (${response.status})`;
+        const error = new Error(detail) as Error & {
+          backendPayload?: Record<string, unknown>;
+        };
+        const errorPayload = (parsed && typeof parsed === "object")
+          ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
+          : {};
+        errorPayload.status = response.status;
+        if (!errorPayload.detail) {
+          errorPayload.detail = detail;
+        }
+        error.backendPayload = errorPayload;
+        throw error;
+      }
+
+      const answer = typeof parsed.answer === "string" && parsed.answer.trim()
+        ? parsed.answer.trim()
+        : "";
+
+      if (!answer) {
+        throw new Error("Empty answer from chat backend.");
+      }
+
+      const successPayload = (parsed && typeof parsed === "object")
+        ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
+        : ({ answer } as Record<string, unknown>);
+
+      const successSteps = buildChatSuccessThinkingSteps({
+        category: parsed.category,
+        safety: parsed.safety,
+        readingLevel: parsed.reading_level,
+        responseStyle: parsed.response_style,
+        model: parsed.model,
+        mode,
+        mcpUsed: parsed.mcp_used,
+        mcpServer: parsed.mcp_server,
+        mcpOutput: parsed.mcp_output,
+        backendPayload: successPayload,
+        durationMs: Math.max(1, Date.now() - requestStartedAt),
+      });
+
+      finalizeBackendAssistantReply(answer, mode, successSteps, successPayload);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown chat backend error.";
+      const errorSteps = buildChatErrorThinkingSteps(
+        detail,
+        Math.max(1, Date.now() - requestStartedAt),
+      );
+      const errorPayload = (
+        error instanceof Error
+        && "backendPayload" in error
+        && typeof (error as Error & { backendPayload?: unknown }).backendPayload === "object"
+      )
+        ? (
+          (error as Error & { backendPayload?: Record<string, unknown> }).backendPayload
+          ?? { detail }
+        )
+        : { detail };
+      finalizeBackendAssistantReply(detail, mode, errorSteps, errorPayload);
+    }
+  }, [finalizeBackendAssistantReply]);
+
   const handleSend = useCallback((payload: PromptSendPayload) => {
     const trimmed = payload.message.trim();
     if (!trimmed) return;
+
     const mode = payload.mode ?? "normal";
+    const shouldUseBackendChat = mode !== "story" && mode !== "video";
     const initialCharacterSelection = mode === "story" ? null : payload.characterSelection ?? null;
     const initialVideoType: VideoGenerationType | null = null;
     const initialGameplaySelection: GameplaySelection | null = null;
@@ -681,11 +985,20 @@ export default function ChatPage() {
       ? formatStoryPromptWithCharacter(trimmed, initialCharacterSelection)
       : mode === "video"
         ? formatVideoPromptWithType(trimmed, initialVideoType, initialGameplaySelection)
-      : trimmed;
+        : trimmed;
     const userMessageId = Date.now().toString();
 
+    const backendHistory = shouldUseBackendChat
+      ? [
+        ...messages
+          .filter((msg) => msg.role === "user" || msg.role === "assistant")
+          .map((msg) => ({ role: msg.role, content: msg.content })),
+        { role: "user" as const, content: userContent },
+      ].slice(-12)
+      : [];
+
     setShouldAutoScroll(true);
-    setMessages(prev => [
+    setMessages((prev) => [
       ...prev,
       {
         id: userMessageId,
@@ -699,6 +1012,8 @@ export default function ChatPage() {
         gameplaySelection: initialGameplaySelection,
       },
     ]);
+    setIsAwaitingBackendReply(false);
+
     if (mode === "story") {
       setActiveStoryMessageId(userMessageId);
       setActiveVideoMessageId(null);
@@ -751,9 +1066,18 @@ export default function ChatPage() {
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
     }
+
     setTimeout(() => scrollToBottom("smooth", true), 60);
+
+    if (shouldUseBackendChat) {
+      addAssistantReply(mode, true);
+      setIsAwaitingBackendReply(true);
+      void requestBackendAssistantReply(mode, trimmed, backendHistory);
+      return;
+    }
+
     addAssistantReply(mode, shouldStartImmediately);
-  }, [scrollToBottom, addAssistantReply]);
+  }, [messages, scrollToBottom, addAssistantReply, requestBackendAssistantReply]);
 
   const isEmpty = messages.length === 0;
   const groups = groupMessages(messages);
@@ -813,7 +1137,7 @@ export default function ChatPage() {
               animate="show"
               style={{ marginBottom: "34px" }}
             >
-              Type an idea and Dream AI turns it into a magical story for kids.
+              Ask any question and Dream Buddy gives kid-safe answers, stories, and quiz help.
             </motion.p>
 
             <motion.div
@@ -898,7 +1222,7 @@ export default function ChatPage() {
                                   style={{ overflow: "hidden" }}
                                 >
                                   <div className={styles.thoughtLogPanel}>
-                                    <p className={styles.thoughtLogTitle}>Dreaming</p>
+                                    <p className={styles.thoughtLogTitle}>Logs</p>
                                     {group.messages[0].thinkingSteps.map((step, si) => {
                                       const isLast = si === group.messages[0].thinkingSteps!.length - 1;
                                       return (
@@ -908,8 +1232,44 @@ export default function ChatPage() {
                                             {!isLast && <span className={styles.thoughtLogLine} />}
                                           </div>
                                           <div className={styles.thoughtLogStepContent}>
-                                            <p className={styles.thoughtLogStepTitle}>{step.title}</p>
-                                            <p className={styles.thoughtLogStepDetail}>{step.detail}</p>
+                                            <div className={styles.thoughtLogStepHead}>
+                                              <div className={styles.thoughtLogStepHeadMain}>
+                                                <p className={styles.thoughtLogStepTitle}>{step.title}</p>
+                                                <p className={styles.thoughtLogStepDetail}>{step.detail}</p>
+                                              </div>
+                                              {step.data !== undefined ? (
+                                                <button
+                                                  type="button"
+                                                  className={styles.jsonToggleBtn}
+                                                  onClick={() => toggleJsonPanel(`${group.messages[0].id}:step:${si}`)}
+                                                >
+                                                  JSON
+                                                  <motion.span
+                                                    animate={{ rotate: openJsonByKey[`${group.messages[0].id}:step:${si}`] ? 180 : 0 }}
+                                                    transition={{ duration: 0.22, ease: "easeInOut" }}
+                                                    className={styles.jsonToggleChevron}
+                                                  >
+                                                    <ChevronDown size={11} />
+                                                  </motion.span>
+                                                </button>
+                                              ) : null}
+                                            </div>
+                                            <AnimatePresence initial={false}>
+                                              {step.data !== undefined && openJsonByKey[`${group.messages[0].id}:step:${si}`] ? (
+                                                <motion.div
+                                                  key={`${group.messages[0].id}-step-json-${si}`}
+                                                  initial={{ height: 0, opacity: 0 }}
+                                                  animate={{ height: "auto", opacity: 1 }}
+                                                  exit={{ height: 0, opacity: 0 }}
+                                                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                                                  style={{ overflow: "hidden" }}
+                                                >
+                                                  <pre className={styles.jsonOutputPre}>
+                                                    {formatJsonForDisplay(step.data)}
+                                                  </pre>
+                                                </motion.div>
+                                              ) : null}
+                                            </AnimatePresence>
                                             {step.imageUrls?.length ? (
                                               <div className={styles.thoughtLogImageGrid}>
                                                 {step.imageUrls.map((imageUrl, imageIndex) => (
@@ -980,7 +1340,7 @@ export default function ChatPage() {
                                   : `${styles.bubbleUser} ${isFirst ? styles.bubbleUserFirst : ""} ${isLast ? styles.bubbleUserLast : ""}`
                               }`}
                             >
-                              {msg.content}
+                              <div>{msg.content}</div>
                             </div>
                           );
                         })}
@@ -1015,7 +1375,7 @@ export default function ChatPage() {
                         >
                           <Sparkles size={11} />
                         </motion.div>
-                        <span className={styles.dreamingCardTitle}>Dreaming</span>
+                        <span className={styles.dreamingCardTitle}>Processing</span>
                         <span className={styles.dreamingCardTimer}>
                           {(activeRunMode === "story" || activeRunMode === "video") && !isThinkingStreamActive
                             ? "waiting"
@@ -1364,7 +1724,7 @@ export default function ChatPage() {
                 <PromptInputBox
                   onSend={handleSend}
                   isLoading={isLoading}
-                  placeholder="Continue the story..."
+                  placeholder="Ask another question..."
                   mode={composerMode}
                   onModeChange={setComposerMode}
                 />

@@ -1,10 +1,11 @@
-# Main: Microsoft Agent Framework Orchestrator
+# Main MAF Chat: Microsoft Agent Framework Orchestrator
 
-This `backend/main/` service is the orchestration layer between UI/clients and specialized A2A backends.
+This `backend/main-maf-chat/` service is the orchestration layer between UI/clients and specialized A2A backends.
 
 It currently routes to:
 - `backend/a2a-crew-ai-character-maker` for character workflows
 - `backend/a2a-maf-story-book-maker` for short storybook workflows
+- Built-in MAF chat agents for kid-safe Q&A (`/api/v1/orchestrate/chat`)
 
 ## Architecture
 
@@ -15,6 +16,9 @@ User/UI
          -> A2A -> character backend (/a2a)
       -> storybook request passthrough
          -> A2A -> storybook backend (/a2a)
+      -> chat route
+         -> MAF question-reader agent + response agent (OpenAI/Azure OpenAI)
+         -> Exa MCP tools when chat mode is search
 ```
 
 ## Endpoints
@@ -33,6 +37,11 @@ Character orchestration entrypoint.
 
 ### `POST /api/v1/orchestrate/storybook`
 Storybook orchestration entrypoint. Forwards to storybook backend through A2A.
+
+### `POST /api/v1/orchestrate/chat`
+Kid-safe chat orchestration entrypoint. Uses two MAF agents:
+- question-reader agent (classification + safety)
+- response agent (age-appropriate answer)
 
 ## Storybook Request Shape
 
@@ -71,7 +80,7 @@ python -m uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
 ### 3) Main orchestrator (8010)
 
 ```bash
-cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/main
+cd /Users/yashwanthkrishna/Desktop/Projects/dream/backend/main-maf-chat
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -79,7 +88,7 @@ cp .env.example .env
 python -m uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
-## Required `.env` values in `backend/main/.env`
+## Required `.env` values in `backend/main-maf-chat/.env`
 
 ```dotenv
 AGENT_PROVIDER=openai
@@ -91,6 +100,11 @@ A2A_USE_PROTOCOL=true
 A2A_STORY_BACKEND_BASE_URL=http://127.0.0.1:8020
 A2A_STORY_RPC_PATH=/a2a
 A2A_STORY_USE_PROTOCOL=true
+EXA_MCP_ENABLED=true
+EXA_MCP_BASE_URL=https://mcp.exa.ai/mcp
+EXA_API_KEY=
+EXA_MCP_TOOLS=web_search_exa
+EXA_MCP_TIMEOUT_SECONDS=45
 ```
 
 Model note:
@@ -138,9 +152,26 @@ curl -sS -X POST "http://127.0.0.1:8010/api/v1/orchestrate/storybook" \
   }'
 ```
 
+### Kid-safe chat via main
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8010/api/v1/orchestrate/chat" \
+  -H "content-type: application/json" \
+  -d '{
+    "message": "Why is the sky blue?",
+    "history": [],
+    "age_band": "5-8",
+    "mode": "search"
+  }'
+```
+
+Chat response includes metadata fields:
+- `mcp_used`: `true` when Exa MCP was used for that reply.
+- `mcp_server`: MCP server URL label used by backend.
+
 ## Azure Deploy Notes
 
-`backend/main/scripts/deploy_azure.sh` now supports optional story backend envs:
+`backend/main-maf-chat/scripts/deploy_azure.sh` now supports optional story backend envs:
 - `A2A_STORY_BACKEND_BASE_URL` (defaults to `A2A_BACKEND_BASE_URL` if unset)
 - `A2A_STORY_RPC_PATH` (default `/a2a`)
 - `A2A_STORY_USE_PROTOCOL` (default `true`)
