@@ -29,6 +29,7 @@ from .schemas import (
     WorldReference,
 )
 from .services.replicate_service import ReplicateGenerationError, ReplicateImageService
+from .services.tts_service import AudioSynthesisError, OpenAITTSService
 from .services.vision_service import OpenAIVisionService, VisionDescriptionError
 
 
@@ -43,15 +44,13 @@ else:
     A2A_IMPORT_ERROR = None
 
 
-CHAPTER_SEQUENCE = [
-    "Chapter 1",
-    "Chapter 2",
-    "Chapter 3",
-    "Chapter 3 cont.",
-    "Chapter 4",
-]
+STORY_TEXT_PAGE_COUNT = 10
+SCENE_IMAGE_COUNT = STORY_TEXT_PAGE_COUNT + 1  # cover + one illustration per story text page
+SPREAD_COUNT = STORY_TEXT_PAGE_COUNT + 2  # cover/title spread + story spreads + end spread
 
-MIN_CHAPTER_TEXT_CHARS = 260
+CHAPTER_SEQUENCE = [f"Chapter {index}" for index in range(1, STORY_TEXT_PAGE_COUNT + 1)]
+
+MIN_CHAPTER_TEXT_CHARS = 520
 
 RESOLUTION_KEYWORDS = (
     "finally",
@@ -282,6 +281,7 @@ class StoryBookWorkflow:
         scene_prompt_agent: ScenePromptAgent | None = None,
         vision_service: OpenAIVisionService | None = None,
         replicate_service: ReplicateImageService | None = None,
+        tts_service: OpenAITTSService | None = None,
         character_client: CharacterA2AClient | None = None,
         progress_reporter: ProgressReporter | None = None,
     ) -> None:
@@ -306,6 +306,17 @@ class StoryBookWorkflow:
             default_input_fidelity=settings.replicate_input_fidelity,
             default_output_compression=settings.replicate_output_compression,
         )
+        self._tts = tts_service
+        if self._tts is None and getattr(settings, "story_audio_enabled", True):
+            api_key = getattr(settings, "openai_api_key", None)
+            if isinstance(api_key, str) and api_key.strip():
+                self._tts = OpenAITTSService(
+                    api_key=api_key,
+                    model=getattr(settings, "openai_tts_model", "gpt-4o-mini-tts"),
+                    voice=getattr(settings, "openai_tts_voice", "alloy"),
+                    response_format=getattr(settings, "openai_tts_response_format", "mp3"),
+                    speed=float(getattr(settings, "openai_tts_speed", 1.0)),
+                )
         self._character_client = character_client or CharacterA2AClient(settings)
         self._progress_reporter = progress_reporter
 
@@ -337,6 +348,8 @@ class StoryBookWorkflow:
     def choose_workflow(payload: StoryBookCreationRequest) -> WorkflowType:
         if payload.force_workflow:
             return payload.force_workflow
+        if payload.reuse_existing_character:
+            return "reference_enriched"
         if payload.world_references or payload.character_drawings:
             return "reference_enriched"
         return "prompt_only"
@@ -364,6 +377,8 @@ class StoryBookWorkflow:
                 "requested_max_characters": payload.max_characters,
                 "world_reference_count": len(payload.world_references),
                 "character_drawing_count": len(payload.character_drawings),
+                "reuse_existing_character": payload.reuse_existing_character,
+                "reuse_character_name": payload.reuse_character_name,
             },
         )
 
@@ -415,9 +430,14 @@ class StoryBookWorkflow:
             },
         )
 
-        character_task = asyncio.create_task(
-            self._generate_characters(blueprint=blueprint, payload=prepared_payload)
-        )
+        if prepared_payload.reuse_existing_character:
+            character_task = asyncio.create_task(
+                self._reuse_existing_character_packets(blueprint=blueprint, payload=prepared_payload)
+            )
+        else:
+            character_task = asyncio.create_task(
+                self._generate_characters(blueprint=blueprint, payload=prepared_payload)
+            )
         story_task = asyncio.create_task(
             self._story_writer_agent.generate(payload=prepared_payload, blueprint=blueprint)
         )
@@ -450,7 +470,9 @@ class StoryBookWorkflow:
             )
         else:
             character_result = character_result_raw
-            if character_result.total_count == 0:
+            if prepared_payload.reuse_existing_character:
+                generation_sources["character_branch"] = "reused_existing"
+            elif character_result.total_count == 0:
                 generation_sources["character_branch"] = "skipped_no_characters"
             elif character_result.success_count == character_result.total_count:
                 generation_sources["character_branch"] = "parallel_success"
@@ -516,6 +538,25 @@ class StoryBookWorkflow:
             },
         )
 
+        await self._emit_progress(
+            stage="story_audio_generation_start",
+            message="Generating per-page MP3 narration for right-side story pages.",
+            data={
+                "enabled": self._tts is not None,
+                "page_count": len(story.right_pages),
+            },
+        )
+        story, audio_warnings = await self._attach_story_audio(story=story)
+        warnings.extend(audio_warnings)
+        await self._emit_progress(
+            stage="story_audio_generation_complete",
+            message="Per-page MP3 narration stage finished.",
+            data={
+                "audio_pages_ready": sum(1 for page in story.right_pages if page.audio_url),
+                "warning_count": len(audio_warnings),
+            },
+        )
+
         try:
             await self._emit_progress(
                 stage="scene_prompt_generation_start",
@@ -560,15 +601,19 @@ class StoryBookWorkflow:
             payload=prepared_payload,
             characters=character_result.packets,
         )
-        scene_reference_counts = [len(reference_images)] * 6
+        scene_reference_counts = [len(reference_images)] * SCENE_IMAGE_COUNT
 
         await self._emit_progress(
             stage="scene_image_generation_start",
-            message="Starting scene image generation via Replicate.",
+            message="Starting Replicate scene rendering pipeline (cover + story pages).",
             data={
-                "scene_count": 6,
+                "scene_count": SCENE_IMAGE_COUNT,
                 "reference_images_used": len(reference_images),
                 "replicate_model": self._replicate.model,
+                "timeout_seconds_per_attempt": float(self._settings.scene_image_timeout_seconds),
+                "configured_retry_count": int(self._settings.scene_image_retry_count),
+                "max_attempts_per_scene": max(3, int(self._settings.scene_image_retry_count) + 1),
+                "retry_strategy": "hedged_parallel_retry_first_success_wins",
             },
         )
 
@@ -586,7 +631,7 @@ class StoryBookWorkflow:
         spreads = self._build_exact_spreads(story=story, generated_images=generated_images)
         await self._emit_progress(
             stage="spread_contract_complete",
-            message="7-spread contract assembled.",
+            message="Fixed spread contract assembled.",
             data={"spread_count": len(spreads)},
         )
 
@@ -614,6 +659,79 @@ class StoryBookWorkflow:
             generation_sources=generation_sources,
             reference_image_breakdown=reference_breakdown,
             scene_reference_counts=scene_reference_counts,
+        )
+
+    async def _reuse_existing_character_packets(
+        self,
+        blueprint: StoryBlueprint,
+        payload: StoryBookCreationRequest,
+    ) -> CharacterBranchResult:
+        reference_images = list(
+            dict.fromkeys(
+                image_input
+                for drawing in payload.character_drawings
+                for image_input in [self._extract_image_input_from_drawing(drawing)]
+                if image_input
+            )
+        )
+
+        if not reference_images:
+            await self._emit_progress(
+                stage="character_generation_skipped_reuse",
+                message=(
+                    "Reuse was requested but no reusable character references were provided. "
+                    "Falling back to character generation branch."
+                ),
+                data={"reuse_character_name": payload.reuse_character_name},
+            )
+            return await self._generate_characters(blueprint=blueprint, payload=payload)
+
+        explicit_name = (payload.reuse_character_name or "").strip()
+        blueprint_name = (
+            blueprint.character_briefs[0].name.strip()
+            if blueprint.character_briefs and blueprint.character_briefs[0].name
+            else ""
+        )
+        selected_name = explicit_name or blueprint_name or "Reused Character"
+
+        blueprint_brief = (
+            blueprint.character_briefs[0].brief.strip()
+            if blueprint.character_briefs and blueprint.character_briefs[0].brief
+            else ""
+        )
+        drawing_hint = ""
+        for drawing in payload.character_drawings:
+            candidate = (drawing.description or drawing.notes or "").strip()
+            if candidate:
+                drawing_hint = candidate
+                break
+        selected_brief = drawing_hint or blueprint_brief or f"Existing character reference for {selected_name}."
+
+        packet = GeneratedCharacterPacket(
+            name=selected_name,
+            brief=selected_brief,
+            generated_images=reference_images,
+            warnings=[],
+        )
+
+        await self._emit_progress(
+            stage="character_generation_skipped_reuse",
+            message=(
+                f"Reused existing character '{selected_name}' from provided references "
+                "and skipped new character generation."
+            ),
+            data={
+                "name": selected_name,
+                "reference_image_count": len(reference_images),
+                "reuse_character_name": payload.reuse_character_name,
+            },
+        )
+
+        return CharacterBranchResult(
+            packets=[packet],
+            warnings=[],
+            success_count=1,
+            total_count=1,
         )
 
     async def _generate_characters(
@@ -730,15 +848,83 @@ class StoryBookWorkflow:
             warnings=["Generated from fallback path without character backend output."],
         )
 
+    async def _attach_story_audio(
+        self,
+        story: StoryDraft,
+    ) -> tuple[StoryDraft, list[str]]:
+        if self._tts is None or not story.right_pages:
+            return story, []
+
+        tasks = [
+            asyncio.create_task(
+                asyncio.to_thread(self._tts.synthesize_text_to_data_url, page.text)
+            )
+            for page in story.right_pages
+        ]
+
+        warnings: list[str] = []
+        audio_by_page: dict[int, str] = {}
+
+        for page, task in zip(story.right_pages, tasks, strict=True):
+            try:
+                audio_url = await task
+            except AudioSynthesisError as exc:
+                warnings.append(
+                    f"Audio generation failed for page {page.page_number}: {exc}"
+                )
+                await self._emit_progress(
+                    stage="story_audio_generation_failed",
+                    message=f"MP3 generation failed for page {page.page_number}.",
+                    data={"page_number": page.page_number, "detail": str(exc)},
+                )
+                continue
+            except Exception as exc:
+                warnings.append(
+                    f"Audio generation failed for page {page.page_number}: {exc}"
+                )
+                await self._emit_progress(
+                    stage="story_audio_generation_failed",
+                    message=f"MP3 generation failed for page {page.page_number}.",
+                    data={"page_number": page.page_number, "detail": str(exc)},
+                )
+                continue
+
+            audio_by_page[page.page_number] = audio_url
+            await self._emit_progress(
+                stage="story_audio_generated",
+                message=f"MP3 ready for page {page.page_number}.",
+                data={"page_number": page.page_number},
+            )
+
+        if not audio_by_page:
+            return story, warnings
+
+        patched_pages = [
+            StoryRightPage(
+                page_number=page.page_number,
+                chapter=page.chapter,
+                text=page.text,
+                audio_url=audio_by_page.get(page.page_number) or page.audio_url,
+            )
+            for page in story.right_pages
+        ]
+        patched_story = story.model_copy(update={"right_pages": patched_pages})
+        return patched_story, warnings
+
     async def _generate_scene_images(
         self,
         scene_prompts: ScenePromptBundle,
         reference_images: list[str],
     ) -> list[str]:
-        prompt_list = [scene_prompts.cover_prompt, *scene_prompts.illustration_prompts[:5]]
-        if len(prompt_list) != 6:
+        prompt_list = [
+            scene_prompts.cover_prompt,
+            *scene_prompts.illustration_prompts[:STORY_TEXT_PAGE_COUNT],
+        ]
+        if len(prompt_list) != SCENE_IMAGE_COUNT:
             raise StoryWorkflowError(
-                f"Scene prompt contract violation: expected 6 prompts (cover + 5), got {len(prompt_list)}."
+                "Scene prompt contract violation: "
+                f"expected {SCENE_IMAGE_COUNT} prompts (cover + {STORY_TEXT_PAGE_COUNT}), "
+                f"got {len(prompt_list)}."
             )
 
         tasks = [
@@ -767,7 +953,10 @@ class StoryBookWorkflow:
 
                 await self._emit_progress(
                     stage="scene_image_failed",
-                    message=f"Scene image generation failed at index {index}.",
+                    message=(
+                        "Scene render failed after retry policy "
+                        f"for scene_index={index} ({'cover' if index == 0 else f'page_{index}'})."
+                    ),
                     data={"scene_index": index, "detail": str(exc)},
                 )
                 raise StoryWorkflowError(
@@ -778,7 +967,7 @@ class StoryBookWorkflow:
                 stage="scene_image_generated",
                 message=(
                     f"{'Cover' if index == 0 else f'Page image {index}'} generated "
-                    f"({index + 1}/6)."
+                    f"({index + 1}/{SCENE_IMAGE_COUNT})."
                 ),
                 data={
                     "scene_index": index,
@@ -796,97 +985,235 @@ class StoryBookWorkflow:
         negative_prompt: str,
         reference_images: list[str],
     ) -> str:
-        max_attempts = max(1, self._settings.scene_image_retry_count + 1)
-        timeout_seconds = self._settings.scene_image_timeout_seconds
+        configured_attempts = max(1, int(self._settings.scene_image_retry_count) + 1)
+        # Product requirement: always run a 3-attempt hedge window (70s + 70s + 70s launch cadence).
+        max_attempts = max(3, configured_attempts)
+        timeout_seconds = float(self._settings.scene_image_timeout_seconds)
+        loop = asyncio.get_running_loop()
+        page_label = "cover" if scene_index == 0 else f"page_{scene_index}"
+
+        attempt_tasks: dict[int, asyncio.Task[str]] = {}
+        attempt_started_at: dict[int, float] = {}
+        timeout_event_emitted: set[int] = set()
         last_error: Exception | None = None
 
-        for attempt in range(1, max_attempts + 1):
+        async def launch_attempt(attempt: int) -> None:
             await self._emit_progress(
                 stage="scene_image_attempt_start",
                 message=(
-                    f"Scene image attempt {attempt}/{max_attempts} started for index {scene_index}."
+                    "Replicate prediction launched "
+                    f"for {page_label} (scene_index={scene_index}), attempt {attempt}/{max_attempts}."
                 ),
                 data={
                     "scene_index": scene_index,
+                    "scene_label": page_label,
                     "attempt": attempt,
                     "max_attempts": max_attempts,
                     "timeout_seconds": timeout_seconds,
+                    "strategy": "hedged_parallel_retry",
+                    "replicate_model": self._replicate.model,
                 },
             )
+            attempt_tasks[attempt] = asyncio.create_task(
+                asyncio.to_thread(
+                    self._replicate.generate_story_image,
+                    prompt,
+                    negative_prompt or None,
+                    None,
+                    None,
+                    reference_images,
+                )
+            )
+            attempt_started_at[attempt] = loop.time()
 
-            try:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self._replicate.generate_story_image,
-                        prompt,
-                        negative_prompt or None,
-                        None,
-                        None,
-                        reference_images,
-                    ),
-                    timeout=timeout_seconds,
-                )
-                return result
-            except asyncio.TimeoutError as exc:
-                last_error = StoryWorkflowError(
-                    f"scene_index={scene_index}, detail=Image generation timed out after {timeout_seconds:.0f} seconds."
-                )
-                await self._emit_progress(
-                    stage="scene_image_attempt_timeout",
-                    message=(
-                        f"Scene image attempt {attempt}/{max_attempts} timed out at index {scene_index}."
-                    ),
-                    data={
-                        "scene_index": scene_index,
-                        "attempt": attempt,
-                        "max_attempts": max_attempts,
-                        "timeout_seconds": timeout_seconds,
-                        "will_retry": attempt < max_attempts,
-                    },
-                )
-            except ReplicateGenerationError as exc:
-                last_error = StoryWorkflowError(f"scene_index={scene_index}, detail={exc}")
-                await self._emit_progress(
-                    stage="scene_image_attempt_error",
-                    message=(
-                        f"Scene image attempt {attempt}/{max_attempts} failed at index {scene_index}."
-                    ),
-                    data={
-                        "scene_index": scene_index,
-                        "attempt": attempt,
-                        "max_attempts": max_attempts,
-                        "detail": str(exc),
-                        "will_retry": attempt < max_attempts,
-                    },
-                )
-            except Exception as exc:
-                last_error = StoryWorkflowError(f"scene_index={scene_index}, detail={exc}")
-                await self._emit_progress(
-                    stage="scene_image_attempt_error",
-                    message=(
-                        f"Scene image attempt {attempt}/{max_attempts} failed at index {scene_index}."
-                    ),
-                    data={
-                        "scene_index": scene_index,
-                        "attempt": attempt,
-                        "max_attempts": max_attempts,
-                        "detail": str(exc),
-                        "will_retry": attempt < max_attempts,
-                    },
-                )
+        await launch_attempt(1)
+        next_attempt_to_launch = 2
+        next_launch_at = attempt_started_at[1] + timeout_seconds
 
-            if attempt < max_attempts:
+        while True:
+            now = loop.time()
+
+            if next_attempt_to_launch <= max_attempts and now >= next_launch_at:
+                prior_attempt = next_attempt_to_launch - 1
+                prior_task = attempt_tasks.get(prior_attempt)
+                if (
+                    prior_task is not None
+                    and not prior_task.done()
+                    and prior_attempt not in timeout_event_emitted
+                ):
+                    timeout_event_emitted.add(prior_attempt)
+                    elapsed = now - attempt_started_at.get(prior_attempt, now)
+                    await self._emit_progress(
+                        stage="scene_image_attempt_timeout",
+                        message=(
+                            "Replicate prediction exceeded SLA window "
+                            f"for {page_label} (scene_index={scene_index}), "
+                            f"attempt {prior_attempt}/{max_attempts} after {elapsed:.1f}s. "
+                            f"Keeping attempt {prior_attempt} in-flight while launching attempt {next_attempt_to_launch}."
+                        ),
+                        data={
+                            "scene_index": scene_index,
+                            "scene_label": page_label,
+                            "attempt": prior_attempt,
+                            "max_attempts": max_attempts,
+                            "timeout_seconds": timeout_seconds,
+                            "elapsed_seconds": round(elapsed, 2),
+                            "prediction_still_running": True,
+                            "will_retry": True,
+                        },
+                    )
+
                 await self._emit_progress(
                     stage="scene_image_retry_scheduled",
                     message=(
-                        f"Retrying scene image generation for index {scene_index} using the same prompt."
+                        "Hedged retry scheduled for "
+                        f"{page_label} (scene_index={scene_index}): "
+                        f"launching attempt {next_attempt_to_launch}/{max_attempts} with identical prompt and references."
                     ),
                     data={
                         "scene_index": scene_index,
-                        "next_attempt": attempt + 1,
+                        "scene_label": page_label,
+                        "next_attempt": next_attempt_to_launch,
                         "max_attempts": max_attempts,
+                        "strategy": "launch_new_attempt_keep_previous_polling",
                     },
                 )
+                await launch_attempt(next_attempt_to_launch)
+                next_attempt_to_launch += 1
+                if next_attempt_to_launch <= max_attempts:
+                    next_launch_at = loop.time() + timeout_seconds
+                else:
+                    next_launch_at = float("inf")
+
+            pending_tasks = [task for task in attempt_tasks.values() if not task.done()]
+            if not pending_tasks:
+                break
+
+            wait_timeout: float | None = None
+            if next_attempt_to_launch <= max_attempts:
+                wait_timeout = max(0.0, next_launch_at - loop.time())
+
+            done, _ = await asyncio.wait(
+                pending_tasks,
+                timeout=wait_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                continue
+
+            for finished in done:
+                attempt = next(
+                    (attempt_id for attempt_id, task in attempt_tasks.items() if task is finished),
+                    None,
+                )
+                if attempt is None:
+                    continue
+
+                try:
+                    result = finished.result()
+                except ReplicateGenerationError as exc:
+                    last_error = StoryWorkflowError(
+                        f"scene_index={scene_index}, attempt={attempt}, detail={exc}"
+                    )
+                    pending_count = sum(
+                        1
+                        for task in attempt_tasks.values()
+                        if not task.done()
+                    )
+                    await self._emit_progress(
+                        stage="scene_image_attempt_error",
+                        message=(
+                            "Replicate prediction failed "
+                            f"for {page_label} (scene_index={scene_index}), "
+                            f"attempt {attempt}/{max_attempts}. "
+                            f"In-flight attempts remaining: {pending_count}."
+                        ),
+                        data={
+                            "scene_index": scene_index,
+                            "scene_label": page_label,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "detail": str(exc),
+                            "prediction_failed": True,
+                            "will_retry": next_attempt_to_launch <= max_attempts,
+                            "inflight_attempts_remaining": pending_count,
+                        },
+                    )
+                    continue
+                except Exception as exc:
+                    last_error = StoryWorkflowError(
+                        f"scene_index={scene_index}, attempt={attempt}, detail={exc}"
+                    )
+                    pending_count = sum(
+                        1
+                        for task in attempt_tasks.values()
+                        if not task.done()
+                    )
+                    await self._emit_progress(
+                        stage="scene_image_attempt_error",
+                        message=(
+                            "Unexpected scene render error "
+                            f"for {page_label} (scene_index={scene_index}), "
+                            f"attempt {attempt}/{max_attempts}. "
+                            f"In-flight attempts remaining: {pending_count}."
+                        ),
+                        data={
+                            "scene_index": scene_index,
+                            "scene_label": page_label,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "detail": str(exc),
+                            "prediction_failed": True,
+                            "will_retry": next_attempt_to_launch <= max_attempts,
+                            "inflight_attempts_remaining": pending_count,
+                        },
+                    )
+                    continue
+
+                await self._emit_progress(
+                    stage="scene_image_attempt_won",
+                    message=(
+                        "Selected first successful Replicate prediction "
+                        f"for {page_label} (scene_index={scene_index}) from attempt {attempt}/{max_attempts}."
+                    ),
+                    data={
+                        "scene_index": scene_index,
+                        "scene_label": page_label,
+                        "attempt": attempt,
+                        "max_attempts": max_attempts,
+                        "strategy": "first_success_wins",
+                        "image_url": result,
+                    },
+                )
+
+                ignored_attempts: list[int] = []
+                for attempt_id, task in attempt_tasks.items():
+                    if attempt_id == attempt:
+                        continue
+                    if not task.done():
+                        task.cancel()
+                        ignored_attempts.append(attempt_id)
+
+                if ignored_attempts:
+                    await self._emit_progress(
+                        stage="scene_image_attempt_cancelled",
+                        message=(
+                            "Ignoring slower in-flight predictions "
+                            f"for {page_label} (scene_index={scene_index}) after attempt {attempt} succeeded."
+                        ),
+                        data={
+                            "scene_index": scene_index,
+                            "scene_label": page_label,
+                            "selected_attempt": attempt,
+                            "ignored_attempts": ignored_attempts,
+                        },
+                    )
+
+                await asyncio.gather(
+                    *[task for attempt_id, task in attempt_tasks.items() if attempt_id != attempt],
+                    return_exceptions=True,
+                )
+                return result
 
         if last_error is not None:
             raise last_error
@@ -1042,9 +1369,13 @@ class StoryBookWorkflow:
                 )
             ]
 
-        plans_by_number = {p.page_number: p for p in blueprint.page_plans if 1 <= p.page_number <= 5}
+        plans_by_number = {
+            p.page_number: p
+            for p in blueprint.page_plans
+            if 1 <= p.page_number <= STORY_TEXT_PAGE_COUNT
+        }
         page_plans = []
-        for index in range(1, 6):
+        for index in range(1, STORY_TEXT_PAGE_COUNT + 1):
             existing = plans_by_number.get(index)
             default_chapter = CHAPTER_SEQUENCE[index - 1]
             if existing is not None:
@@ -1053,9 +1384,6 @@ class StoryBookWorkflow:
             else:
                 chapter = default_chapter
                 beat = f"Story beat for {default_chapter}."
-
-            if index == 4 and "cont" not in chapter.lower():
-                chapter = "Chapter 3 cont."
 
             page_plans.append(
                 {
@@ -1078,18 +1406,20 @@ class StoryBookWorkflow:
         )
 
     def _normalize_story_draft(self, story: StoryDraft, blueprint: StoryBlueprint) -> StoryDraft:
-        pages_by_number = {p.page_number: p for p in story.right_pages if 1 <= p.page_number <= 5}
+        pages_by_number = {
+            p.page_number: p
+            for p in story.right_pages
+            if 1 <= p.page_number <= STORY_TEXT_PAGE_COUNT
+        }
 
         normalized_pages: list[StoryRightPage] = []
-        for index in range(1, 6):
+        for index in range(1, STORY_TEXT_PAGE_COUNT + 1):
             page = pages_by_number.get(index)
             plan = next((p for p in blueprint.page_plans if p.page_number == index), None)
             default_chapter = CHAPTER_SEQUENCE[index - 1]
             chapter = page.chapter.strip() if page and page.chapter else (plan.chapter if plan else default_chapter)
             if not chapter:
                 chapter = default_chapter
-            if index == 4:
-                chapter = "Chapter 3 cont."
 
             text = page.text.strip() if page and page.text else ""
             if not text and plan is not None:
@@ -1108,6 +1438,7 @@ class StoryBookWorkflow:
                     page_number=index,
                     chapter=chapter,
                     text=text,
+                    audio_url=page.audio_url.strip() if page and page.audio_url else None,
                 )
             )
 
@@ -1138,12 +1469,12 @@ class StoryBookWorkflow:
             )
 
         illustration_prompts = [p.strip() for p in scene_prompts.illustration_prompts if p.strip()]
-        if len(illustration_prompts) < 5:
-            for page in story.right_pages[len(illustration_prompts) : 5]:
+        if len(illustration_prompts) < STORY_TEXT_PAGE_COUNT:
+            for page in story.right_pages[len(illustration_prompts) : STORY_TEXT_PAGE_COUNT]:
                 illustration_prompts.append(
                     f"Illustration for {page.chapter}: {page.text}. Child-friendly cinematic storybook style."
                 )
-        illustration_prompts = illustration_prompts[:5]
+        illustration_prompts = illustration_prompts[:STORY_TEXT_PAGE_COUNT]
 
         character_anchor = self._build_character_anchor_text(characters)
         page_map = {page.page_number: page for page in story.right_pages}
@@ -1325,9 +1656,11 @@ class StoryBookWorkflow:
         return generated_character_images + uploaded_character_drawings
 
     def _build_exact_spreads(self, story: StoryDraft, generated_images: list[str]) -> list[StorySpread]:
-        if len(generated_images) != 6:
+        if len(generated_images) != SCENE_IMAGE_COUNT:
             raise StoryWorkflowError(
-                f"Spread build contract violation: expected 6 generated images (cover + 5), got {len(generated_images)}."
+                "Spread build contract violation: "
+                f"expected {SCENE_IMAGE_COUNT} generated images "
+                f"(cover + {STORY_TEXT_PAGE_COUNT}), got {len(generated_images)}."
             )
 
         right_pages_map = {page.page_number: page for page in story.right_pages}
@@ -1348,17 +1681,16 @@ class StoryBookWorkflow:
             )
         ]
 
-        for index in range(1, 6):
+        for index in range(1, STORY_TEXT_PAGE_COUNT + 1):
             page = right_pages_map.get(index)
             chapter = page.chapter if page else CHAPTER_SEQUENCE[index - 1]
             text = page.text if page else f"Story content for page {index}."
-            if index == 4:
-                chapter = "Chapter 3 cont."
+            audio_url = page.audio_url if page else None
 
             spreads.append(
                 StorySpread(
                     spread_index=index,
-                    label=f"Page {index} of 5",
+                    label=f"Page {index} of {STORY_TEXT_PAGE_COUNT}",
                     left=StorySpreadSide(
                         kind="illustration",
                         image_url=generated_images[index],
@@ -1369,13 +1701,14 @@ class StoryBookWorkflow:
                         page_number=index,
                         chapter=chapter,
                         text=text,
+                        audio_url=audio_url,
                     ),
                 )
             )
 
         spreads.append(
             StorySpread(
-                spread_index=6,
+                spread_index=STORY_TEXT_PAGE_COUNT + 1,
                 label=None,
                 left=StorySpreadSide(
                     kind="end_page",
@@ -1384,6 +1717,11 @@ class StoryBookWorkflow:
                 right=StorySpreadSide(kind="empty"),
             )
         )
+
+        if len(spreads) != SPREAD_COUNT:
+            raise StoryWorkflowError(
+                f"Spread contract violation: expected {SPREAD_COUNT} spreads, got {len(spreads)}."
+            )
 
         return spreads
 
@@ -1403,20 +1741,23 @@ class StoryBookWorkflow:
             ],
             page_plans=[
                 {"page_number": 1, "chapter": "Chapter 1", "beat": "The hero begins the journey."},
-                {"page_number": 2, "chapter": "Chapter 2", "beat": "A challenge appears."},
-                {"page_number": 3, "chapter": "Chapter 3", "beat": "The conflict peaks."},
-                {"page_number": 4, "chapter": "Chapter 3 cont.", "beat": "A clever turn shifts momentum."},
-                {"page_number": 5, "chapter": "Chapter 4", "beat": "A hopeful resolution closes the tale."},
+                {"page_number": 2, "chapter": "Chapter 2", "beat": "The hero commits to the journey."},
+                {"page_number": 3, "chapter": "Chapter 3", "beat": "Early progress builds confidence."},
+                {"page_number": 4, "chapter": "Chapter 4", "beat": "A first obstacle challenges the plan."},
+                {"page_number": 5, "chapter": "Chapter 5", "beat": "Stakes rise and choices get harder."},
+                {"page_number": 6, "chapter": "Chapter 6", "beat": "A midpoint insight changes the approach."},
+                {"page_number": 7, "chapter": "Chapter 7", "beat": "A setback tests courage and patience."},
+                {"page_number": 8, "chapter": "Chapter 8", "beat": "Support and teamwork reignite momentum."},
+                {"page_number": 9, "chapter": "Chapter 9", "beat": "The climax reveals the winning move."},
+                {"page_number": 10, "chapter": "Chapter 10", "beat": "A hopeful resolution closes the tale."},
             ],
         )
 
     def _fallback_story_draft(self, blueprint: StoryBlueprint) -> StoryDraft:
         pages: list[StoryRightPage] = []
-        for index in range(1, 6):
+        for index in range(1, STORY_TEXT_PAGE_COUNT + 1):
             plan = next((p for p in blueprint.page_plans if p.page_number == index), None)
             chapter = plan.chapter if plan else CHAPTER_SEQUENCE[index - 1]
-            if index == 4:
-                chapter = "Chapter 3 cont."
             beat = plan.beat if plan else f"{chapter} continues the adventure."
             text = beat
             pages.append(StoryRightPage(page_number=index, chapter=chapter, text=text))
@@ -1438,7 +1779,7 @@ class StoryBookWorkflow:
                 f"Cover illustration for '{story.title}'. {blueprint.cover_concept}. "
                 "Clean composition, expressive characters, rich atmosphere."
             ),
-            illustration_prompts=prompts[:5],
+            illustration_prompts=prompts[:STORY_TEXT_PAGE_COUNT],
             negative_prompt=NEGATIVE_PROMPT_DEFAULT,
         )
 
@@ -1460,7 +1801,7 @@ class StoryBookWorkflow:
 
         if not self._has_any_keyword(final_text, RESOLUTION_KEYWORDS):
             final_text = (
-                f"{final_text} The challenge reaches a clear, hopeful resolution."
+                f"{final_text} By the end, the challenge is clearly resolved in a hopeful way."
             ).strip()
 
         if not self._has_any_keyword(final_text, POSITIVE_ENDING_KEYWORDS):
@@ -1521,6 +1862,20 @@ class StoryBookWorkflow:
                 continue
             merged = f"{merged} {sentence}".strip()
 
+        if len(merged) < MIN_CHAPTER_TEXT_CHARS:
+            for sentence in self._page_text_padding(
+                page_number=page_number,
+                chapter=chapter,
+                plan_beat=plan_beat,
+            ):
+                if len(merged) >= MIN_CHAPTER_TEXT_CHARS:
+                    break
+                if not sentence:
+                    continue
+                if sentence in merged:
+                    continue
+                merged = f"{merged} {sentence}".strip()
+
         return self._sanitize_story_page_text(merged)
 
     def _sanitize_story_page_text(self, text: str) -> str:
@@ -1533,10 +1888,15 @@ class StoryBookWorkflow:
             "The hero reacts with courage and purpose, and the moment clearly leads into the next page",
             "By the end, the challenge is clearly resolved, and the goal feels within reach.",
             "By the end, the challenge is clearly resolved, and the goal feels within reach",
+            "Small actions and expressions make the emotions easy for kids to follow.",
+            "Small actions and expressions make the emotions easy for kids to follow",
+            "The characters learn one practical lesson and use it immediately in the next moment.",
+            "The characters learn one practical lesson and use it immediately in the next moment",
         )
         for phrase in boilerplate_phrases:
             normalized = re.sub(re.escape(phrase), "", normalized, flags=re.IGNORECASE)
 
+        normalized = re.sub(r"\bIn\s+Chapter\s+\d+\s*,\s*", "", normalized, flags=re.IGNORECASE)
         normalized = re.sub(r"\s+", " ", normalized).strip(" .")
         if not normalized:
             return normalized
@@ -1560,42 +1920,91 @@ class StoryBookWorkflow:
         return merged
 
     def _page_text_extensions(self, page_number: int, chapter: str, plan_beat: str) -> list[str]:
-        chapter_line = chapter.strip() or f"Chapter {page_number}"
         beat_line = re.sub(r"\s+", " ", (plan_beat or "")).strip()
         beat_sentence = beat_line if beat_line else "the moment moves the story forward in a clear way."
         if beat_sentence and not beat_sentence.endswith("."):
             beat_sentence = f"{beat_sentence}."
 
-        common_tail = [
-            "Small actions and expressions make the emotions easy for kids to follow.",
-            "The characters learn one practical lesson and use it immediately in the next moment.",
-        ]
-
         by_page: dict[int, list[str]] = {
             1: [
-                f"In {chapter_line}, the story world opens with a clear goal.",
-                "The lead character notices a chance to begin and takes the first brave step.",
-                *common_tail,
+                "The morning field smells of wet earth, and the crowd noise turns into a steady heartbeat in the hero's chest.",
+                "One small moment sparks a big decision: the dream is no longer a wish, it is a promise made out loud.",
+                "Even tiny choices now matter, and the hero starts watching, listening, and learning with purpose.",
             ],
             2: [
-                f"In {chapter_line}, teamwork starts shaping the journey.",
-                "Friends share encouragement, and the lead character begins trusting the process.",
-                *common_tail,
+                "Practice becomes a shared rhythm, with friends correcting each move and celebrating every improvement.",
+                "The hero notices that confidence grows faster when effort is honest and consistent.",
+                "By sunset, the group has turned a rough attempt into a repeatable routine.",
             ],
             3: [
-                f"In {chapter_line}, tension rises and the challenge becomes real.",
-                "A mistake or obstacle appears, but the group stays focused instead of giving up.",
-                *common_tail,
+                "A first success arrives unexpectedly and lights up the whole ground with laughter and surprise.",
+                "The hero realizes the game is full of patterns, and smart observation can be as powerful as raw strength.",
+                "That new understanding sets up a harder test waiting just ahead.",
             ],
             4: [
-                f"In {chapter_line}, the turning point gains momentum.",
-                "The lead character applies what they learned, and the team adjusts with patience.",
-                *common_tail,
+                "Pressure appears all at once, and the hero's timing slips at the worst possible moment.",
+                "Instead of hiding the mistake, the hero takes a breath, studies what went wrong, and asks for help.",
+                "That brave pause becomes the first step toward a smarter comeback.",
             ],
             5: [
-                f"In {chapter_line}, the journey reaches a meaningful resolution.",
-                "By the end, the challenge is solved in a hopeful way, and everyone celebrates progress together.",
-                "The final beat feels motivating: effort, support, and courage make future dreams feel possible.",
+                "The stakes feel heavier now, and every missed chance sounds louder than before.",
+                "Doubt whispers that the goal is too far away, but the team answers with patience and loyalty.",
+                "Together they keep showing up, proving that persistence can be louder than fear.",
+            ],
+            6: [
+                "A mentor shares one clear insight, and suddenly old mistakes begin to make sense.",
+                "The hero connects earlier clues into a simple strategy that feels both practical and powerful.",
+                "With a new plan in hand, effort finally starts turning into visible progress.",
+            ],
+            7: [
+                "Just when things seem stable, a painful setback breaks the hero's momentum.",
+                "For a quiet minute, disappointment feels bigger than the dream itself.",
+                "Then support arrives, and the hero chooses to return with humility, grit, and fresh focus.",
+            ],
+            8: [
+                "Encouragement from friends turns nervous energy into controlled courage.",
+                "The hero applies every lesson learned so far and even begins guiding younger players nearby.",
+                "That shift from self-doubt to leadership marks a true turning point in the journey.",
+            ],
+            9: [
+                "The decisive moment arrives fast, and the hero meets it with calm eyes and steady hands.",
+                "Teamwork and preparation click together under pressure, and the toughest challenge is faced directly.",
+                "When the play succeeds, it feels earned through every hard day that came before.",
+            ],
+            10: [
+                "Celebration fills the air, but the biggest victory is the hero's growth in character and confidence.",
+                "The goal is reached in a hopeful, satisfying way, and gratitude is shared with everyone who helped.",
+                "The final note is clear and uplifting: dreams become real when courage, practice, and kindness stay together.",
             ],
         }
-        return by_page.get(page_number, [beat_sentence, *common_tail])
+        return by_page.get(
+            page_number,
+            [
+                beat_sentence,
+                "The scene unfolds with clear action, emotion, and a meaningful choice.",
+                "By the end of the page, the hero learns something useful and carries it forward.",
+            ],
+        )
+
+    def _page_text_padding(self, page_number: int, chapter: str, plan_beat: str) -> list[str]:
+        beat_line = re.sub(r"\s+", " ", (plan_beat or "")).strip()
+        beat_sentence = beat_line if beat_line else ""
+        if beat_sentence and not beat_sentence.endswith("."):
+            beat_sentence = f"{beat_sentence}."
+
+        chapter_label = re.sub(r"\s+", " ", (chapter or "").strip()) or f"Chapter {page_number}"
+        return [
+            beat_sentence,
+            (
+                f"This part of {chapter_label} adds richer detail through specific actions, expressive reactions, "
+                "and scene-level continuity that is easy for kids to follow."
+            ),
+            (
+                "The emotional stakes stay clear while the pacing remains gentle, so every new moment feels earned "
+                "and connected to the page before it."
+            ),
+            (
+                "By the close of this page, the character carries a concrete lesson forward, setting up the next "
+                "scene with confidence and curiosity."
+            ),
+        ]

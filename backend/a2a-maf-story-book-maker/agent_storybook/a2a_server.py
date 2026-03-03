@@ -230,7 +230,7 @@ def register_a2a_routes(app: FastAPI, settings: Settings) -> None:
                 description="Run full storybook workflow (blueprint + parallel character/story + scene image generation).",
                 tags=["storybook", "maf", "a2a", "image-generation"],
                 examples=[
-                    "Create a short moon-ruins adventure storybook with 5 illustrated pages.",
+                    "Create a moon-ruins adventure storybook with 10 illustrated pages and a complete ending.",
                 ],
             ),
         ],

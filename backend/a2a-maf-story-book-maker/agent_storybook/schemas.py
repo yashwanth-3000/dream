@@ -30,6 +30,14 @@ class StoryBookCreationRequest(BaseModel):
     max_characters: int = Field(default=2, ge=1, le=2)
     tone: str | None = None
     age_band: str | None = None
+    reuse_existing_character: bool = Field(
+        default=False,
+        description=(
+            "When true, reuse provided character_drawings as canonical identity and skip "
+            "new character generation."
+        ),
+    )
+    reuse_character_name: str | None = None
 
 
 class CharacterBrief(BaseModel):
@@ -38,7 +46,7 @@ class CharacterBrief(BaseModel):
 
 
 class StoryPagePlan(BaseModel):
-    page_number: int = Field(ge=1, le=5)
+    page_number: int = Field(ge=1, le=10)
     chapter: str = ""
     beat: str = ""
 
@@ -54,9 +62,10 @@ class StoryBlueprint(BaseModel):
 
 
 class StoryRightPage(BaseModel):
-    page_number: int = Field(ge=1, le=5)
+    page_number: int = Field(ge=1, le=10)
     chapter: str = ""
     text: str = ""
+    audio_url: str | None = None
 
 
 class StoryDraft(BaseModel):
@@ -95,6 +104,7 @@ class StorySpreadSide(BaseModel):
     chapter: str | None = None
     text: str | None = None
     page_number: int | None = None
+    audio_url: str | None = None
 
 
 class StorySpread(BaseModel):

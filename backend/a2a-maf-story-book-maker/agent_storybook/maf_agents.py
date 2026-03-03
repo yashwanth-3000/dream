@@ -42,13 +42,18 @@ Create a short children's story blueprint from user input and references.
 Rules:
 - Keep the story compact and visual-first.
 - Create at most 2 character briefs.
-- Create exactly 5 page plans for right-side text pages.
+- Create exactly 10 page plans for right-side text pages.
 - Page structure target:
-  page 1 -> chapter 1
-  page 2 -> chapter 2
-  page 3 -> chapter 3
-  page 4 -> chapter 3 continuation
-  page 5 -> chapter 4 with clear resolution and uplifting payoff
+  page 1 -> opening hook + character goal
+  page 2 -> commitment to the journey
+  page 3 -> early progress and wonder
+  page 4 -> first obstacle
+  page 5 -> stakes rise
+  page 6 -> midpoint insight
+  page 7 -> setback
+  page 8 -> support + courage turn
+  page 9 -> climax and solution
+  page 10 -> clear emotional closure and hopeful payoff
 - Make continuity-friendly content suitable for illustrated spreads.
 - The story must end complete, hopeful, and emotionally satisfying for kids.
 
@@ -64,8 +69,13 @@ Output JSON keys exactly:
     {"page_number":1,"chapter":"Chapter 1","beat":"..."},
     {"page_number":2,"chapter":"Chapter 2","beat":"..."},
     {"page_number":3,"chapter":"Chapter 3","beat":"..."},
-    {"page_number":4,"chapter":"Chapter 3 cont.","beat":"..."},
-    {"page_number":5,"chapter":"Chapter 4","beat":"..."}
+    {"page_number":4,"chapter":"Chapter 4","beat":"..."},
+    {"page_number":5,"chapter":"Chapter 5","beat":"..."},
+    {"page_number":6,"chapter":"Chapter 6","beat":"..."},
+    {"page_number":7,"chapter":"Chapter 7","beat":"..."},
+    {"page_number":8,"chapter":"Chapter 8","beat":"..."},
+    {"page_number":9,"chapter":"Chapter 9","beat":"..."},
+    {"page_number":10,"chapter":"Chapter 10","beat":"..."}
   ]
 }
 """.strip()
@@ -79,12 +89,15 @@ Task:
 Write a short children's story draft for fixed layout.
 
 Rules:
-- Exactly 5 right-page entries.
+- Exactly 10 right-page entries.
 - Each entry should be substantial (4-7 sentences) with clear progression.
+- Target 420-700 characters per page entry so the right page feels full.
 - Keep language child-friendly and clear.
 - Keep chapter tags aligned to blueprint.
-- Page 5 must resolve the core conflict and deliver a clear feel-good or motivational ending beat.
+- Page 10 must resolve the core conflict and deliver a clear feel-good or motivational ending beat.
 - end_page_text must be explicitly uplifting and complete (no cliffhanger tone).
+- Write natural story prose only. Do not include meta narration like "In Chapter 3..." or instructional filler.
+- Do not repeat stock phrasing across pages; each page should feel distinct and scene-specific.
 
 Output JSON keys exactly:
 {
@@ -94,8 +107,13 @@ Output JSON keys exactly:
     {"page_number":1,"chapter":"Chapter 1","text":"..."},
     {"page_number":2,"chapter":"Chapter 2","text":"..."},
     {"page_number":3,"chapter":"Chapter 3","text":"..."},
-    {"page_number":4,"chapter":"Chapter 3 cont.","text":"..."},
-    {"page_number":5,"chapter":"Chapter 4","text":"..."}
+    {"page_number":4,"chapter":"Chapter 4","text":"..."},
+    {"page_number":5,"chapter":"Chapter 5","text":"..."},
+    {"page_number":6,"chapter":"Chapter 6","text":"..."},
+    {"page_number":7,"chapter":"Chapter 7","text":"..."},
+    {"page_number":8,"chapter":"Chapter 8","text":"..."},
+    {"page_number":9,"chapter":"Chapter 9","text":"..."},
+    {"page_number":10,"chapter":"Chapter 10","text":"..."}
   ],
   "end_page_text": "..."
 }
@@ -107,21 +125,21 @@ Generate compact JSON only.
 Do not use markdown.
 
 Task:
-Create one cover prompt and exactly five illustration prompts for the story spreads.
+Create one cover prompt and exactly ten illustration prompts for the story spreads.
 
 Rules:
 - Prompts must be story-ready and cinematic.
 - Preserve character identity consistency across all prompts.
 - Include setting/world continuity from references.
 - Mention emotional beat and action context.
-- Prompt 4 should reflect chapter 3 continuation pacing.
+- Prompt 10 should reflect resolution pacing.
 - If a page contains multiple micro-beats, you may use 2-4 comic-style panels inside one single 2:3 illustration.
 - Keep panel compositions clean and visual-only (no text, speech bubbles, captions, or on-image words).
 
 Output JSON keys exactly:
 {
   "cover_prompt": "...",
-  "illustration_prompts": ["...", "...", "...", "...", "..."],
+  "illustration_prompts": ["...", "...", "...", "...", "...", "...", "...", "...", "...", "..."],
   "negative_prompt": "..."
 }
 """.strip()
@@ -372,7 +390,7 @@ class ScenePromptAgent:
             ],
         }
         prompt = (
-            "Generate scene prompts JSON for cover + five illustrations.\n"
+            "Generate scene prompts JSON for cover + ten illustrations.\n"
             f"request_json={json.dumps(snapshot, ensure_ascii=True)}"
         )
         return await self._agent.run_json(prompt=prompt, model_cls=ScenePromptBundle)

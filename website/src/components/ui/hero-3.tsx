@@ -223,7 +223,7 @@ export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
             x: ["-100%", "0%"],
             transition: {
               ease: "linear",
-              duration: 58,
+              duration: 40,
               repeat: Infinity,
             },
           }}

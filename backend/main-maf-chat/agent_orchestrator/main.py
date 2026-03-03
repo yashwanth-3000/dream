@@ -23,6 +23,7 @@ from .models import (
     CharacterOrchestrationRequest,
     CharacterOrchestrationResponse,
     JobCreateRequest,
+    JobDeleteResponse,
     JobEventResponse,
     JobResponse,
     ServiceHealthResponse,
@@ -100,6 +101,8 @@ def _build_story_backend_payload(payload: StoryBookOrchestrationRequest) -> dict
         "max_characters": payload.max_characters,
         "tone": payload.tone,
         "age_band": payload.age_band,
+        "reuse_existing_character": payload.reuse_existing_character,
+        "reuse_character_name": payload.reuse_character_name,
     }
 
 
@@ -136,22 +139,41 @@ def _extract_progress_payload(payload: dict[str, object]) -> dict[str, object] |
 
 def _collect_image_urls(result_payload: dict[str, Any]) -> list[str]:
     urls: list[str] = []
+
+    def _append_url(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        normalized = value.strip()
+        if not normalized:
+            return
+        if not (normalized.startswith("http") or normalized.startswith("data:")):
+            return
+        if normalized in urls:
+            return
+        urls.append(normalized)
+
     for url in result_payload.get("generated_images", []):
-        if isinstance(url, str) and url.startswith("http"):
-            urls.append(url)
+        _append_url(url)
+
     for char in result_payload.get("characters", []):
         if isinstance(char, dict):
             for url in char.get("generated_images", []):
-                if isinstance(url, str) and url.startswith("http"):
-                    urls.append(url)
+                _append_url(url)
+
     for spread in result_payload.get("spreads", []):
         if isinstance(spread, dict):
             for side in ("left", "right"):
                 side_data = spread.get(side)
                 if isinstance(side_data, dict):
-                    img = side_data.get("image_url")
-                    if isinstance(img, str) and img.startswith("http") and img not in urls:
-                        urls.append(img)
+                    _append_url(side_data.get("image_url"))
+                    _append_url(side_data.get("audio_url"))
+
+    story = result_payload.get("story")
+    if isinstance(story, dict):
+        for page in story.get("right_pages", []):
+            if isinstance(page, dict):
+                _append_url(page.get("audio_url"))
+
     return urls
 
 
@@ -165,6 +187,101 @@ def _derive_title(result_payload: dict[str, Any], job_type: str, user_prompt: st
         if isinstance(backstory, dict) and backstory.get("name"):
             return str(backstory["name"])
     return user_prompt[:80] if user_prompt else "Untitled"
+
+
+async def _persist_story_characters_as_jobs(
+    *,
+    story_job_id: str,
+    story_payload: dict[str, Any],
+    story_prompt: str,
+) -> list[str]:
+    raw_characters = story_payload.get("characters")
+    if not isinstance(raw_characters, list):
+        return []
+
+    persisted_ids: list[str] = []
+
+    for index, packet in enumerate(raw_characters):
+        if not isinstance(packet, dict):
+            continue
+
+        backstory = packet.get("backstory")
+        backstory_dict = backstory if isinstance(backstory, dict) else {}
+        packet_name = str(packet.get("name") or "").strip()
+        backstory_name = str(backstory_dict.get("name") or "").strip()
+        character_name = backstory_name or packet_name or f"Story Character {index + 1}"
+
+        generated_images_raw = packet.get("generated_images")
+        generated_images = [
+            str(url).strip()
+            for url in (generated_images_raw if isinstance(generated_images_raw, list) else [])
+            if isinstance(url, str) and str(url).strip()
+        ]
+
+        child_job_id = ""
+        try:
+            child_job = await jm.create_job(
+                job_type="character",
+                title=character_name,
+                user_prompt=f"Character extracted from story job {story_job_id}: {character_name}",
+                input_payload={
+                    "source": "storybook",
+                    "source_story_job_id": story_job_id,
+                    "character_index": index,
+                    "story_prompt": story_prompt,
+                },
+                triggered_by="storybook-character-save",
+                engine="a2a-crew-ai-character-maker",
+            )
+            child_job_id = child_job.get("id", "")
+            if not child_job_id:
+                continue
+
+            await jm.start_job(child_job_id, step="persist_story_character")
+            await jm.update_progress(
+                child_job_id,
+                step="persist_story_character",
+                message=(
+                    f"Persisting story-generated character {index + 1}/"
+                    f"{len(raw_characters)} ({character_name})."
+                ),
+                progress=70.0,
+                data={"source_story_job_id": story_job_id},
+            )
+            if generated_images:
+                await jm.download_and_store_assets(
+                    child_job_id,
+                    generated_images,
+                    asset_type="character_image",
+                )
+            await jm.complete_job(
+                child_job_id,
+                {
+                    "source_story_job_id": story_job_id,
+                    "character_index": index,
+                    "name": character_name,
+                    "backstory": backstory_dict,
+                    "image_prompt": packet.get("image_prompt"),
+                    "generated_images": generated_images,
+                    "warnings": packet.get("warnings") if isinstance(packet.get("warnings"), list) else [],
+                },
+                title=character_name,
+            )
+            persisted_ids.append(child_job_id)
+        except Exception as exc:
+            logger.warning(
+                "story_character_persist_failed story_job_id=%s index=%d error=%s",
+                story_job_id,
+                index,
+                exc,
+            )
+            if child_job_id:
+                try:
+                    await jm.fail_job(child_job_id, f"Story character persist failed: {exc}")
+                except Exception:
+                    pass
+
+    return persisted_ids
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +409,15 @@ async def list_jobs(
     status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    summary: bool = Query(False),
 ) -> list[dict[str, Any]]:
-    return await db.list_jobs(job_type=type, status=status, limit=limit, offset=offset)
+    return await db.list_jobs(
+        job_type=type,
+        status=status,
+        limit=limit,
+        offset=offset,
+        summary=summary,
+    )
 
 
 @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse)
@@ -302,6 +426,14 @@ async def get_job(job_id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.delete("/api/v1/jobs/{job_id}", response_model=JobDeleteResponse)
+async def delete_job_endpoint(job_id: str) -> JobDeleteResponse:
+    deleted = await jm.delete_job(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobDeleteResponse(deleted=True, id=job_id)
 
 
 @app.get("/api/v1/jobs/{job_id}/events", response_model=list[JobEventResponse])
@@ -467,6 +599,14 @@ async def orchestrate_storybook(
             message=f"Downloading {len(image_urls)} asset(s)...", progress=80.0,
         )
         await jm.download_and_store_assets(job_id, image_urls, asset_type="scene_image")
+        if not payload.reuse_existing_character:
+            saved_character_job_ids = await _persist_story_characters_as_jobs(
+                story_job_id=job_id,
+                story_payload=result_data,
+                story_prompt=payload.user_prompt,
+            )
+            if saved_character_job_ids:
+                result_data["saved_character_job_ids"] = saved_character_job_ids
         await jm.complete_job(job_id, result_data, title=title)
 
     return response
@@ -560,6 +700,14 @@ async def orchestrate_storybook_stream(
                 await jm.update_progress(job_id, step="downloading_assets",
                                          message=f"Downloading {len(image_urls)} asset(s)...", progress=90.0)
                 await jm.download_and_store_assets(job_id, image_urls, asset_type="scene_image")
+            if not payload.reuse_existing_character:
+                saved_character_job_ids = await _persist_story_characters_as_jobs(
+                    story_job_id=job_id,
+                    story_payload=final_payload,
+                    story_prompt=payload.user_prompt,
+                )
+                if saved_character_job_ids:
+                    final_payload["saved_character_job_ids"] = saved_character_job_ids
             await jm.complete_job(job_id, final_payload, title=title)
         elif job_id:
             await jm.fail_job(job_id, "Stream ended without final payload.")

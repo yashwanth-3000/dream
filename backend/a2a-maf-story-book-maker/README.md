@@ -1,14 +1,15 @@
 # Dream MAF Story Book Maker
 
-A multi-agent storybook engine that generates short illustrated storybooks with a fixed 7-spread contract. Built with Microsoft Agent Framework (MAF), it connects to the Character Maker via A2A and renders scene images through Replicate.
+A multi-agent storybook engine that generates illustrated storybooks with a fixed 12-spread contract (cover/title + 10 story pages + end spread). Built with Microsoft Agent Framework (MAF), it connects to the Character Maker via A2A, renders scene images through Replicate, and generates per-page MP3 narration via OpenAI.
 
-**Pipeline:** User prompt + optional references → Vision enrichment → Story blueprint → Parallel character generation + story writing → Scene prompts → Replicate image rendering → Normalized 7-spread output.
+**Pipeline:** User prompt + optional references → Vision enrichment → Story blueprint → Parallel character generation + story writing → Per-page MP3 narration → Scene prompts → Replicate image rendering → Normalized 12-spread output.
 
 **Models used:**
 
 - `gpt-4o-mini` (MAF agents) — story planning, writing, scene prompt generation
 - `gpt-4.1-mini` — vision analysis of uploaded drawings/references
-- `openai/gpt-image-1.5` (Replicate) — cover + 5 scene illustration rendering
+- `openai/gpt-image-1.5` (Replicate) — cover + 10 scene illustration rendering
+- `gpt-4o-mini-tts` (OpenAI audio) — MP3 narration for each right-side story page
 
 ### Architecture
 
@@ -21,8 +22,8 @@ A multi-agent storybook engine that generates short illustrated storybooks with 
 | Agent | Purpose |
 |-------|---------|
 | StoryBlueprintAgent | Creates structured story plan (title, chapters, character briefs) from prompt |
-| StoryWriterAgent | Writes 5 right-page chapter entries from the blueprint |
-| ScenePromptAgent | Generates cover prompt + 5 illustration prompts for Replicate |
+| StoryWriterAgent | Writes 10 right-page chapter entries from the blueprint |
+| ScenePromptAgent | Generates cover prompt + 10 illustration prompts for Replicate |
 | Character Branch | Parallel A2A calls to Character Maker for each character brief |
 
 ### Pipeline Steps
@@ -32,17 +33,18 @@ A multi-agent storybook engine that generates short illustrated storybooks with 
 | 1. Vision enrichment | Analyzes uploaded drawings/world references (optional, skipped if none) |
 | 2. Story blueprint | MAF agent creates story plan + character briefs |
 | 3. Parallel branches | Character generation (A2A) and story writing (MAF) run concurrently |
-| 4. Scene prompts | MAF agent generates cover + 5 illustration prompts |
-| 5. Image rendering | Replicate renders all 6 images in parallel |
-| 6. Normalization | Output shaped into fixed 7-spread contract |
+| 4. Audio narration | OpenAI generates per-page MP3 audio for right-side story pages |
+| 5. Scene prompts | MAF agent generates cover + 10 illustration prompts |
+| 6. Image rendering | Replicate renders all 11 images in parallel |
+| 7. Normalization | Output shaped into fixed 12-spread contract |
 
 ### Spread Layout (Fixed Contract)
 
 | Spread | Left | Right | Label |
 |--------|------|-------|-------|
 | 0 | Cover image | Title page | — |
-| 1–5 | Illustration | Chapter text | `Page N of 5` |
-| 6 | End page | Empty | — |
+| 1–10 | Illustration | Chapter text + `audio_url` | `Page N of 10` |
+| 11 | End page | Empty | — |
 
 ### Workflow Selection
 
@@ -64,7 +66,8 @@ backend/a2a-maf-story-book-maker/
 │   ├── maf_agents.py              # MAF agent definitions (blueprint, writer, scene)
 │   ├── story_workflow.py          # Full workflow orchestrator
 │   └── services/
-│       └── replicate_service.py   # Replicate image generation
+│       ├── replicate_service.py   # Replicate image generation
+│       └── tts_service.py         # OpenAI text-to-speech generation
 ├── tests/
 │   └── test_story_workflow.py
 ├── Dockerfile
@@ -98,6 +101,11 @@ cp .env.example .env
 | `OPENAI_TEMPERATURE` | No | `0.5` | Generation temperature |
 | `OPENAI_VISION_MODEL` | No | `gpt-4.1-mini` | Vision model for image descriptions |
 | `OPENAI_VISION_MAX_TOKENS` | No | `500` | Max vision output tokens |
+| `STORY_AUDIO_ENABLED` | No | `true` | Enable per-page MP3 narration generation |
+| `OPENAI_TTS_MODEL` | No | `gpt-4o-mini-tts` | OpenAI TTS model for story narration |
+| `OPENAI_TTS_VOICE` | No | `alloy` | OpenAI TTS voice |
+| `OPENAI_TTS_RESPONSE_FORMAT` | No | `mp3` | Story narration output format |
+| `OPENAI_TTS_SPEED` | No | `1.0` | Story narration speed |
 | `REPLICATE_MODEL` | No | `openai/gpt-image-1.5` | Replicate image model |
 | `REPLICATE_OUTPUT_COUNT` | No | `1` | Images per scene |
 | `REPLICATE_ASPECT_RATIO` | No | `2:3` | Image aspect ratio |

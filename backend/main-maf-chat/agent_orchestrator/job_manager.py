@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import mimetypes
+import re
 from collections import defaultdict
 from typing import Any
 from urllib.parse import urlparse
@@ -155,6 +157,13 @@ async def fail_job(job_id: str, error: str) -> dict[str, Any]:
     return job
 
 
+async def delete_job(job_id: str) -> bool:
+    deleted = await db.delete_job(job_id)
+    if deleted:
+        await event_bus.close_job(job_id)
+    return deleted
+
+
 async def download_and_store_assets(
     job_id: str,
     image_urls: list[str],
@@ -168,24 +177,38 @@ async def download_and_store_assets(
     async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
         for i, url in enumerate(image_urls):
             try:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                content_type = resp.headers.get("content-type", "image/webp")
-                mime = content_type.split(";")[0].strip()
-                ext = mimetypes.guess_extension(mime) or _ext_from_url(url) or ".webp"
+                content: bytes
+                mime: str
+                original_url: str
+
+                if isinstance(url, str) and url.startswith("data:"):
+                    decoded = _decode_data_url(url)
+                    if decoded is None:
+                        raise ValueError("Unsupported or malformed data URL.")
+                    mime, content = decoded
+                    original_url = f"data:{mime}"
+                else:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    content_type = resp.headers.get("content-type", "application/octet-stream")
+                    mime = content_type.split(";")[0].strip()
+                    content = resp.content
+                    original_url = url
+
+                ext = mimetypes.guess_extension(mime) or _ext_from_url(url) or ".bin"
                 url_hash = hashlib.sha256(url.encode()).hexdigest()[:12]
                 filename = f"{asset_type}_{i:03d}_{url_hash}{ext}"
                 filepath = assets_dir / filename
-                filepath.write_bytes(resp.content)
+                filepath.write_bytes(content)
 
                 asset = await db.create_asset(
                     job_id=job_id,
                     asset_type=asset_type,
-                    original_url=url,
+                    original_url=original_url,
                     stored_path=str(filepath),
                     filename=filename,
                     mime_type=mime,
-                    size_bytes=len(resp.content),
+                    size_bytes=len(content),
                 )
                 stored.append(asset)
 
@@ -197,8 +220,8 @@ async def download_and_store_assets(
                     metadata={
                         "asset_id": asset["id"],
                         "filename": filename,
-                        "original_url": url,
-                        "size_bytes": len(resp.content),
+                        "original_url": original_url,
+                        "size_bytes": len(content),
                     },
                 )
             except Exception as exc:
@@ -218,3 +241,25 @@ def _ext_from_url(url: str) -> str:
     if "." in path:
         return "." + path.rsplit(".", 1)[-1].lower()
     return ""
+
+
+def _decode_data_url(value: str) -> tuple[str, bytes] | None:
+    match = re.match(r"^data:(?P<mime>[^;,]+)?(?:;charset=[^;,]+)?(?P<base64>;base64)?,(?P<data>.*)$", value, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    mime = (match.group("mime") or "application/octet-stream").strip().lower()
+    payload = match.group("data") or ""
+
+    if match.group("base64"):
+        try:
+            decoded = base64.b64decode(payload, validate=True)
+        except Exception:
+            return None
+        return mime, decoded
+
+    try:
+        decoded = payload.encode("utf-8")
+    except Exception:
+        return None
+    return mime, decoded

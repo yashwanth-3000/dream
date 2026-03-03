@@ -28,7 +28,7 @@
   overflow: hidden;
 }
 
-.hero,
+.heroInner,
 .section,
 .logoStrip,
 .footer {
@@ -38,80 +38,36 @@
   padding-right: 64px;
 }
 
-.hero {
-  padding-top: 130px;
-  padding-bottom: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
-  gap: 52px;
-  align-items: center;
-  min-height: clamp(580px, 82vh, 860px);
+/* heroOuter = full-width flex column section (no side padding) */
+.heroOuter {
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(620px, 90vh, 900px);
+  overflow: hidden;
   background: var(--cream-1);
   scroll-margin-top: 156px;
 }
 
+/* heroInner = max-width constrained content, grows to fill space above the marquee */
+.heroInner {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-top: 100px;
+  padding-bottom: 32px;
+}
+
 .heroText {
   width: 100%;
+  max-width: 720px;
   display: grid;
   gap: 20px;
   justify-items: start;
   text-align: left;
-  align-self: center;
+  position: relative;
+  z-index: 1;
 }
 
-/* ── Tech stack strip (between hero and first section) ── */
-.techStrip {
-  max-width: 1512px;
-  margin: 0 auto;
-  padding: 20px 64px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  border-bottom: 1px solid #eee3d8;
-  background: var(--cream-0);
-}
-
-.techLabel {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #b09a88;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.techDivider {
-  width: 1px;
-  height: 13px;
-  background: #ddd0c2;
-  flex-shrink: 0;
-}
-
-.avatarRow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Base logo chip */
-.logoChip {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: #fdfaf7;
-  border: 1px solid #e4d9cd;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.logoChip:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
-}
 
 .heroTitle {
   margin: 0;
@@ -242,6 +198,42 @@
     radial-gradient(circle at 47% 68%, rgb(255 168 101 / 56%) 0 16%, transparent 31%);
   mix-blend-mode: screen;
   animation: float-soft 8.4s ease-in-out infinite;
+}
+
+/* ── Hero horizontal marquee ── */
+.heroMarquee {
+  flex-shrink: 0;
+  width: 100%;
+  height: 280px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 22%, black 100%);
+}
+
+.heroMarqueeTrack {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.heroMarqueeCard {
+  position: relative;
+  flex-shrink: 0;
+  height: 248px;
+  width: 186px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgb(200 175 150 / 36%);
+  box-shadow: 0 20px 40px -16px rgb(40 23 12 / 32%);
+}
+
+.heroMarqueeImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .scrollerColumns {
@@ -390,7 +382,6 @@
 
 .sectionWord {
   display: inline-block;
-  padding-right: 0.19em;
 }
 
 .sectionCopy {
@@ -1695,34 +1686,39 @@
 }
 
 @media (max-width: 1120px) {
-  .hero,
+  .heroInner,
   .section,
   .logoStrip,
-  .techStrip,
   .footer {
     padding-left: 30px;
     padding-right: 30px;
   }
 
-  .hero {
-    grid-template-columns: 1fr;
+  .heroOuter {
     min-height: unset;
-    padding-bottom: 0;
-    gap: 36px;
+  }
+
+  .heroInner {
+    padding-bottom: 32px;
   }
 
   .heroText {
     justify-items: center;
     text-align: center;
+    max-width: 100%;
   }
 
   .heroActions {
     justify-content: center;
   }
 
-  .heroVisual {
-    border-radius: 20px 20px 0 0;
-    min-height: 360px;
+  .heroMarquee {
+    height: 220px;
+  }
+
+  .heroMarqueeCard {
+    height: 180px;
+    width: 135px;
   }
 
   .metricGrid,
@@ -1756,20 +1752,30 @@
 }
 
 @media (max-width: 760px) {
-  .hero,
+  .heroInner,
   .section,
   .logoStrip,
-  .techStrip,
   .footer {
     padding-left: 18px;
     padding-right: 18px;
   }
 
-  .hero {
-    padding-top: 90px;
-    padding-bottom: 0;
+  .heroOuter {
     scroll-margin-top: 170px;
-    gap: 28px;
+  }
+
+  .heroInner {
+    padding-top: 90px;
+    padding-bottom: 24px;
+  }
+
+  .heroMarquee {
+    height: 200px;
+  }
+
+  .heroMarqueeCard {
+    height: 160px;
+    width: 120px;
   }
 
   .heroTitle {
@@ -1778,24 +1784,6 @@
 
   .heroCopy {
     font-size: 15px;
-  }
-
-  .heroVisual {
-    min-height: 280px;
-    border-radius: 16px 16px 0 0;
-  }
-
-  .avatarTag {
-    flex-wrap: wrap;
-    border-radius: 14px;
-  }
-
-  .scrollerColumns {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .scrollerColumn:nth-child(3) {
-    display: none;
   }
 
   .metricGrid,

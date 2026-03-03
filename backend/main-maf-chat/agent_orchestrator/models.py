@@ -80,6 +80,17 @@ class StoryBookOrchestrationRequest(BaseModel):
     max_characters: int = Field(default=2, ge=1, le=2)
     tone: str | None = None
     age_band: str | None = None
+    reuse_existing_character: bool = Field(
+        default=False,
+        description=(
+            "When true, reuse provided character_drawings as canonical identity and skip "
+            "new character generation."
+        ),
+    )
+    reuse_character_name: str | None = Field(
+        default=None,
+        description="Optional explicit name for the reused existing character.",
+    )
 
 
 class StoryBookOrchestrationResponse(BaseModel):
@@ -169,3 +180,8 @@ class JobEventResponse(BaseModel):
     message: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
+
+
+class JobDeleteResponse(BaseModel):
+    deleted: bool
+    id: str

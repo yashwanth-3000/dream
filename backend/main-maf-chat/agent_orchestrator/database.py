@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -209,6 +210,7 @@ async def list_jobs(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    summary: bool = False,
 ) -> list[dict[str, Any]]:
     db = await get_db()
     try:
@@ -222,8 +224,14 @@ async def list_jobs(
             vals.append(status)
         where_clause = f"WHERE {' AND '.join(wheres)}" if wheres else ""
         vals.extend([limit, offset])
+        select_cols = (
+            "id, type, status, title, user_prompt, input_payload, progress, current_step, "
+            "error_message, triggered_by, engine, created_at, updated_at"
+            if summary
+            else "*"
+        )
         cursor = await db.execute(
-            f"SELECT * FROM jobs {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"SELECT {select_cols} FROM jobs {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             vals,
         )
         rows = await cursor.fetchall()
@@ -231,9 +239,14 @@ async def list_jobs(
         for row in rows:
             job = _row_to_dict(row)
             job["input_payload"] = json.loads(job.get("input_payload") or "{}")
-            job["result_payload"] = json.loads(job.get("result_payload") or "{}")
+            if summary:
+                job["result_payload"] = {"_summary": True}
+            else:
+                job["result_payload"] = json.loads(job.get("result_payload") or "{}")
             asset_cursor = await db.execute(
-                "SELECT * FROM assets WHERE job_id = ? ORDER BY created_at", (job["id"],)
+                "SELECT * FROM assets WHERE job_id = ? ORDER BY created_at"
+                + (" LIMIT 3" if summary else ""),
+                (job["id"],),
             )
             asset_rows = await asset_cursor.fetchall()
             job["assets"] = [_row_to_dict(a) for a in asset_rows]
@@ -243,6 +256,57 @@ async def list_jobs(
         return jobs
     finally:
         await db.close()
+
+
+async def delete_job(job_id: str) -> bool:
+    db = await get_db()
+    asset_paths: list[Path] = []
+    assets_root = get_assets_dir().resolve()
+    job_dir = (get_assets_dir() / job_id).resolve()
+
+    try:
+        exists_cursor = await db.execute("SELECT id FROM jobs WHERE id = ?", (job_id,))
+        exists_row = await exists_cursor.fetchone()
+        if exists_row is None:
+            return False
+
+        asset_cursor = await db.execute(
+            "SELECT stored_path FROM assets WHERE job_id = ?",
+            (job_id,),
+        )
+        asset_rows = await asset_cursor.fetchall()
+        for row in asset_rows:
+            raw_path = str(row["stored_path"] or "").strip()
+            if not raw_path:
+                continue
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = (_DB_DIR / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+            asset_paths.append(candidate)
+
+        await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        await db.commit()
+    finally:
+        await db.close()
+
+    for asset_path in asset_paths:
+        try:
+            if not str(asset_path).startswith(str(assets_root)):
+                continue
+            if asset_path.exists() and asset_path.is_file():
+                asset_path.unlink()
+        except Exception:
+            continue
+
+    try:
+        if str(job_dir).startswith(str(assets_root)) and job_dir.exists():
+            shutil.rmtree(job_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    return True
 
 
 async def add_job_event(

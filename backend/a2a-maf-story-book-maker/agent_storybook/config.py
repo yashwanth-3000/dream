@@ -27,6 +27,11 @@ class Settings(BaseSettings):
 
     openai_vision_model: str = "gpt-4.1-mini"
     openai_vision_max_tokens: int = 500
+    story_audio_enabled: bool = True
+    openai_tts_model: str = "gpt-4o-mini-tts"
+    openai_tts_voice: str = "alloy"
+    openai_tts_response_format: str = "mp3"
+    openai_tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
 
     replicate_api_token: str
     replicate_model: str = "openai/gpt-image-1.5"
@@ -62,6 +67,7 @@ class Settings(BaseSettings):
     def validate_credentials(self) -> "Settings":
         self.openai_model = self._normalize_openai_model(self.openai_model)
         self.openai_vision_model = self._normalize_openai_model(self.openai_vision_model)
+        self.openai_tts_model = self._normalize_openai_model(self.openai_tts_model)
 
         if not self.character_backend_use_protocol:
             raise ValueError("A2A-only mode: CHARACTER_BACKEND_USE_PROTOCOL must be true.")
