@@ -31,11 +31,11 @@ function previewItemsForJob(job: Job) {
 
 const QUICK_LINKS = [
   {
-    href: "/dashboard/create",
-    kicker: "Launch",
-    title: "New Dream",
-    body: "Create a fresh storybook from one prompt.",
-    cta: "Open Create",
+    href: "/dashboard/test-ui",
+    kicker: "Testing",
+    title: "Test UI",
+    body: "Open both Character API Test and Storybook Test from one place.",
+    cta: "Open Test UI",
   },
   {
     href: "/dashboard/stories",

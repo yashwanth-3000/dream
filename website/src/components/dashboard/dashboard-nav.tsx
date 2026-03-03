@@ -6,12 +6,10 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
-  Sparkles,
   Briefcase,
   BookOpenText,
   MessageCircle,
   Users,
-  Settings,
   FlaskConical,
 } from "lucide-react";
 
@@ -19,14 +17,11 @@ import { cn } from "@/lib/utils";
 
 const dashboardLinks = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Create", href: "/dashboard/create", icon: Sparkles },
   { label: "Jobs", href: "/dashboard/jobs", icon: Briefcase },
   { label: "Stories", href: "/dashboard/stories", icon: BookOpenText },
   { label: "Quiz Chat", href: "/chat", icon: MessageCircle },
   { label: "Characters", href: "/dashboard/characters", icon: Users },
-  { label: "API Test", href: "/dashboard/api-test", icon: FlaskConical },
-  { label: "Storybook Test", href: "/dashboard/storybook-test", icon: BookOpenText },
-  { label: "Settings", href: "/dashboard/settings", icon: Settings },
+  { label: "Test UI", href: "/dashboard/test-ui", icon: FlaskConical },
 ];
 
 const spring = {

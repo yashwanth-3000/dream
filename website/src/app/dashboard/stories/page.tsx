@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Filter, MoreVertical, RefreshCw, Search, BookMarked, FileText, BookOpenText, Clock3, XCircle } from "lucide-react";
+import { ChevronDown, Filter, MoreVertical, RefreshCw, Search, BookMarked, BookOpenText, Clock3, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";

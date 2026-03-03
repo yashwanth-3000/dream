@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 
 import { DashboardNav } from "@/components/dashboard/dashboard-nav";
 import styles from "./dashboard.module.css";
@@ -37,11 +36,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               Back Home
             </Link>
             <Link
-              href="/dashboard/create"
+              href="/chat"
               className={`${styles.btnInk} px-4 py-2 text-xs md:text-sm`}
             >
-              <Sparkles className="size-4" />
-              New Job
+              Open Chat
             </Link>
           </div>
         </header>

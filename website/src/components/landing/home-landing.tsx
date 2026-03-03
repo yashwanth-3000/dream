@@ -86,33 +86,6 @@ const faqItems = [
   },
 ];
 
-const team = [
-  {
-    name: "Marcus Chen",
-    role: "Story Systems Lead",
-    image:
-      "https://framerusercontent.com/images/pT0JmsN2TRfIHy3pQc3lhNMabs0.png?width=1024&height=2000",
-  },
-  {
-    name: "Amira Hassan",
-    role: "Child Safety Specialist",
-    image:
-      "https://framerusercontent.com/images/E4puL2ldoiQmc8Q9Ju4gW6uxg.png?width=1024&height=2000",
-  },
-  {
-    name: "David Park",
-    role: "Storybook Experience Engineer",
-    image:
-      "https://framerusercontent.com/images/RoOV7tIiyQQk02qpHtIeMdUpMA.png?width=1024&height=2000",
-  },
-  {
-    name: "Elena Martinez",
-    role: "Learning Experience",
-    image:
-      "https://framerusercontent.com/images/Nj8ejHUjmUrxbMwRLUCsHAtarxA.png?width=1024&height=2000",
-  },
-];
-
 const heroMarqueeImages = [
   "https://images.unsplash.com/photo-1756312148347-611b60723c7a?w=900&auto=format&fit=crop&q=60",
   "https://images.unsplash.com/photo-1757865579201-693dd2080c73?w=900&auto=format&fit=crop&q=60",
@@ -810,7 +783,7 @@ export default function HomeLanding() {
           <div>
             <p className={styles.colTitle}>Product</p>
             <Link href="/chat" className={styles.footerLink}>AI Chat</Link>
-            <Link href="/dashboard/create" className={styles.footerLink}>Create Storybook</Link>
+            <Link href="/dashboard/test-ui" className={styles.footerLink}>Test UI</Link>
             <Link href="/dashboard/stories" className={styles.footerLink}>Story Library</Link>
             <Link href="/dashboard/characters" className={styles.footerLink}>Character Vault</Link>
             <Link href="/dashboard/jobs" className={styles.footerLink}>Generation Jobs</Link>

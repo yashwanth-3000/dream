@@ -14,7 +14,6 @@ import {
   Copy,
   ExternalLink,
   ImageIcon,
-  AlertTriangle,
   Loader2,
   RefreshCw,
   BookOpenText,
@@ -93,11 +92,6 @@ function formatRelativeTime(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
-}
-
-function shortText(text: string | undefined | null, max = 320): string {
-  if (!text) return "";
-  return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
 function imageLabelForJobType(type: JobType, idx: number): string {

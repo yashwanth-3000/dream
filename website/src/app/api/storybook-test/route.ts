@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-
-const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
+import { getMainApiBaseUrl } from "@/lib/server-api-base";
 const TARGET_MAIN = "main";
 
 function mainBaseUrl() {
-  return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(/\/+$/, "");
+  return getMainApiBaseUrl();
 }
 
 function resolveTarget(url: URL) {

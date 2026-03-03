@@ -369,19 +369,6 @@ function formatReferenceDate(rawDate?: string): string | null {
   return REFERENCE_DATE_FORMATTER.format(parsed);
 }
 
-function normalizeReferenceAuthor(rawAuthor?: string): string | null {
-  const clean = decodeHtmlEntities((rawAuthor || "").trim());
-  if (!clean) return null;
-  if (/^(published\s*date|date)\s*:/i.test(clean)) return null;
-  const dateToken = extractDateToken(clean);
-  if (!dateToken) return clean;
-  const leftover = clean
-    .replace(dateToken, "")
-    .replace(/[•|\-:,()\s]+/g, "")
-    .trim();
-  return leftover ? clean : null;
-}
-
 function referenceLogoUrl(rawUrl: string): string {
   return `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(rawUrl)}`;
 }

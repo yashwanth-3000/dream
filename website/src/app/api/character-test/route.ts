@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-
-const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:8000";
-const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
+import { getCharacterApiBaseUrl, getMainApiBaseUrl } from "@/lib/server-api-base";
 const TARGET_MAIN = "main";
 const TARGET_BACKEND = "backend";
 
 function backendBaseUrl() {
-  return (process.env.BACKEND_API_BASE_URL || DEFAULT_BACKEND_BASE_URL).replace(/\/+$/, "");
+  return getCharacterApiBaseUrl();
 }
 
 function mainBaseUrl() {
-  return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(/\/+$/, "");
+  return getMainApiBaseUrl();
 }
 
 function resolveTarget(url: URL) {

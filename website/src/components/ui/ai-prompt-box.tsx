@@ -3,7 +3,7 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, Paperclip, Square, X, StopCircle, Mic } from "lucide-react";
+import { ArrowUp, BookOpenText, Clapperboard, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Utility function for className merging
@@ -334,22 +334,26 @@ const MODE_CONFIG: Record<
     label: string;
     description: string;
     activeClass: string;
+    icon: React.ComponentType<{ className?: string }>;
   }
 > = {
   search: {
-    label: "Search",
-    description: "Explore ideas and ask anything",
+    label: "Web Search",
+    description: "Search the web for the latest answers",
     activeClass: "bg-sky-50 border-sky-300 text-sky-700",
+    icon: Globe,
   },
   story: {
-    label: "Story",
+    label: "Storybook",
     description: "Craft a magical kid-safe storybook narrative",
     activeClass: "bg-amber-50 border-amber-300 text-amber-700",
+    icon: BookOpenText,
   },
   video: {
     label: "Video",
     description: "Legacy video mode",
     activeClass: "bg-violet-50 border-violet-300 text-violet-700",
+    icon: Clapperboard,
   },
 };
 
@@ -541,6 +545,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
             <div className="flex items-center">
               {VISIBLE_MODES.map((modeId, i) => {
                 const mode = MODE_CONFIG[modeId];
+                const ModeIcon = mode.icon;
                 return (
                 <React.Fragment key={modeId}>
                   {i > 0 && (
@@ -552,12 +557,13 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
                     type="button"
                     onClick={() => toggleMode(modeId)}
                     className={cn(
-                      "rounded-full transition-all flex items-center gap-1 px-2.5 py-1 border h-8 text-xs font-medium",
+                      "rounded-full transition-all flex items-center gap-1.5 px-2.5 py-1 border h-8 text-xs font-medium",
                       activeMode === modeId
                         ? mode.activeClass
                         : "bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-black/5"
                     )}
                   >
+                    <ModeIcon className="h-3.5 w-3.5 shrink-0" />
                     <AnimatePresence initial={false}>
                       {activeMode === modeId ? (
                         <motion.span

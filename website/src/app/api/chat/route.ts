@@ -1,10 +1,5 @@
 import { NextResponse } from "next/server";
-
-const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
-
-function mainBaseUrl() {
-  return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(/\/+$/, "");
-}
+import { getMainApiBaseUrl } from "@/lib/server-api-base";
 
 export async function POST(request: Request) {
   let payload: unknown;
@@ -15,7 +10,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const response = await fetch(`${mainBaseUrl()}/api/v1/orchestrate/chat`, {
+    const baseUrl = getMainApiBaseUrl();
+    const response = await fetch(`${baseUrl}/api/v1/orchestrate/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -32,7 +28,7 @@ export async function POST(request: Request) {
       {
         detail: "Chat backend request failed.",
         error: error instanceof Error ? error.message : String(error),
-        backendBaseUrl: mainBaseUrl(),
+        backendBaseUrl: process.env.MAIN_API_BASE_URL || null,
       },
       { status: 502 }
     );

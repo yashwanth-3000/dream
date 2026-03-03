@@ -1,13 +1,5 @@
 import { NextResponse } from "next/server";
-
-const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
-
-function mainBaseUrl() {
-  return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(
-    /\/+$/,
-    ""
-  );
-}
+import { getMainApiBaseUrl } from "@/lib/server-api-base";
 
 export async function GET(
   request: Request,
@@ -20,8 +12,9 @@ export async function GET(
   const qs = after ? `?after=${encodeURIComponent(after)}` : "";
 
   try {
+    const baseUrl = getMainApiBaseUrl();
     const response = await fetch(
-      `${mainBaseUrl()}/api/v1/jobs/${id}/events${qs}`,
+      `${baseUrl}/api/v1/jobs/${id}/events${qs}`,
       { cache: "no-store" }
     );
     const text = await response.text();

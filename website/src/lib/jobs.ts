@@ -106,68 +106,6 @@ export async function createJob(params: {
   return res.json();
 }
 
-export function getMainApiBaseUrl(): string {
-  return "/api";
-}
-
 export function getAssetUrl(jobId: string, filename: string): string {
   return `/api/assets/${jobId}/${filename}`;
-}
-
-export function formatJobMode(type: JobType): string {
-  switch (type) {
-    case "character":
-      return "Character";
-    case "story":
-      return "Story";
-    case "video":
-      return "Video";
-    default:
-      return type;
-  }
-}
-
-export function formatJobStatus(status: JobStatus): string {
-  switch (status) {
-    case "queued":
-      return "Queued";
-    case "processing":
-      return "Processing";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return status;
-  }
-}
-
-export function statusColor(status: JobStatus): string {
-  switch (status) {
-    case "queued":
-      return "text-blue-500";
-    case "processing":
-      return "text-yellow-500";
-    case "completed":
-      return "text-green-500";
-    case "failed":
-      return "text-red-500";
-    default:
-      return "text-muted-foreground";
-  }
-}
-
-export function statusBg(status: JobStatus): string {
-  switch (status) {
-    case "queued":
-      return "bg-blue-500/10 text-blue-500";
-    case "processing":
-      return "bg-yellow-500/10 text-yellow-500";
-    case "completed":
-      return "bg-green-500/10 text-green-500";
-    case "failed":
-      return "bg-red-500/10 text-red-500";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
 }

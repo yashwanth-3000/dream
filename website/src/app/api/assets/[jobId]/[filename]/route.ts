@@ -1,20 +1,13 @@
 import { NextResponse } from "next/server";
-
-const DEFAULT_MAIN_BASE_URL = "http://127.0.0.1:8010";
-
-function mainBaseUrl() {
-  return (process.env.MAIN_API_BASE_URL || DEFAULT_MAIN_BASE_URL).replace(
-    /\/+$/,
-    ""
-  );
-}
+import { getMainApiBaseUrl } from "@/lib/server-api-base";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ jobId: string; filename: string }> }
 ) {
   const { jobId, filename } = await params;
-  const url = `${mainBaseUrl()}/api/v1/assets/${encodeURIComponent(jobId)}/${encodeURIComponent(filename)}`;
+  const baseUrl = getMainApiBaseUrl();
+  const url = `${baseUrl}/api/v1/assets/${encodeURIComponent(jobId)}/${encodeURIComponent(filename)}`;
 
   try {
     const upstream = await fetch(url, { cache: "no-store" });
