@@ -358,6 +358,12 @@ const VISIBLE_MODES: ModeId[] = ["search", "story"];
 export interface CharacterSelection {
   type: "existing" | "create";
   name: string;
+  id?: string;
+  source?: "job";
+  jobId?: string;
+  avatar?: string;
+  description?: string;
+  referenceImageUrls?: string[];
 }
 
 export interface PromptSendPayload {

@@ -405,6 +405,7 @@ export type StoryPage = {
   isTitle?: boolean;
   isEnd?: boolean;
   chapter?: string;
+  audioUrl?: string;
 };
 
 /*

@@ -34,3 +34,30 @@ export async function GET(
     );
   }
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  try {
+    const response = await fetch(`${mainBaseUrl()}/api/v1/jobs/${id}`, {
+      method: "DELETE",
+      cache: "no-store",
+    });
+    const text = await response.text();
+    return new NextResponse(text, {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        detail: "Failed to delete job.",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      { status: 502 }
+    );
+  }
+}

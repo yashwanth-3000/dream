@@ -160,6 +160,39 @@ const PAGE_BG_LEFT_IM =
 const PAGE_BG_RIGHT_IM =
   "linear-gradient(225deg, #f2ead8 0%, #fdf6e8 50%, #f8f1df 100%)";
 
+function sanitizeRightPageText(text: string): string {
+  let normalized = (text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return normalized;
+
+  const boilerplate = [
+    "Small actions and expressions make the emotions easy for kids to follow.",
+    "The characters learn one practical lesson and use it immediately in the next moment.",
+  ];
+  for (const phrase of boilerplate) {
+    normalized = normalized.replace(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+  }
+
+  normalized = normalized.replace(/\bIn\s+Chapter\s+\d+\s*,\s*/gi, "");
+  normalized = normalized.replace(/\.\s*\./g, ". ");
+  normalized = normalized.replace(/\s+/g, " ").trim();
+
+  const sentences = normalized.split(/(?<=[.!?])\s+/);
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(trimmed);
+  }
+
+  let merged = deduped.join(" ").trim();
+  if (merged && !/[.!?]$/.test(merged)) merged += ".";
+  return merged;
+}
+
 function LeftPanel({
   spread,
   cover,
@@ -272,6 +305,7 @@ function RightPanel({
   // Spread 0 = cover/title, last spread has no right page.
   // Content spreads are 1 … totalSpreads-2 → label them "Page 1", "Page 2", …
   const pageLabel = spreadIndex > 0 ? `Page ${spreadIndex} of ${totalSpreads - 2}` : null;
+  const cleanedRightPageText = sanitizeRightPageText(rightPage?.text || "");
 
   /* Blank page (cover right-half or end right-half) */
   if (rightPage === null) {
@@ -325,7 +359,7 @@ function RightPanel({
   return (
     <motion.div
       key={spreadIndex}
-      className="flex flex-col h-full p-4 md:p-6"
+      className="flex h-full min-h-0 flex-col p-4 md:p-6"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.28, delay: 0.06, ease: "easeOut" }}
@@ -340,11 +374,26 @@ function RightPanel({
           {rightPage.chapter}
         </p>
       )}
-      <p className="text-[11px] md:text-[14px] leading-[1.8] md:leading-[1.95] text-stone-800 font-medium flex-1">
-        {rightPage.text}
-      </p>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
+        <p className="whitespace-pre-wrap text-[11px] md:text-[14px] leading-[1.8] md:leading-[1.95] text-stone-800 font-medium">
+          {cleanedRightPageText}
+        </p>
+        {rightPage.audioUrl ? (
+          <div className="rounded-lg border border-stone-300/70 bg-stone-50/80 px-2.5 py-2">
+            <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.08em] text-stone-600">
+              Listen To This Page
+            </p>
+            <audio
+              controls
+              preload="none"
+              src={rightPage.audioUrl}
+              className="h-8 w-full"
+            />
+          </div>
+        ) : null}
+      </div>
       {pageLabel && (
-        <p className="mt-auto pt-1.5 text-[8px] md:text-[10px] text-stone-400 text-center tabular-nums">
+        <p className="mt-2 pt-1 text-[8px] md:text-[10px] text-stone-400 text-center tabular-nums">
           {pageLabel}
         </p>
       )}
@@ -506,7 +555,7 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
         animTimer.current = null;
       }, FLIP_MS);
     },
-    [spread, totalSpreads, flipAnim]
+    [bookScaleRaw, flipAnim, spread, tiltX, tiltY, totalSpreads]
   );
 
   const flipForward = useCallback(() => navigate(1), [navigate]);
@@ -997,14 +1046,14 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
           type="button"
           onClick={flipBackward}
           disabled={!canGoBack}
-          className="absolute left-0 top-0 w-1/2 h-full z-[400] opacity-0 disabled:cursor-default cursor-pointer"
+          className="absolute left-0 top-0 h-full w-[20%] md:w-[14%] max-w-[110px] z-[250] opacity-0 disabled:cursor-default cursor-pointer"
           aria-label="Previous page"
         />
         <button
           type="button"
           onClick={flipForward}
           disabled={!canGoForward}
-          className="absolute right-0 top-0 w-1/2 h-full z-[400] opacity-0 disabled:cursor-default cursor-pointer"
+          className="absolute right-0 top-0 h-full w-[20%] md:w-[14%] max-w-[110px] z-[250] opacity-0 disabled:cursor-default cursor-pointer"
           aria-label="Next page"
         />
       </motion.div>
@@ -1248,7 +1297,7 @@ export function StoryBook({ title, ageBand, pages, cover }: StoryBookProps) {
                 scale: bookScale,
               }}
             >
-              {renderBook(680, false)}
+              {renderBook(760, false)}
             </motion.div>
           </div>
 

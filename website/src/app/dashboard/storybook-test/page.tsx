@@ -52,13 +52,13 @@ type StorybookResponse = {
     title?: string;
     title_page_text?: string;
     end_page_text?: string;
-    right_pages?: Array<{ page_number?: number; chapter?: string; text?: string }>;
+    right_pages?: Array<{ page_number?: number; chapter?: string; text?: string; audio_url?: string }>;
   };
   spreads?: Array<{
     spread_index?: number;
     label?: string | null;
     left?: { kind?: string; image_url?: string; chapter?: string; text?: string; title?: string };
-    right?: { kind?: string; image_url?: string; chapter?: string; text?: string; title?: string };
+    right?: { kind?: string; image_url?: string; chapter?: string; text?: string; title?: string; audio_url?: string };
   }>;
   generated_images?: string[];
   scene_prompts?: {
@@ -81,6 +81,7 @@ type SpreadSide = {
   chapter?: string;
   text?: string;
   title?: string;
+  audio_url?: string;
 };
 
 type StoryPageCard = {
@@ -89,6 +90,7 @@ type StoryPageCard = {
   text: string;
   imageUrl: string | null;
   prompt: string;
+  audioUrl?: string;
 };
 
 type LiveLogLevel = "info" | "success" | "error";
@@ -105,6 +107,7 @@ type LiveTimelineStep = {
   key: string;
   title: string;
   detail: string;
+  stageKey?: string;
   imageUrls: string[];
   data?: unknown;
 };
@@ -129,6 +132,8 @@ const EMPTY_DRAWING: DrawingInput = {
   file: null,
   previewUrl: "",
 };
+
+const DEFAULT_SCENE_IMAGE_COUNT = 11;
 
 function cleanText(value: string) {
   const normalized = value.trim();
@@ -284,6 +289,15 @@ function SpreadSideCard({
         </p>
       ) : null}
 
+      {side.audio_url ? (
+        <div className="mt-2 rounded-lg border px-2 py-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
+          <p className="mb-1 text-[11px] font-semibold" style={{ color: "#7a5a45" }}>
+            MP3 narration
+          </p>
+          <audio controls preload="none" src={side.audio_url} className="h-8 w-full" />
+        </div>
+      ) : null}
+
       {hasImage ? (
         <div className="mt-2 w-full rounded-lg border p-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
           <motion.button
@@ -336,6 +350,34 @@ function formatStageTitle(stage: string) {
   const normalized = stage.trim().replace(/[_-]+/g, " ");
   if (!normalized) return "Progress";
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function buildProgressTimelineKey(stage: string, data: unknown): string {
+  const normalizedStage = (stage || "progress").trim() || "progress";
+  let key = normalizedStage;
+  if (!data || typeof data !== "object") return key;
+
+  const payload = data as Record<string, unknown>;
+  const sceneIndex =
+    typeof payload.scene_index === "number"
+      ? Number(payload.scene_index)
+      : Number.isFinite(Number(payload.scene_index))
+        ? Number(payload.scene_index)
+        : null;
+  const attempt =
+    typeof payload.attempt === "number"
+      ? Number(payload.attempt)
+      : Number.isFinite(Number(payload.attempt))
+        ? Number(payload.attempt)
+        : null;
+
+  if (sceneIndex !== null) {
+    key += `:scene:${sceneIndex}`;
+  }
+  if (attempt !== null) {
+    key += `:attempt:${attempt}`;
+  }
+  return key;
 }
 
 function formatJsonForDisplay(value: unknown): string {
@@ -470,7 +512,7 @@ export default function DashboardStorybookTestPage() {
       .filter((page) => typeof page.page_number === "number")
       .sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0))
       .map((page) => {
-        const pageNumber = Math.max(1, Math.min(5, Number(page.page_number ?? 1)));
+        const pageNumber = Math.max(1, Number(page.page_number ?? 1));
         const spread = spreadMap.get(pageNumber);
         return {
           pageNumber,
@@ -478,6 +520,7 @@ export default function DashboardStorybookTestPage() {
           text: page.text || "",
           imageUrl: spread?.left?.image_url || null,
           prompt: scenePrompts[pageNumber - 1] || "",
+          audioUrl: page.audio_url || spread?.right?.audio_url,
         };
       });
   }, [responseData?.story?.right_pages, scenePrompts, spreads]);
@@ -512,7 +555,8 @@ export default function DashboardStorybookTestPage() {
     if (!coverImage) return null;
 
     const pages: StoryPage[] = [];
-    for (let pageNumber = 1; pageNumber <= 5; pageNumber += 1) {
+    const pageNumbers = Array.from(rightPageMap.keys()).sort((a, b) => a - b);
+    for (const pageNumber of pageNumbers) {
       const spread = spreadMap.get(pageNumber);
       const leftImage = spread?.left?.image_url || generatedImages[pageNumber] || "";
       pages.push({
@@ -524,6 +568,7 @@ export default function DashboardStorybookTestPage() {
       pages.push({
         chapter: rightPage?.chapter || `Chapter ${pageNumber}`,
         text: rightPage?.text || "Story text unavailable for this page.",
+        audioUrl: rightPage?.audio_url || spread?.right?.audio_url,
       });
     }
 
@@ -543,6 +588,12 @@ export default function DashboardStorybookTestPage() {
   const canSubmit = requestState !== "loading" && prompt.trim().length > 0;
 
   const hasActiveRun = requestState !== "idle" || liveLogs.length > 0;
+  const activeLoadingStageKey = useMemo(() => {
+    const latest = liveTimelineSteps[liveTimelineSteps.length - 1];
+    if (!latest) return "in_progress";
+    const raw = (latest.stageKey || latest.key || "").trim();
+    return raw || "in_progress";
+  }, [liveTimelineSteps]);
 
   useEffect(() => {
     if (!expandedImageUrl) return;
@@ -752,7 +803,8 @@ export default function DashboardStorybookTestPage() {
     title: string,
     detail: string,
     imageUrl?: string,
-    data?: unknown
+    data?: unknown,
+    stageKey?: string
   ) {
     setLiveTimelineSteps((prev) => {
       const existingIndex = prev.findIndex((step) => step.key === key);
@@ -763,6 +815,7 @@ export default function DashboardStorybookTestPage() {
             key,
             title,
             detail,
+            stageKey,
             imageUrls: imageUrl ? [imageUrl] : [],
             data,
           },
@@ -780,6 +833,7 @@ export default function DashboardStorybookTestPage() {
         ...current,
         title,
         detail,
+        stageKey: stageKey ?? current.stageKey,
         imageUrls: nextImageUrls,
         data: data ?? current.data,
       };
@@ -817,13 +871,14 @@ export default function DashboardStorybookTestPage() {
             {
               key,
               title: "Scene image generation",
+              stageKey: stage,
               detail: imageUrl
-                ? `${images.length}/6 images generated. ${message}`
+                ? `${images.length}/${DEFAULT_SCENE_IMAGE_COUNT} images generated. ${message}`
                 : message,
               imageUrls: imageUrl ? [imageUrl] : [],
               data: {
                 generated_count: images.length,
-                total_expected: 6,
+                total_expected: DEFAULT_SCENE_IMAGE_COUNT,
                 images,
               },
             },
@@ -836,6 +891,10 @@ export default function DashboardStorybookTestPage() {
           current.data && typeof current.data === "object"
             ? (current.data as Record<string, unknown>)
             : {};
+        const totalExpected =
+          typeof currentData.total_expected === "number"
+            ? Number(currentData.total_expected)
+            : DEFAULT_SCENE_IMAGE_COUNT;
         const existingItemsRaw = Array.isArray(currentData.images) ? currentData.images : [];
         const existingItems = existingItemsRaw.filter(
           (item): item is { scene_index: number | null; scene_type: string; image_url: string } =>
@@ -858,11 +917,12 @@ export default function DashboardStorybookTestPage() {
         next[index] = {
           ...current,
           title: "Scene image generation",
-          detail: `${nextItems.length}/6 images generated. ${message}`,
+          stageKey: stage,
+          detail: `${nextItems.length}/${totalExpected} images generated. ${message}`,
           imageUrls: nextImageUrls,
           data: {
             generated_count: nextItems.length,
-            total_expected: 6,
+            total_expected: totalExpected,
             latest_scene_index: sceneIndex,
             latest_message: message,
             images: nextItems,
@@ -881,9 +941,9 @@ export default function DashboardStorybookTestPage() {
         ? data.generated_images.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
         : [];
 
-      upsertTimelineStep(key, title, message, generatedImages[0], data ?? undefined);
+      upsertTimelineStep(key, title, message, generatedImages[0], data ?? undefined, stage);
       for (const imageUrl of generatedImages.slice(1)) {
-        upsertTimelineStep(key, title, message, imageUrl, undefined);
+        upsertTimelineStep(key, title, message, imageUrl, undefined, stage);
       }
       return;
     }
@@ -911,21 +971,23 @@ export default function DashboardStorybookTestPage() {
             brief,
             generated_images: images,
           };
-          upsertTimelineStep(key, title, detail, images[0], dataPayload);
+          upsertTimelineStep(key, title, detail, images[0], dataPayload, stage);
           for (const imageUrl of images.slice(1)) {
-            upsertTimelineStep(key, title, detail, imageUrl, undefined);
+            upsertTimelineStep(key, title, detail, imageUrl, undefined, stage);
           }
         }
       }
       return;
     }
 
+    const timelineKey = buildProgressTimelineKey(stage, data ?? undefined);
     upsertTimelineStep(
-      stage || "progress",
+      timelineKey,
       formatStageTitle(stage),
       message,
       undefined,
-      progressEvent.data
+      progressEvent.data,
+      stage
     );
   }
 
@@ -1714,7 +1776,7 @@ export default function DashboardStorybookTestPage() {
                                 animate={{ opacity: [1, 0.5, 1] }}
                                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                               >
-                                Finalizing the story...
+                                {activeLoadingStageKey}
                               </motion.span>
                             </motion.div>
                           ) : null}
@@ -1933,12 +1995,20 @@ export default function DashboardStorybookTestPage() {
                     transition={{ duration: 0.24, delay: Math.min(index * 0.03, 0.15) }}
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusChip label={`Page ${page.pageNumber} of 5`} tone="neutral" />
+                      <StatusChip label={`Page ${page.pageNumber} of ${storyPages.length}`} tone="neutral" />
                       <StatusChip label={page.chapter || "chapter"} tone="neutral" />
                     </div>
                     <p className="mt-2 break-words text-xs leading-5" style={{ color: "#7a5a45" }}>
                       {page.text || "No story text generated for this page."}
                     </p>
+                    {page.audioUrl ? (
+                      <div className="mt-2 rounded-lg border px-2 py-2" style={{ borderColor: "#dbc9b7", background: "#f7efe4" }}>
+                        <p className="mb-1 text-[11px] font-semibold" style={{ color: "#7a5a45" }}>
+                          MP3 narration
+                        </p>
+                        <audio controls preload="none" src={page.audioUrl} className="h-8 w-full" />
+                      </div>
+                    ) : null}
                     {page.prompt ? (
                       <p className="mt-2 break-words rounded-lg border px-2 py-1 text-[11px]" style={{ borderColor: "#dbc9b7", color: "#9a7a65" }}>
                         Prompt used: {page.prompt}

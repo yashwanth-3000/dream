@@ -47,12 +47,14 @@ export async function fetchJobs(params?: {
   status?: string;
   limit?: number;
   offset?: number;
+  summary?: boolean;
 }): Promise<Job[]> {
   const qs = new URLSearchParams();
   if (params?.type) qs.set("type", params.type);
   if (params?.status) qs.set("status", params.status);
   if (params?.limit) qs.set("limit", String(params.limit));
   if (params?.offset) qs.set("offset", String(params.offset));
+  if (params?.summary) qs.set("summary", "1");
 
   const res = await fetch(`/api/jobs?${qs.toString()}`, { cache: "no-store" });
   if (!res.ok) return [];
@@ -63,6 +65,14 @@ export async function fetchJob(id: string): Promise<Job | null> {
   const res = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
+}
+
+export async function deleteJob(id: string): Promise<boolean> {
+  const res = await fetch(`/api/jobs/${id}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+  return res.ok;
 }
 
 export async function fetchJobEvents(

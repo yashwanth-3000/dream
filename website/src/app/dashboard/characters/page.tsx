@@ -2,7 +2,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Copy,
@@ -12,18 +13,13 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Trash2,
   User,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 
-import {
-  getStoredCharactersServerSnapshot,
-  getStoredCharactersSnapshot,
-  subscribeStoredCharacters,
-  type StoredCharacter,
-} from "@/lib/custom-characters";
-import { fetchJobs, getAssetUrl, type Job } from "@/lib/jobs";
+import { deleteJob, fetchJobs, getAssetUrl, type Job } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
@@ -35,7 +31,7 @@ interface CharacterCard {
   ageBand: string;
   avatar: string;
   description?: string;
-  source: "job" | "local";
+  source: "job";
   jobId?: string;
 }
 
@@ -69,23 +65,11 @@ function jobToCard(job: Job): CharacterCard {
   };
 }
 
-function localToCard(c: StoredCharacter): CharacterCard {
-  return {
-    id: c.id,
-    name: c.name,
-    role: c.role,
-    mood: c.mood,
-    ageBand: c.ageBand,
-    avatar: c.avatar,
-    description: "description" in c ? (c as { description?: string }).description : undefined,
-    source: "local",
-  };
-}
-
 const AGE_TABS = ["All", "4-7", "5-8", "5-10", "6-9"] as const;
 const easing = [0.22, 1, 0.36, 1] as const;
 
 export default function DashboardCharactersPage() {
+  const router = useRouter();
   const [jobCharacters, setJobCharacters] = useState<CharacterCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -93,15 +77,11 @@ export default function DashboardCharactersPage() {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterCard | null>(null);
   const [copiedId, setCopiedId] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const prefersReducedMotion = useReducedMotion();
-
-  const customCharacters = useSyncExternalStore(
-    subscribeStoredCharacters,
-    getStoredCharactersSnapshot,
-    getStoredCharactersServerSnapshot,
-  );
 
   const loadCharacters = useCallback(async () => {
     try {
@@ -121,19 +101,13 @@ export default function DashboardCharactersPage() {
     loadCharacters();
   }, [loadCharacters]);
 
-  const localCards = useMemo<CharacterCard[]>(
-    () => customCharacters.map(localToCard),
-    [customCharacters],
-  );
-
-  const localIds = useMemo(
-    () => new Set(customCharacters.map((c) => c.id)),
-    [customCharacters],
-  );
+  useEffect(() => {
+    setDeleteError("");
+  }, [selectedCharacter?.id]);
 
   const allCharacters = useMemo<CharacterCard[]>(
-    () => [...localCards, ...jobCharacters],
-    [localCards, jobCharacters],
+    () => jobCharacters,
+    [jobCharacters],
   );
 
   const filtered = useMemo(() => {
@@ -155,6 +129,47 @@ export default function DashboardCharactersPage() {
     setCopiedId(true);
     setTimeout(() => setCopiedId(false), 1500);
   };
+
+  const handleDeleteCharacter = useCallback(async () => {
+    if (!selectedCharacter) return;
+
+    const confirmed = window.confirm(
+      `Delete "${selectedCharacter.name}" from dashboard, database, and stored assets?`
+    );
+    if (!confirmed) return;
+
+    setDeleteError("");
+    setDeletingCharacterId(selectedCharacter.id);
+    try {
+      if (!selectedCharacter.jobId) {
+        throw new Error("Missing character job id.");
+      }
+      const deleted = await deleteJob(selectedCharacter.jobId);
+      if (!deleted) {
+        throw new Error("Could not delete character job from backend.");
+      }
+      setJobCharacters((prev) => prev.filter((entry) => entry.id !== selectedCharacter.jobId));
+      setSelectedCharacter(null);
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Character deletion failed."
+      );
+    } finally {
+      setDeletingCharacterId(null);
+    }
+  }, [selectedCharacter]);
+
+  const handleUseCharacterInStory = useCallback(() => {
+    if (!selectedCharacter) return;
+    if (!selectedCharacter.jobId) return;
+
+    const params = new URLSearchParams({
+      mode: "story",
+      characterId: selectedCharacter.jobId,
+    });
+    setSelectedCharacter(null);
+    router.push(`/chat?${params.toString()}`);
+  }, [router, selectedCharacter]);
 
   return (
     <>
@@ -251,29 +266,6 @@ export default function DashboardCharactersPage() {
           </div>
         </div>
 
-        {/* ── Session badge ── */}
-        {customCharacters.length > 0 && (
-          <motion.div
-            initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={
-              prefersReducedMotion ? { duration: 0 } : { duration: 0.32, ease: easing }
-            }
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold"
-            style={{ background: "#f0e8dc", color: "#8b5e3c" }}
-          >
-            <motion.span
-              animate={
-                prefersReducedMotion ? undefined : { scale: [1, 1.08, 1], rotate: [0, -8, 0] }
-              }
-              transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 2.4 }}
-            >
-              <Sparkles className="size-3" />
-            </motion.span>
-            {customCharacters.length} created this session
-          </motion.div>
-        )}
-
         {/* ── Loading ── */}
         {loading && (
           <div className="mt-12 flex items-center justify-center">
@@ -290,7 +282,6 @@ export default function DashboardCharactersPage() {
             >
               <AnimatePresence mode="popLayout">
                 {filtered.map((char, index) => {
-                  const isLocal = localIds.has(char.id);
                   const isHovered = hoveredId === char.id;
 
                   return (
@@ -353,22 +344,6 @@ export default function DashboardCharactersPage() {
                           transition={{ duration: 0.24, ease: easing }}
                           className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-[#c9924e]/30 via-transparent to-white/30 mix-blend-screen"
                         />
-
-                        {isLocal && (
-                          <motion.span
-                            initial={prefersReducedMotion ? false : { opacity: 0, scale: 0.86, y: -4 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            transition={
-                              prefersReducedMotion
-                                ? { duration: 0 }
-                                : { duration: 0.24, ease: easing, delay: 0.05 }
-                            }
-                            className="absolute left-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm"
-                            style={{ background: "#2b180a", color: "#f5e6d5" }}
-                          >
-                            New
-                          </motion.span>
-                        )}
 
                         {char.source === "job" && (
                           <motion.span
@@ -578,6 +553,7 @@ export default function DashboardCharactersPage() {
                       )}
                       <motion.button
                         type="button"
+                        onClick={handleUseCharacterInStory}
                         whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
                         whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
                         className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-sm transition"
@@ -621,7 +597,26 @@ export default function DashboardCharactersPage() {
                         )}
                         {copiedId ? "Copied!" : "Copy ID"}
                       </motion.button>
+                      <motion.button
+                        type="button"
+                        onClick={handleDeleteCharacter}
+                        disabled={deletingCharacterId === selectedCharacter.id}
+                        whileHover={prefersReducedMotion ? undefined : { y: -1.5 }}
+                        whileTap={prefersReducedMotion ? undefined : { scale: 0.98 }}
+                        className="inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60"
+                        style={{ background: "#fff1ef", border: "1px solid #f0b4ad", color: "#8f2f24" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "#ffe7e3")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "#fff1ef")}
+                      >
+                        <Trash2 className="size-4" />
+                        {deletingCharacterId === selectedCharacter.id ? "Deleting..." : "Delete"}
+                      </motion.button>
                     </div>
+                    {deleteError && (
+                      <p className="mt-2 text-xs font-semibold" style={{ color: "#a23b2f" }}>
+                        {deleteError}
+                      </p>
+                    )}
                   </motion.div>
                 </motion.div>
               </motion.div>

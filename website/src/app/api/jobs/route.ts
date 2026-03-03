@@ -15,12 +15,14 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status") || "";
   const limit = url.searchParams.get("limit") || "50";
   const offset = url.searchParams.get("offset") || "0";
+  const summary = url.searchParams.get("summary") || "";
 
   const params = new URLSearchParams();
   if (type) params.set("type", type);
   if (status) params.set("status", status);
   params.set("limit", limit);
   params.set("offset", offset);
+  if (summary) params.set("summary", summary);
 
   try {
     const response = await fetch(

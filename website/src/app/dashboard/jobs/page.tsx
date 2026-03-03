@@ -112,7 +112,7 @@ export default function DashboardJobsPage() {
 
   const loadJobs = useCallback(async () => {
     try {
-      const data = await fetchJobs();
+      const data = await fetchJobs({ limit: 100, summary: true });
       setJobs(data);
     } finally {
       setLoading(false);

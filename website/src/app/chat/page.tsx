@@ -1,13 +1,20 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, Clapperboard, Gamepad2, RotateCw } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
-import { dashboardCharacters, dashboardStories, getDashboardStoryPages } from "@/lib/dashboard-data";
+import { type StoryPage } from "@/lib/dashboard-data";
 import { StoryBook } from "@/components/dashboard/story-book";
+import {
+  createJob,
+  fetchJob,
+  fetchJobs,
+  getAssetUrl,
+  type Job,
+} from "@/lib/jobs";
 import {
   GAMEPLAY_BACKGROUNDS,
   GAMEPLAY_CATEGORY_OPTIONS,
@@ -22,6 +29,7 @@ import styles from "./chat-page.module.css";
 interface ThinkingStep {
   title: string;
   detail: string;
+  stageKey?: string;
   imageUrls?: string[];
   data?: unknown;
 }
@@ -40,6 +48,32 @@ interface SearchReference {
   snippet?: string;
 }
 
+interface StoryCharacterDrawingInput {
+  url?: string;
+  imageData?: string;
+  description?: string;
+  notes?: string;
+}
+
+interface StoryCharacterOption {
+  id: string;
+  name: string;
+  role: string;
+  avatar: string;
+  source: "job";
+  jobId?: string;
+  description?: string;
+  referenceDrawings: StoryCharacterDrawingInput[];
+}
+
+interface StoryBookMessageData {
+  title: string;
+  ageBand: string;
+  cover: string;
+  pages: StoryPage[];
+  jobId?: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -54,6 +88,8 @@ interface Message {
   gameplaySelection?: GameplaySelection | null;
   thinkingSteps?: ThinkingStep[];
   thinkingDuration?: number;
+  storyBook?: StoryBookMessageData | null;
+  storyJobId?: string;
 }
 
 interface MessageGroup {
@@ -75,8 +111,44 @@ interface ChatBackendResponse {
   [key: string]: unknown;
 }
 
-const TITLE_WORDS = ["What", "shall", "we", "dream", "up?"];
+type StorybookResponse = {
+  workflow_used?: string;
+  story?: {
+    title?: string;
+    title_page_text?: string;
+    end_page_text?: string;
+    right_pages?: Array<{ page_number?: number; chapter?: string; text?: string; audio_url?: string }>;
+  };
+  spreads?: Array<{
+    spread_index?: number;
+    left?: { image_url?: string; chapter?: string; text?: string; title?: string };
+    right?: { image_url?: string; chapter?: string; text?: string; title?: string; audio_url?: string };
+  }>;
+  characters?: Array<{
+    name?: string;
+    brief?: string;
+    backstory?: {
+      name?: string;
+      archetype?: string;
+      narrative_backstory?: string;
+      visual_signifiers?: string[];
+      [key: string]: unknown;
+    } | null;
+    image_prompt?: Record<string, unknown> | null;
+    generated_images?: string[];
+    warnings?: string[];
+  }>;
+  generated_images?: string[];
+  scene_prompts?: {
+    cover_prompt?: string;
+    illustration_prompts?: string[];
+    negative_prompt?: string;
+  };
+  saved_character_job_ids?: string[];
+  warnings?: string[];
+};
 
+const TITLE_WORDS = ["What", "shall", "we", "dream", "up?"];
 // 5 images — 2:3 portrait, matching the story book's per-page illustration ratio
 const DREAM_STAGE_IMAGES = [
   "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=480&h=720&auto=format&fit=crop&q=80",
@@ -214,11 +286,6 @@ const CHAT_PENDING_THINKING_STEPS: ThinkingStep[] = [
   },
 ];
 
-const STORY_CHARACTER_OPTIONS = dashboardCharacters;
-
-// Mock story result — used when story mode completes
-const MOCK_STORY = dashboardStories[0];
-const MOCK_STORY_PAGES = getDashboardStoryPages(MOCK_STORY.id);
 const DEFAULT_GAMEPLAY_CATEGORY: GameplayCategory = GAMEPLAY_CATEGORY_OPTIONS[0]?.id ?? "minecraft";
 const DEFAULT_GAMEPLAY_BACKGROUND_ID = getDefaultGameplayBackgroundId(DEFAULT_GAMEPLAY_CATEGORY);
 
@@ -389,6 +456,280 @@ function extractMcpReferences(mcpOutput: unknown): SearchReference[] {
   return refs;
 }
 
+function isHttpUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function isDataUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  return /^data:/i.test(value.trim());
+}
+
+function toAbsoluteClientUrl(value: string | undefined): string {
+  const normalized = (value || "").trim();
+  if (!normalized) return "";
+  if (isHttpUrl(normalized) || isDataUrl(normalized)) return normalized;
+  if (typeof window === "undefined") return normalized;
+  if (normalized.startsWith("/")) return `${window.location.origin}${normalized}`;
+  return `${window.location.origin}/${normalized}`;
+}
+
+function compactText(value: string | undefined, maxChars = 240): string {
+  const cleaned = (value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+function collectJobCharacterReferenceDrawings(job: Job): StoryCharacterDrawingInput[] {
+  const drawings: StoryCharacterDrawingInput[] = [];
+  const seen = new Set<string>();
+  const assets = Array.isArray(job.assets) ? job.assets : [];
+
+  for (const asset of assets) {
+    const localAssetUrl = toAbsoluteClientUrl(getAssetUrl(job.id, asset.filename));
+    if (isHttpUrl(localAssetUrl) && !seen.has(localAssetUrl)) {
+      seen.add(localAssetUrl);
+      drawings.push({
+        url: localAssetUrl,
+        description: "Stored character asset from Dream job storage.",
+        notes: "Use this as canonical identity lock for face, hairstyle, body proportions, and outfit silhouette.",
+      });
+    }
+
+    const originalUrl = typeof asset.original_url === "string" ? asset.original_url.trim() : "";
+    if (!isHttpUrl(originalUrl) || seen.has(originalUrl)) continue;
+    seen.add(originalUrl);
+    drawings.push({
+      url: originalUrl,
+      description: "Canonical character reference image from character vault.",
+      notes: "Use this as identity lock for face, hairstyle, body proportions, and outfit silhouette.",
+    });
+  }
+
+  const generatedImagesRaw =
+    job.result_payload && typeof job.result_payload === "object"
+      ? (job.result_payload as { generated_images?: unknown }).generated_images
+      : [];
+  const generatedImages = Array.isArray(generatedImagesRaw) ? generatedImagesRaw : [];
+  for (const value of generatedImages) {
+    if (typeof value !== "string") continue;
+    const normalized = value.trim();
+    if (!isHttpUrl(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    drawings.push({
+      url: normalized,
+      description: "Generated character reference image from previous job.",
+      notes: "Reuse this exact identity for the storybook scenes.",
+    });
+  }
+
+  return drawings;
+}
+
+function jobToStoryCharacterOption(job: Job): StoryCharacterOption | null {
+  const backstory =
+    job.result_payload && typeof job.result_payload === "object"
+      ? (job.result_payload as {
+          backstory?: {
+            name?: string;
+            archetype?: string;
+            era?: string;
+            origin?: string;
+            narrative_backstory?: string;
+          };
+        }).backstory
+      : undefined;
+
+  const drawings = collectJobCharacterReferenceDrawings(job);
+  const avatarAsset = job.assets.find((asset) => typeof asset.mime_type === "string" && asset.mime_type.startsWith("image/"));
+  const avatarUrl = avatarAsset ? getAssetUrl(job.id, avatarAsset.filename) : drawings[0]?.url ?? "";
+  const name = (backstory?.name || job.title || "Unnamed Character").trim();
+  if (!name) return null;
+
+  return {
+    id: job.id,
+    name,
+    role: (backstory?.archetype || backstory?.origin || "").trim() || "Story Companion",
+    avatar: avatarUrl,
+    source: "job",
+    jobId: job.id,
+    description: compactText(backstory?.narrative_backstory || job.user_prompt || "", 240),
+    referenceDrawings: drawings,
+  };
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) {
+        reject(new Error("Could not read selected image file."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error("Could not read selected image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function extractErrorDetail(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "message" in detail) {
+    const nested = (detail as { message?: unknown }).message;
+    if (typeof nested === "string") return nested;
+  }
+  return "";
+}
+
+function buildInlineCharacterPrompt(params: {
+  name: string;
+  role: string;
+  description: string;
+  storyPrompt: string;
+}): string {
+  const roleLine = params.role ? `Role: ${params.role}.` : "";
+  const storyLine = params.storyPrompt
+    ? `Story context: ${params.storyPrompt}.`
+    : "";
+  return (
+    `Create a storybook character named ${params.name}. `
+    + `${roleLine} `
+    + `Description: ${params.description}. `
+    + `${storyLine} `
+    + "Return a consistent character identity with strong visual signifiers for scene reuse."
+  ).trim();
+}
+
+function unwrapStorybookPayload(payload: unknown): StorybookResponse | null {
+  if (!payload || typeof payload !== "object") return null;
+  const envelope = payload as { backend_response?: unknown };
+  const workflowPayload = envelope.backend_response && typeof envelope.backend_response === "object"
+    ? envelope.backend_response
+    : payload;
+  if (!workflowPayload || typeof workflowPayload !== "object") return null;
+  return workflowPayload as StorybookResponse;
+}
+
+function buildStoryBookFromResponse(
+  workflowPayload: StorybookResponse | null,
+  fallbackAgeBand: string,
+  jobId?: string,
+): StoryBookMessageData | null {
+  if (!workflowPayload?.story) return null;
+  const story = workflowPayload.story;
+  const rightPages = Array.isArray(story.right_pages) ? story.right_pages : [];
+  if (!rightPages.length) return null;
+
+  const spreads = Array.isArray(workflowPayload.spreads) ? workflowPayload.spreads : [];
+  const generatedImages = Array.isArray(workflowPayload.generated_images) ? workflowPayload.generated_images : [];
+  const spreadMap = new Map(
+    spreads
+      .filter((spread) => typeof spread?.spread_index === "number")
+      .map((spread) => [Number(spread.spread_index), spread]),
+  );
+
+  const rightPageMap = new Map(
+    rightPages
+      .filter((page) => typeof page?.page_number === "number")
+      .map((page) => [Number(page.page_number), page]),
+  );
+
+  const cover =
+    generatedImages[0]
+    || spreadMap.get(0)?.left?.image_url
+    || spreadMap.get(1)?.left?.image_url
+    || "";
+  if (!cover) return null;
+
+  const pages: StoryPage[] = [];
+  const sortedPageNumbers = Array.from(rightPageMap.keys()).sort((a, b) => a - b);
+  for (const pageNumber of sortedPageNumbers) {
+    const spread = spreadMap.get(pageNumber);
+    const illustration = spread?.left?.image_url || generatedImages[pageNumber] || cover;
+    pages.push({
+      text: "",
+      illustration,
+    });
+    const rightPage = rightPageMap.get(pageNumber);
+    pages.push({
+      chapter: rightPage?.chapter || `Chapter ${pageNumber}`,
+      text: rightPage?.text || "Story text unavailable for this page.",
+      audioUrl: rightPage?.audio_url || spread?.right?.audio_url,
+    });
+  }
+
+  pages.push({
+    isEnd: true,
+    text: story.end_page_text || "The story ends with hope and a smile.",
+  });
+
+  return {
+    title: story.title || "Generated Storybook",
+    ageBand: fallbackAgeBand || "5-8",
+    cover,
+    pages,
+    jobId,
+  };
+}
+
+function stageToReadableTitle(stage: string): string {
+  const normalized = stage.trim().replace(/[_-]+/g, " ");
+  if (!normalized) return "Progress";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function buildProgressStepKey(stage: string, data: unknown): string {
+  const normalizedStage = (stage || "progress").trim() || "progress";
+  let key = `progress:${normalizedStage}`;
+
+  if (!data || typeof data !== "object") return key;
+  const payload = data as Record<string, unknown>;
+  const sceneIndex =
+    typeof payload.scene_index === "number"
+      ? Number(payload.scene_index)
+      : Number.isFinite(Number(payload.scene_index))
+        ? Number(payload.scene_index)
+        : null;
+  const attempt =
+    typeof payload.attempt === "number"
+      ? Number(payload.attempt)
+      : Number.isFinite(Number(payload.attempt))
+        ? Number(payload.attempt)
+        : null;
+  const pageNumber =
+    typeof payload.page_number === "number"
+      ? Number(payload.page_number)
+      : Number.isFinite(Number(payload.page_number))
+        ? Number(payload.page_number)
+        : null;
+  const characterIndex =
+    typeof payload.character_index === "number"
+      ? Number(payload.character_index)
+      : Number.isFinite(Number(payload.character_index))
+        ? Number(payload.character_index)
+        : null;
+
+  if (sceneIndex !== null) {
+    key += `:scene:${sceneIndex}`;
+  }
+  if (pageNumber !== null) {
+    key += `:page:${pageNumber}`;
+  }
+  if (characterIndex !== null) {
+    key += `:character:${characterIndex}`;
+  }
+  if (attempt !== null) {
+    key += `:attempt:${attempt}`;
+  }
+  return key;
+}
+
 function buildChatSuccessThinkingSteps(meta: {
   category?: string;
   safety?: string;
@@ -521,6 +862,105 @@ function formatVideoPromptWithType(
   return `${prompt}\n\nVideo Type: Normal`;
 }
 
+function normalizeAssistantMessageForDisplay(input: string): string {
+  let text = (input || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return "";
+
+  // Recover line breaks for flattened numbered sections from backend responses.
+  text = text.replace(/([.!?])\s+(?=\d+\.\s+)/g, "$1\n");
+  text = text.replace(/(:)\s+(?=\d+[\.\)]\s*)/g, "$1\n");
+  text = text.replace(/\s+(?=sources?:\s)/gi, "\n");
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text;
+}
+
+function renderInlineBoldText(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const pattern = /\*\*([^*]+)\*\*/g;
+  let last = 0;
+  let match: RegExpExecArray | null = null;
+  let key = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > last) {
+      out.push(<React.Fragment key={`txt-${key++}`}>{text.slice(last, match.index)}</React.Fragment>);
+    }
+    out.push(<strong key={`bold-${key++}`}>{match[1]}</strong>);
+    last = pattern.lastIndex;
+  }
+
+  if (last < text.length) {
+    out.push(<React.Fragment key={`txt-${key++}`}>{text.slice(last)}</React.Fragment>);
+  }
+  return out;
+}
+
+function renderAssistantMessageContent(content: string): React.ReactNode {
+  const normalized = normalizeAssistantMessageForDisplay(content);
+  if (!normalized) return "";
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const blocks: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let listType: "ordered" | "unordered" | null = null;
+  let key = 0;
+
+  const flushList = () => {
+    if (!listItems.length || !listType) return;
+    if (listType === "ordered") {
+      blocks.push(
+        <ol key={`ol-${key++}`} className={styles.chatMarkdownOrderedList}>
+          {listItems.map((item, index) => (
+            <li key={`li-${key++}-${index}`}>{renderInlineBoldText(item)}</li>
+          ))}
+        </ol>
+      );
+    } else {
+      blocks.push(
+        <ul key={`ul-${key++}`} className={styles.chatMarkdownUnorderedList}>
+          {listItems.map((item, index) => (
+            <li key={`li-${key++}-${index}`}>{renderInlineBoldText(item)}</li>
+          ))}
+        </ul>
+      );
+    }
+    listItems = [];
+    listType = null;
+  };
+
+  for (const line of lines) {
+    const orderedMatch = line.match(/^\d+[\.\)]\s*(.+)$/);
+    if (orderedMatch) {
+      if (listType && listType !== "ordered") flushList();
+      listType = "ordered";
+      listItems.push(orderedMatch[1].trim());
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*]\s+(.+)$/);
+    if (unorderedMatch) {
+      if (listType && listType !== "unordered") flushList();
+      listType = "unordered";
+      listItems.push(unorderedMatch[1].trim());
+      continue;
+    }
+
+    flushList();
+    blocks.push(
+      <p key={`p-${key++}`} className={styles.chatMarkdownParagraph}>
+        {renderInlineBoldText(line)}
+      </p>
+    );
+  }
+
+  flushList();
+  return <div className={styles.chatMarkdownContent}>{blocks}</div>;
+}
+
 function getStoryCharacterStep(selection: CharacterSelection | null): ThinkingStep {
   return {
     title: "Choosing character style",
@@ -545,9 +985,13 @@ function getVideoTypeStep(videoType: VideoGenerationType | null, gameplaySelecti
 }
 
 export default function ChatPage() {
+  const [queryMode, setQueryMode] = useState("");
+  const [queryCharacterId, setQueryCharacterId] = useState("");
+  const hasAppliedQueryCharacterRef = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAwaitingBackendReply, setIsAwaitingBackendReply] = useState(false);
+  const [isAwaitingStoryReply, setIsAwaitingStoryReply] = useState(false);
   const [isClosingLogs, setIsClosingLogs] = useState(false);
   const [isThinkingStreamActive, setIsThinkingStreamActive] = useState(false);
   const [hasActiveStoryCharacterChoice, setHasActiveStoryCharacterChoice] = useState(false);
@@ -566,6 +1010,18 @@ export default function ChatPage() {
   const [pendingVideoType, setPendingVideoType] = useState<VideoGenerationType | null>(null);
   const [pendingGameplayCategory, setPendingGameplayCategory] = useState<GameplayCategory>(DEFAULT_GAMEPLAY_CATEGORY);
   const [pendingGameplayBackgroundId, setPendingGameplayBackgroundId] = useState(DEFAULT_GAMEPLAY_BACKGROUND_ID);
+  const [jobStoryCharacters, setJobStoryCharacters] = useState<StoryCharacterOption[]>([]);
+  const [isLoadingStoryCharacters, setIsLoadingStoryCharacters] = useState(false);
+  const [queryStoryCharacterOption, setQueryStoryCharacterOption] = useState<StoryCharacterOption | null>(null);
+  const [isLoadingQueryStoryCharacter, setIsLoadingQueryStoryCharacter] = useState(false);
+  const [isInlineCharacterCreatorOpen, setIsInlineCharacterCreatorOpen] = useState(false);
+  const [isCreatingInlineCharacter, setIsCreatingInlineCharacter] = useState(false);
+  const [inlineCharacterName, setInlineCharacterName] = useState("");
+  const [inlineCharacterRole, setInlineCharacterRole] = useState("");
+  const [inlineCharacterDescription, setInlineCharacterDescription] = useState("");
+  const [inlineCharacterImageData, setInlineCharacterImageData] = useState("");
+  const [inlineCharacterImageName, setInlineCharacterImageName] = useState("");
+  const [inlineCharacterError, setInlineCharacterError] = useState("");
   const [visibleSteps, setVisibleSteps] = useState(0);
   const [visibleImageCount, setVisibleImageCount] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -580,6 +1036,13 @@ export default function ChatPage() {
   const activeStoryCharacterSelectionRef = useRef<CharacterSelection | null>(null);
   const activeVideoTypeRef = useRef<VideoGenerationType | null>(null);
   const activeGameplaySelectionRef = useRef<GameplaySelection | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setQueryMode((params.get("mode") || "").toLowerCase());
+    setQueryCharacterId((params.get("characterId") || "").trim());
+  }, []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth", force = false) => {
     if (!force && !shouldAutoScroll) return;
@@ -634,14 +1097,102 @@ export default function ChatPage() {
     return Math.max(1400, Math.floor(bufferedWindow / count));
   }, [activeThinkingSteps.length]);
 
+  const storyCharacterOptions = useMemo(() => {
+    const merged = new Map<string, StoryCharacterOption>();
+    for (const option of jobStoryCharacters) {
+      if (!option?.id) continue;
+      if (!merged.has(option.id)) merged.set(option.id, option);
+    }
+    if (queryStoryCharacterOption?.id && !merged.has(queryStoryCharacterOption.id)) {
+      merged.set(queryStoryCharacterOption.id, queryStoryCharacterOption);
+    }
+    return Array.from(merged.values());
+  }, [jobStoryCharacters, queryStoryCharacterOption]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingStoryCharacters(true);
+    void fetchJobs({ type: "character", limit: 100 })
+      .then((jobs) => {
+        if (cancelled) return;
+        const mapped = jobs
+          .map(jobToStoryCharacterOption)
+          .filter((entry): entry is StoryCharacterOption => entry !== null);
+        setJobStoryCharacters(mapped);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setJobStoryCharacters([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingStoryCharacters(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!queryCharacterId) {
+      setQueryStoryCharacterOption(null);
+      setIsLoadingQueryStoryCharacter(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingQueryStoryCharacter(true);
+    void fetchJob(queryCharacterId)
+      .then((job) => {
+        if (cancelled) return;
+        if (!job || job.type !== "character") {
+          setQueryStoryCharacterOption(null);
+          return;
+        }
+        const option = jobToStoryCharacterOption(job);
+        setQueryStoryCharacterOption(option);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQueryStoryCharacterOption(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsLoadingQueryStoryCharacter(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queryCharacterId]);
+
+  useEffect(() => {
+    if (queryMode !== "story") return;
+    setComposerMode((current) => (current === "story" ? current : "story"));
+  }, [queryMode]);
+
+  useEffect(() => {
+    if (!queryCharacterId || hasAppliedQueryCharacterRef.current) return;
+    if (!storyCharacterOptions.some((option) => option.id === queryCharacterId)) return;
+    hasAppliedQueryCharacterRef.current = true;
+    setPendingUseAiStoryCharacter(false);
+    setPendingStoryCharacterId(queryCharacterId);
+  }, [queryCharacterId, storyCharacterOptions]);
+
+  useEffect(() => {
+    if (!isThinkingStreamActive && !hasActiveStoryCharacterChoice) return;
+    setIsInlineCharacterCreatorOpen(false);
+  }, [isThinkingStreamActive, hasActiveStoryCharacterChoice]);
+
   const activeStoryCharacter = React.useMemo(
-    () => STORY_CHARACTER_OPTIONS.find((char) => char.id === activeStoryCharacterId) ?? null,
-    [activeStoryCharacterId],
+    () => storyCharacterOptions.find((char) => char.id === activeStoryCharacterId) ?? null,
+    [activeStoryCharacterId, storyCharacterOptions],
   );
 
   const pendingStoryCharacter = React.useMemo(
-    () => STORY_CHARACTER_OPTIONS.find((char) => char.id === pendingStoryCharacterId) ?? null,
-    [pendingStoryCharacterId],
+    () => storyCharacterOptions.find((char) => char.id === pendingStoryCharacterId) ?? null,
+    [pendingStoryCharacterId, storyCharacterOptions],
   );
 
   const pendingVideoTypeOption = React.useMemo(
@@ -725,12 +1276,23 @@ export default function ChatPage() {
 
   const handleSelectStoryCharacter = useCallback((characterId: string) => {
     setActiveStoryCharacterId(characterId);
-    const selected = STORY_CHARACTER_OPTIONS.find((char) => char.id === characterId);
+    const selected = storyCharacterOptions.find((char) => char.id === characterId);
     if (!selected) return;
-    applyActiveStoryCharacterSelection({ type: "existing", name: selected.name });
+    applyActiveStoryCharacterSelection({
+      type: "existing",
+      id: selected.id,
+      source: selected.source,
+      jobId: selected.jobId,
+      name: selected.name,
+      avatar: selected.avatar,
+      description: selected.description,
+      referenceImageUrls: selected.referenceDrawings
+        .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
+        .filter((value) => Boolean(value)),
+    });
     setHasActiveStoryCharacterChoice(true);
     startThinkingStream();
-  }, [applyActiveStoryCharacterSelection, startThinkingStream]);
+  }, [applyActiveStoryCharacterSelection, startThinkingStream, storyCharacterOptions]);
 
   const handleUseAiStoryCharacter = useCallback(() => {
     setActiveStoryCharacterId("");
@@ -751,36 +1313,12 @@ export default function ChatPage() {
     setPendingUseAiStoryCharacter((previous) => !previous);
   }, [isThinkingStreamActive, isClosingLogs]);
 
-  const handleClearPendingStoryChoice = useCallback(() => {
-    if (isThinkingStreamActive || isClosingLogs) return;
-    setPendingStoryCharacterId("");
-    setPendingUseAiStoryCharacter(false);
-  }, [isThinkingStreamActive, isClosingLogs]);
-
   const scrollCharacterCarousel = useCallback((dir: 1 | -1) => {
     const el = characterCarouselRef.current;
     if (!el) return;
     // scroll 3 cards at a time (80px card + 7px gap)
     el.scrollBy({ left: dir * (80 * 3 + 7 * 2), behavior: "smooth" });
   }, []);
-
-  const handleConfirmStoryCharacterChoice = useCallback(() => {
-    if (isThinkingStreamActive || isClosingLogs) return;
-    if (pendingUseAiStoryCharacter) {
-      handleUseAiStoryCharacter();
-      return;
-    }
-    if (pendingStoryCharacterId) {
-      handleSelectStoryCharacter(pendingStoryCharacterId);
-    }
-  }, [
-    isThinkingStreamActive,
-    isClosingLogs,
-    pendingUseAiStoryCharacter,
-    pendingStoryCharacterId,
-    handleUseAiStoryCharacter,
-    handleSelectStoryCharacter,
-  ]);
 
   const handlePickPendingVideoType = useCallback((selection: VideoGenerationType) => {
     if (isThinkingStreamActive || isClosingLogs) return;
@@ -836,6 +1374,7 @@ export default function ChatPage() {
   // Stream steps + elapsed counter while loading
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
+    if (activeRunMode === "story" && isAwaitingStoryReply) return;
 
     const imageTimers: ReturnType<typeof setTimeout>[] = [];
     const stepTimers = activeThinkingSteps.map((step, i) =>
@@ -861,7 +1400,7 @@ export default function ChatPage() {
       imageTimers.forEach(clearTimeout);
       clearInterval(ticker);
     };
-  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, stepIntervalMs]);
+  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, stepIntervalMs, activeRunMode, isAwaitingStoryReply]);
 
   // Keep the live thinking stream pinned to bottom while steps/images are added.
   useEffect(() => {
@@ -872,6 +1411,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
     if ((activeRunMode === "normal" || activeRunMode === "search") && isAwaitingBackendReply) return;
+    if (activeRunMode === "story" && isAwaitingStoryReply) return;
     const imageStageTotal = activeThinkingSteps.find((step) => step.imageUrls?.length)?.imageUrls?.length ?? 0;
     const closeDelayMs = 240;
     let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -930,6 +1470,7 @@ export default function ChatPage() {
         setHasActiveStoryCharacterChoice(false);
         setHasActiveVideoTypeChoice(false);
         setIsAwaitingBackendReply(false);
+        setIsAwaitingStoryReply(false);
         activeStoryCharacterSelectionRef.current = null;
         activeVideoTypeRef.current = null;
         activeGameplaySelectionRef.current = null;
@@ -944,7 +1485,7 @@ export default function ChatPage() {
       clearTimeout(finishTimer);
       if (closeTimer) clearTimeout(closeTimer);
     };
-  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, isAwaitingBackendReply, scrollToBottom]);
+  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, isAwaitingBackendReply, isAwaitingStoryReply, scrollToBottom]);
 
   const addAssistantReply = useCallback((mode: ModeId | "normal", startImmediately: boolean) => {
     const stepsForRun = getThinkingSteps(mode).map((step) => ({
@@ -974,6 +1515,8 @@ export default function ChatPage() {
     overrideThinkingSteps?: ThinkingStep[],
     backendJson?: Record<string, unknown> | null,
     references?: SearchReference[],
+    storyBook?: StoryBookMessageData | null,
+    storyJobId?: string,
   ) => {
     const duration = Math.max(1, Math.round((Date.now() - thinkingStartRef.current) / 1000));
     const sourceSteps = (overrideThinkingSteps && overrideThinkingSteps.length > 0)
@@ -998,6 +1541,8 @@ export default function ChatPage() {
         backendJson: backendJson ?? null,
         references: references ?? [],
         mode,
+        storyBook: storyBook ?? null,
+        storyJobId,
         thinkingSteps: finalThinkingSteps,
         thinkingDuration: duration,
       },
@@ -1016,6 +1561,7 @@ export default function ChatPage() {
     setHasActiveStoryCharacterChoice(false);
     setHasActiveVideoTypeChoice(false);
     setIsAwaitingBackendReply(false);
+    setIsAwaitingStoryReply(false);
     activeStoryCharacterSelectionRef.current = null;
     activeVideoTypeRef.current = null;
     activeGameplaySelectionRef.current = null;
@@ -1117,6 +1663,680 @@ export default function ChatPage() {
     }
   }, [finalizeBackendAssistantReply]);
 
+  const requestStorybookAssistantReply = useCallback(async (
+    storyPrompt: string,
+    selection: CharacterSelection | null,
+    selectedOption: StoryCharacterOption | null,
+    preludeSteps: ThinkingStep[] = [],
+  ) => {
+    const requestStartedAt = Date.now();
+    const timelineOrder: string[] = [];
+    const timelineMap = new Map<string, ThinkingStep>();
+
+    const syncTimeline = () => {
+      const steps = timelineOrder
+        .map((key) => timelineMap.get(key))
+        .filter((step): step is ThinkingStep => Boolean(step));
+      if (!steps.length) return;
+      setActiveThinkingSteps(steps);
+      setVisibleSteps(steps.length);
+      const imageCount = steps.reduce((sum, step) => sum + (step.imageUrls?.length ?? 0), 0);
+      setVisibleImageCount(imageCount);
+      setElapsedSeconds(Math.max(1, Math.round((Date.now() - requestStartedAt) / 1000)));
+    };
+
+    const upsertTimelineStep = (
+      key: string,
+      title: string,
+      detail: string,
+      data?: unknown,
+      imageUrl?: string,
+      stageKey?: string,
+    ) => {
+      const existing = timelineMap.get(key);
+      const nextImages = imageUrl
+        ? Array.from(new Set([...(existing?.imageUrls ?? []), imageUrl]))
+        : (existing?.imageUrls ?? []);
+      timelineMap.set(key, {
+        title,
+        detail,
+        stageKey: stageKey ?? existing?.stageKey,
+        data: data ?? existing?.data,
+        imageUrls: nextImages.length ? nextImages : undefined,
+      });
+      if (!timelineOrder.includes(key)) {
+        timelineOrder.push(key);
+      }
+      syncTimeline();
+    };
+
+    if (preludeSteps.length) {
+      preludeSteps.forEach((step, index) => {
+        const key = `prelude:${index}`;
+        timelineMap.set(key, {
+          title: step.title,
+          detail: step.detail,
+          stageKey: step.stageKey,
+          data: step.data,
+          imageUrls: step.imageUrls ? [...step.imageUrls] : undefined,
+        });
+        timelineOrder.push(key);
+      });
+      syncTimeline();
+    }
+
+    upsertTimelineStep(
+      "story_character_choice",
+      "Choosing character style",
+      selection?.type === "existing" && selectedOption
+        ? `Reusing existing character: ${selectedOption.name}.`
+        : "Using AI-created character path for this story.",
+      {
+        selection_type: selection?.type ?? "create",
+        character_id: selectedOption?.id ?? null,
+        character_name: selectedOption?.name ?? null,
+      },
+    );
+
+    setIsAwaitingStoryReply(true);
+
+    const requestPayload: Record<string, unknown> = {
+      user_prompt: storyPrompt.trim(),
+      world_references: [],
+      character_drawings: [],
+      max_characters: 2,
+    };
+
+    if (selection?.type === "existing" && selectedOption) {
+      const canonicalDrawings: Array<Record<string, string>> = [];
+      for (const drawing of selectedOption.referenceDrawings) {
+        const description = drawing.description || `Canonical reference for ${selectedOption.name}.`;
+        const notes = drawing.notes || "Preserve identity consistency in every scene.";
+        if (drawing.imageData && drawing.imageData.trim()) {
+          canonicalDrawings.push({
+            description,
+            notes,
+            image_data: drawing.imageData.trim(),
+          });
+          continue;
+        }
+        if (drawing.url && drawing.url.trim()) {
+          canonicalDrawings.push({
+            description,
+            notes,
+            url: drawing.url.trim(),
+          });
+        }
+      }
+      const avatarFallback = toAbsoluteClientUrl(selectedOption.avatar || "");
+      if (!canonicalDrawings.length && avatarFallback) {
+        if (isDataUrl(avatarFallback)) {
+          canonicalDrawings.push({
+            description: `Canonical fallback reference for ${selectedOption.name}.`,
+            notes: "Preserve this exact identity in all storybook pages.",
+            image_data: avatarFallback,
+          });
+        } else {
+          canonicalDrawings.push({
+            description: `Canonical fallback reference for ${selectedOption.name}.`,
+            notes: "Preserve this exact identity in all storybook pages.",
+            url: avatarFallback,
+          });
+        }
+      }
+
+      requestPayload.character_drawings = canonicalDrawings;
+      requestPayload.reuse_existing_character = true;
+      requestPayload.reuse_character_name = selectedOption.name;
+      requestPayload.max_characters = 1;
+      requestPayload.force_workflow = "reference_enriched";
+      requestPayload.user_prompt = `${storyPrompt.trim()}\n\nUse the existing character "${selectedOption.name}" as the lead and keep identity strictly consistent across all pages.`;
+    }
+
+    let jobId: string | undefined;
+
+    try {
+      try {
+        const createdJob = await createJob({
+          type: "story",
+          title: storyPrompt.trim().slice(0, 80) || "Storybook Generation",
+          user_prompt: storyPrompt.trim(),
+          input_payload: requestPayload as Record<string, unknown>,
+          triggered_by: "chat-story-mode",
+          engine: "a2a-maf-story-book-maker",
+        });
+        jobId = createdJob.id;
+        upsertTimelineStep(
+          "job_created",
+          "Job tracking",
+          `Created story job ${createdJob.id}.`,
+          { job_id: createdJob.id },
+        );
+      } catch (jobError) {
+        upsertTimelineStep(
+          "job_created",
+          "Job tracking",
+          `Job creation skipped: ${jobError instanceof Error ? jobError.message : "unknown error"}`,
+          { warning: "job_creation_failed" },
+        );
+      }
+
+      const jobQuery = jobId ? `&job_id=${encodeURIComponent(jobId)}` : "";
+      const response = await fetch(`/api/storybook-test?target=main&stream=1${jobQuery}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
+
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/x-ndjson")) {
+        const rawText = await response.text();
+        let parsed: unknown = null;
+        if (rawText.trim()) {
+          try {
+            parsed = JSON.parse(rawText);
+          } catch {
+            parsed = { raw: rawText };
+          }
+        }
+        if (!response.ok) {
+          const detail =
+            parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
+              ? String((parsed as { detail?: unknown }).detail || "")
+              : `Story request failed (${response.status}).`;
+          throw new Error(detail || `Story request failed (${response.status}).`);
+        }
+
+        const fallbackEnvelope = {
+          backend_endpoint: "",
+          backend_status_code: response.status,
+          backend_response: parsed,
+        } as Record<string, unknown>;
+        const fallbackWorkflow = unwrapStorybookPayload(fallbackEnvelope);
+        const fallbackBook = buildStoryBookFromResponse(fallbackWorkflow, "5-8", jobId);
+        finalizeBackendAssistantReply(
+          fallbackBook ? `Storybook ready: ${fallbackBook.title}.` : "Storybook generated.",
+          "story",
+          timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+          fallbackEnvelope,
+          [],
+          fallbackBook,
+          jobId,
+        );
+        return;
+      }
+
+      if (!response.body) {
+        throw new Error("Stream was requested, but backend returned an empty body.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalEnvelope: Record<string, unknown> | null = null;
+      let streamError: string | null = null;
+
+      const consumeLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        let event: unknown;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
+          upsertTimelineStep(
+            `stream_parse_${timelineOrder.length}`,
+            "Stream parse warning",
+            "Received a stream line that could not be parsed as JSON.",
+            { raw_line: trimmed },
+          );
+          return;
+        }
+
+        if (!event || typeof event !== "object") return;
+        const eventObj = event as Record<string, unknown>;
+        const eventType = String(eventObj.type || "").toLowerCase().trim();
+
+        if (eventType === "progress") {
+          const stage = String(eventObj.stage || "progress");
+          const message = String(eventObj.message || "Progress update received.");
+          const data = eventObj.data;
+          const imageUrl =
+            data && typeof data === "object" && data !== null && "image_url" in data
+              ? String((data as { image_url?: unknown }).image_url || "")
+              : "";
+          const timelineKey = buildProgressStepKey(stage, data);
+          upsertTimelineStep(
+            timelineKey,
+            stageToReadableTitle(stage),
+            message,
+            data,
+            imageUrl || undefined,
+            stage,
+          );
+          return;
+        }
+
+        if (eventType === "status") {
+          const state = String(eventObj.state || "").trim();
+          const message = String(eventObj.message || "Status update received.");
+          const title = state ? `A2A status: ${state}` : "A2A status";
+          const key = state ? `status:${state}` : `status:${timelineOrder.length}`;
+          upsertTimelineStep(key, title, message, eventObj);
+          return;
+        }
+
+        if (eventType === "update") {
+          const message = String(eventObj.message || "Backend update received.");
+          upsertTimelineStep(
+            `update:${timelineOrder.length}`,
+            "Backend update",
+            message,
+            eventObj,
+          );
+          return;
+        }
+
+        if (eventType === "error") {
+          streamError =
+            String(eventObj.detail || eventObj.message || "Story stream failed with an unknown error.");
+          upsertTimelineStep("stream_error", "Stream error", streamError, eventObj);
+          return;
+        }
+
+        if (eventType === "final") {
+          finalEnvelope = {
+            backend_endpoint: eventObj.backend_endpoint || eventObj.endpoint || "",
+            backend_status_code: eventObj.backend_status_code || eventObj.status_code || 200,
+            backend_response: eventObj.backend_response || eventObj.payload || null,
+          };
+          upsertTimelineStep(
+            "final_response",
+            "Final response",
+            "Storybook payload received from backend.",
+            finalEnvelope,
+          );
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) consumeLine(line);
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) consumeLine(buffer);
+
+      if (streamError) {
+        throw new Error(streamError);
+      }
+
+      if (!finalEnvelope) {
+        throw new Error("Story stream ended before final payload was received.");
+      }
+
+      let storyJobId = jobId;
+      if (jobId) {
+        try {
+          const refreshedJob = await fetchJob(jobId);
+          if (refreshedJob?.id) storyJobId = refreshedJob.id;
+        } catch {
+          // Best effort only.
+        }
+      }
+
+      const workflowPayload = unwrapStorybookPayload(finalEnvelope);
+      if (selection?.type !== "existing") {
+        const savedCharacterIds = Array.isArray(workflowPayload?.saved_character_job_ids)
+          ? workflowPayload.saved_character_job_ids.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            )
+          : [];
+        if (savedCharacterIds.length) {
+          upsertTimelineStep(
+            "story_characters_saved",
+            "Story characters saved",
+            `Saved ${savedCharacterIds.length} story-generated character(s) to Azure character storage.`,
+            {
+              saved_character_ids: savedCharacterIds,
+              source_job_id: storyJobId || null,
+            },
+            undefined,
+            "story_characters_saved",
+          );
+        }
+      }
+      const storyBook = buildStoryBookFromResponse(workflowPayload, "5-8", storyJobId);
+      finalizeBackendAssistantReply(
+        storyBook ? `Storybook ready: ${storyBook.title}.` : "Storybook generated.",
+        "story",
+        timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+        finalEnvelope,
+        [],
+        storyBook,
+        storyJobId,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Storybook generation failed.";
+      upsertTimelineStep("story_error", "Story generation failed", detail, {
+        detail,
+        job_id: jobId || null,
+      });
+      finalizeBackendAssistantReply(
+        detail,
+        "story",
+        timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+        {
+          detail,
+          job_id: jobId || null,
+          duration_ms: Math.max(1, Date.now() - requestStartedAt),
+        },
+        [],
+        null,
+        jobId,
+      );
+    }
+  }, [finalizeBackendAssistantReply]);
+
+  const handleToggleInlineCharacterCreator = useCallback(() => {
+    if (isThinkingStreamActive || isClosingLogs) return;
+    setInlineCharacterError("");
+    setIsInlineCharacterCreatorOpen((prev) => !prev);
+  }, [isThinkingStreamActive, isClosingLogs]);
+
+  const handleCreateCharacterInlineAndContinue = useCallback(async () => {
+    if (isThinkingStreamActive || isClosingLogs || isCreatingInlineCharacter) return;
+
+    const name = inlineCharacterName.trim();
+    const description = inlineCharacterDescription.trim();
+    const role = inlineCharacterRole.trim();
+    const resolvedDescription = description || `${name} is a kid-safe story character with clear visual identity.`;
+    if (!name) {
+      setInlineCharacterError("Add character name to continue.");
+      return;
+    }
+
+    const storyUserMessage = messages.find(
+      (message) => message.id === activeStoryMessageId && message.role === "user",
+    );
+    const storyPrompt = (storyUserMessage?.basePrompt || storyUserMessage?.content || "").trim();
+    const inlineCreationPrelude: ThinkingStep[] = [];
+    const appendInlineCreationStep = (
+      title: string,
+      detail: string,
+      data?: Record<string, unknown>,
+      stageKey?: string,
+    ) => {
+      inlineCreationPrelude.push({
+        title,
+        detail,
+        data,
+        stageKey,
+      });
+    };
+
+    setIsCreatingInlineCharacter(true);
+    setInlineCharacterError("");
+    appendInlineCreationStep(
+      "Character request prepared",
+      "Validated inline character fields and assembled CrewAI A2A payload.",
+      {
+        character_name: name,
+        has_uploaded_reference: Boolean(inlineCharacterImageData),
+      },
+      "character_request_prepared",
+    );
+
+    try {
+      const inputReferences: Array<{ image_data: string; description: string; notes: string }> = [];
+      if (inlineCharacterImageData) {
+        inputReferences.push({
+          image_data: inlineCharacterImageData,
+          description: `User uploaded canonical reference for ${name}.`,
+          notes: "Preserve this identity exactly across generated character assets and story scenes.",
+        });
+      }
+
+      const requestPayload = {
+        user_prompt: buildInlineCharacterPrompt({
+          name,
+          role,
+          description: resolvedDescription,
+          storyPrompt,
+        }),
+        world_references: [],
+        character_drawings: inputReferences,
+      };
+
+      const job = await createJob({
+        type: "character",
+        title: name,
+        user_prompt: requestPayload.user_prompt,
+        input_payload: {
+          name,
+          role,
+          source: "chat-inline-creator",
+          has_uploaded_reference: Boolean(inlineCharacterImageData),
+          description: resolvedDescription,
+        },
+        triggered_by: "chat-inline-character-creator",
+        engine: "a2a-crew-ai-character-maker",
+      });
+      const jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
+      appendInlineCreationStep(
+        "Character job created",
+        `Tracking character generation under job ${job.id}.`,
+        {
+          job_id: job.id,
+          engine: "a2a-crew-ai-character-maker",
+        },
+        "character_job_created",
+      );
+
+      appendInlineCreationStep(
+        "Character generation dispatch",
+        "Sending create request to main orchestrator -> CrewAI A2A character backend.",
+        {
+          target: "main-maf-chat",
+          backend: "a2a-crew-ai-character-maker",
+        },
+        "character_generation_dispatch",
+      );
+      const response = await fetch(`/api/character-test?target=main${jobIdParam}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
+
+      const responseText = await response.text();
+      const parsedResponse: unknown = responseText.trim()
+        ? (() => {
+            try {
+              return JSON.parse(responseText) as unknown;
+            } catch {
+              return { raw: responseText };
+            }
+          })()
+        : null;
+
+      if (!response.ok) {
+        const detail = extractErrorDetail(parsedResponse);
+        appendInlineCreationStep(
+          "Character generation failed",
+          detail || `Character backend returned status ${response.status}.`,
+          {
+            status_code: response.status,
+            detail: detail || null,
+          },
+          "character_generation_failed",
+        );
+        throw new Error(
+          detail
+            ? `Character generation failed: ${detail}`
+            : `Character generation failed with status ${response.status}.`,
+        );
+      }
+
+      appendInlineCreationStep(
+        "Character generation complete",
+        "CrewAI A2A character backend returned canonical character output.",
+        undefined,
+        "character_generation_complete",
+      );
+
+      const resolvedJob = await fetchJob(job.id);
+      if (!resolvedJob || resolvedJob.type !== "character") {
+        throw new Error("Character was generated but could not be loaded from Azure storage.");
+      }
+
+      const selectedOption = jobToStoryCharacterOption(resolvedJob);
+      if (!selectedOption) {
+        throw new Error("Character was generated but could not be loaded into chat selection.");
+      }
+
+      appendInlineCreationStep(
+        "Character saved to storage",
+        `Saved ${name} to Azure character storage under job ${resolvedJob.id}.`,
+        {
+          character_job_id: resolvedJob.id,
+          reference_count: selectedOption.referenceDrawings.length,
+        },
+        "character_saved_to_azure",
+      );
+
+      const selectedSelection: CharacterSelection = {
+        type: "existing",
+        id: selectedOption.id,
+        source: selectedOption.source,
+        jobId: selectedOption.jobId,
+        name: selectedOption.name,
+        avatar: selectedOption.avatar,
+        description: selectedOption.description,
+        referenceImageUrls: selectedOption.referenceDrawings
+          .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
+          .filter((value) => Boolean(value)),
+      };
+
+      setPendingUseAiStoryCharacter(false);
+      setPendingStoryCharacterId(selectedOption.id);
+      setActiveStoryCharacterId(selectedOption.id);
+      applyActiveStoryCharacterSelection(selectedSelection);
+      setHasActiveStoryCharacterChoice(true);
+      setIsInlineCharacterCreatorOpen(false);
+      setInlineCharacterName("");
+      setInlineCharacterRole("");
+      setInlineCharacterDescription("");
+      setInlineCharacterImageData("");
+      setInlineCharacterImageName("");
+      setInlineCharacterError("");
+      startThinkingStream();
+
+      if (storyPrompt) {
+        void requestStorybookAssistantReply(
+          storyPrompt,
+          selectedSelection,
+          selectedOption,
+          inlineCreationPrelude,
+        );
+      }
+    } catch (error) {
+      setInlineCharacterError(
+        error instanceof Error ? error.message : "Could not create character in chat.",
+      );
+    } finally {
+      setIsCreatingInlineCharacter(false);
+    }
+  }, [
+    isThinkingStreamActive,
+    isClosingLogs,
+    isCreatingInlineCharacter,
+    inlineCharacterName,
+    inlineCharacterDescription,
+    inlineCharacterRole,
+    inlineCharacterImageData,
+    messages,
+    activeStoryMessageId,
+    applyActiveStoryCharacterSelection,
+    startThinkingStream,
+    requestStorybookAssistantReply,
+  ]);
+
+  const handleInlineCharacterImageChange = useCallback(async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setInlineCharacterError("Please upload an image file for character reference.");
+      return;
+    }
+    try {
+      const imageData = await fileToDataUrl(file);
+      setInlineCharacterImageData(imageData);
+      setInlineCharacterImageName(file.name);
+      setInlineCharacterError("");
+    } catch (error) {
+      setInlineCharacterError(error instanceof Error ? error.message : "Could not read selected image.");
+    } finally {
+      event.currentTarget.value = "";
+    }
+  }, []);
+
+  const handleRemoveInlineCharacterImage = useCallback(() => {
+    setInlineCharacterImageData("");
+    setInlineCharacterImageName("");
+    setInlineCharacterError("");
+  }, []);
+
+  const handleConfirmStoryCharacterChoice = useCallback(() => {
+    if (isThinkingStreamActive || isClosingLogs) return;
+    const storyUserMessage = messages.find(
+      (message) => message.id === activeStoryMessageId && message.role === "user",
+    );
+    const storyPrompt = (storyUserMessage?.basePrompt || storyUserMessage?.content || "").trim();
+    if (!storyPrompt) return;
+
+    if (pendingUseAiStoryCharacter) {
+      handleUseAiStoryCharacter();
+      void requestStorybookAssistantReply(storyPrompt, null, null);
+      return;
+    }
+    if (pendingStoryCharacterId) {
+      const selectedOption = storyCharacterOptions.find((character) => character.id === pendingStoryCharacterId) ?? null;
+      handleSelectStoryCharacter(pendingStoryCharacterId);
+      const selectedSelection: CharacterSelection | null = selectedOption
+        ? {
+            type: "existing",
+            id: selectedOption.id,
+            source: selectedOption.source,
+            jobId: selectedOption.jobId,
+            name: selectedOption.name,
+            avatar: selectedOption.avatar,
+            description: selectedOption.description,
+            referenceImageUrls: selectedOption.referenceDrawings
+              .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
+              .filter((value) => Boolean(value)),
+          }
+        : null;
+      void requestStorybookAssistantReply(storyPrompt, selectedSelection, selectedOption);
+    }
+  }, [
+    isThinkingStreamActive,
+    isClosingLogs,
+    messages,
+    activeStoryMessageId,
+    pendingUseAiStoryCharacter,
+    pendingStoryCharacterId,
+    storyCharacterOptions,
+    handleUseAiStoryCharacter,
+    handleSelectStoryCharacter,
+    requestStorybookAssistantReply,
+  ]);
+
   const handleSend = useCallback((payload: PromptSendPayload) => {
     const trimmed = payload.message.trim();
     if (!trimmed) return;
@@ -1159,6 +2379,7 @@ export default function ChatPage() {
       },
     ]);
     setIsAwaitingBackendReply(false);
+    setIsAwaitingStoryReply(false);
 
     if (mode === "story") {
       setActiveStoryMessageId(userMessageId);
@@ -1174,6 +2395,7 @@ export default function ChatPage() {
       setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
       setHasActiveVideoTypeChoice(false);
+      setIsAwaitingStoryReply(false);
       activeStoryCharacterSelectionRef.current = null;
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
@@ -1191,6 +2413,7 @@ export default function ChatPage() {
       setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
       setHasActiveVideoTypeChoice(false);
+      setIsAwaitingStoryReply(false);
       activeStoryCharacterSelectionRef.current = null;
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
@@ -1208,6 +2431,7 @@ export default function ChatPage() {
       setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
       setHasActiveVideoTypeChoice(false);
+      setIsAwaitingStoryReply(false);
       activeStoryCharacterSelectionRef.current = null;
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
@@ -1227,6 +2451,20 @@ export default function ChatPage() {
 
   const isEmpty = messages.length === 0;
   const groups = groupMessages(messages);
+  const isStoryProcessLocked =
+    isCreatingInlineCharacter
+    || isAwaitingStoryReply
+    || (isThinkingStreamActive && activeRunMode === "story")
+    || isClosingLogs;
+  const activeInFlightStageLabel = useMemo(() => {
+    if (!isThinkingStreamActive) return "";
+    const latestStep = activeThinkingSteps[activeThinkingSteps.length - 1];
+    if (!latestStep) return "in_progress";
+    const rawStage = (latestStep.stageKey || "").trim();
+    if (rawStage) return rawStage;
+    const fallbackTitle = (latestStep.title || "").trim().replace(/\s+/g, "_").toLowerCase();
+    return fallbackTitle || "in_progress";
+  }, [isThinkingStreamActive, activeThinkingSteps]);
 
   return (
     <div
@@ -1320,6 +2558,7 @@ export default function ChatPage() {
             transition={{ duration: 0.3 }}
             className={styles.chatRoot}
           >
+            {isStoryProcessLocked && <div className={styles.storyInteractionLock} />}
             <div className={styles.chatScroller} ref={scrollerRef}>
               <div className={styles.chatScrollInner}>
 
@@ -1443,8 +2682,8 @@ export default function ChatPage() {
                           const isFirst = mi === 0;
                           const isLast = mi === group.messages.length - 1;
 
-                          // Story mode: embed the full story book + action row
-                          if (msg.role === "assistant" && msg.mode === "story") {
+                          // Story mode: embed the generated story book + action row
+                          if (msg.role === "assistant" && msg.mode === "story" && msg.storyBook) {
                             return (
                               <motion.div
                                 key={msg.id}
@@ -1456,22 +2695,36 @@ export default function ChatPage() {
                                 {/* Full embedded story book */}
                                 <div className={styles.storyResultBook}>
                                   <StoryBook
-                                    title={MOCK_STORY.title}
-                                    ageBand={MOCK_STORY.ageBand}
-                                    pages={MOCK_STORY_PAGES}
-                                    cover={MOCK_STORY.cover}
+                                    title={msg.storyBook.title}
+                                    ageBand={msg.storyBook.ageBand}
+                                    pages={msg.storyBook.pages}
+                                    cover={msg.storyBook.cover}
                                   />
                                 </div>
 
                                 {/* Extra actions */}
                                 <div className={styles.storyResultActions}>
-                                  <button type="button" className={styles.storyResultRegenerateBtn}>
+                                  <button
+                                    type="button"
+                                    className={styles.storyResultRegenerateBtn}
+                                    onClick={() => {
+                                      setComposerMode("story");
+                                      setShouldAutoScroll(true);
+                                      scrollToBottom("smooth", true);
+                                    }}
+                                  >
                                     <RotateCw size={12} strokeWidth={2.5} className={styles.storyResultRegenerateIcon} />
                                     Regenerate
                                   </button>
-                                  <button type="button" className={styles.storyResultActionBtn}>
-                                    Share
-                                  </button>
+                                  {msg.storyJobId ? (
+                                    <Link href={`/dashboard/jobs/${msg.storyJobId}`} className={styles.storyResultActionBtn}>
+                                      Open detailed logs
+                                    </Link>
+                                  ) : (
+                                    <button type="button" className={styles.storyResultActionBtn}>
+                                      Share
+                                    </button>
+                                  )}
                                 </div>
                               </motion.div>
                             );
@@ -1486,7 +2739,11 @@ export default function ChatPage() {
                                   : `${styles.bubbleUser} ${isFirst ? styles.bubbleUserFirst : ""} ${isLast ? styles.bubbleUserLast : ""}`
                               }`}
                             >
-                              <div>{msg.content}</div>
+                              <div>
+                                {msg.role === "assistant"
+                                  ? renderAssistantMessageContent(msg.content)
+                                  : msg.content}
+                              </div>
                               {msg.role === "assistant" && (msg.references?.length ?? 0) > 0 ? (
                                 <div className={styles.referenceSection}>
                                   {/* Header — click to toggle full list */}
@@ -1653,7 +2910,7 @@ export default function ChatPage() {
                                   className={styles.dreamingCarouselArrow}
                                   aria-label="Scroll left"
                                   tabIndex={-1}
-                                  disabled={isThinkingStreamActive || isClosingLogs}
+                                  disabled={isStoryProcessLocked}
                                 >
                                   <ChevronLeft size={12} strokeWidth={2.5} />
                                 </button>
@@ -1672,7 +2929,7 @@ export default function ChatPage() {
                                       }`}
                                       data-active={aiActive || undefined}
                                       aria-pressed={pendingUseAiStoryCharacter}
-                                      disabled={isThinkingStreamActive || isClosingLogs}
+                                      disabled={isStoryProcessLocked}
                                     >
                                       <div className={styles.dreamingAiCardInner}>
                                         <Sparkles size={15} />
@@ -1686,7 +2943,7 @@ export default function ChatPage() {
                                   );
                                 })()}
 
-                                {STORY_CHARACTER_OPTIONS.map((char) => {
+                                {storyCharacterOptions.map((char) => {
                                   const active = isThinkingStreamActive
                                     ? activeStoryCharacterSelection?.type === "existing" &&
                                       activeStoryCharacterId === char.id
@@ -1701,7 +2958,7 @@ export default function ChatPage() {
                                       }`}
                                       data-active={active || undefined}
                                       aria-pressed={active}
-                                      disabled={isThinkingStreamActive || isClosingLogs}
+                                      disabled={isStoryProcessLocked}
                                     >
                                       {/* eslint-disable-next-line @next/next/no-img-element */}
                                       <img src={char.avatar} alt={char.name} loading="lazy" />
@@ -1715,6 +2972,11 @@ export default function ChatPage() {
                                     </button>
                                   );
                                 })}
+                                {!isLoadingStoryCharacters && !isLoadingQueryStoryCharacter && storyCharacterOptions.length === 0 && (
+                                  <div className={styles.dreamingCharacterEmpty}>
+                                    No saved characters yet. Create one to reuse it here.
+                                  </div>
+                                )}
                                 </div>
                                 <button
                                   type="button"
@@ -1722,7 +2984,7 @@ export default function ChatPage() {
                                   className={styles.dreamingCarouselArrow}
                                   aria-label="Scroll right"
                                   tabIndex={-1}
-                                  disabled={isThinkingStreamActive || isClosingLogs}
+                                  disabled={isStoryProcessLocked}
                                 >
                                   <ChevronRight size={12} strokeWidth={2.5} />
                                 </button>
@@ -1732,7 +2994,7 @@ export default function ChatPage() {
                                   type="button"
                                   onClick={handleConfirmStoryCharacterChoice}
                                   className={styles.dreamingCharacterPrimaryButton}
-                                  disabled={!hasPendingStoryChoice || isThinkingStreamActive || isClosingLogs}
+                                  disabled={!hasPendingStoryChoice || isStoryProcessLocked}
                                 >
                                   {pendingUseAiStoryCharacter
                                     ? "Continue with AI"
@@ -1740,20 +3002,128 @@ export default function ChatPage() {
                                       ? `Continue with ${pendingStoryCharacter.name}`
                                       : "Pick a character to continue"}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={handleToggleInlineCharacterCreator}
+                                  className={styles.dreamingCharacterSecondaryButton}
+                                  disabled={isStoryProcessLocked}
+                                >
+                                  {isInlineCharacterCreatorOpen ? "Close creator" : "+ Create in chat"}
+                                </button>
                                 <Link
                                   href="/dashboard/characters/new-character"
                                   className={styles.dreamingCharacterSecondaryButton}
+                                  onClick={(event) => {
+                                    if (!isStoryProcessLocked) return;
+                                    event.preventDefault();
+                                  }}
                                 >
-                                  + Create character
+                                  Open full creator
                                 </Link>
                               </div>
+                              {isInlineCharacterCreatorOpen && (
+                                <div className={styles.inlineCharacterCreatorPanel}>
+                                  <p className={styles.inlineCharacterCreatorTitle}>
+                                    Create a new character and continue in one go
+                                  </p>
+                                  <div className={styles.inlineCharacterCreatorGrid}>
+                                    <input
+                                      type="text"
+                                      value={inlineCharacterName}
+                                      onChange={(event) => setInlineCharacterName(event.target.value)}
+                                      placeholder="Character name"
+                                      className={styles.inlineCharacterCreatorInput}
+                                      disabled={isStoryProcessLocked}
+                                    />
+                                    <input
+                                      type="text"
+                                      value={inlineCharacterRole}
+                                      onChange={(event) => setInlineCharacterRole(event.target.value)}
+                                      placeholder="Role (optional)"
+                                      className={styles.inlineCharacterCreatorInput}
+                                      disabled={isStoryProcessLocked}
+                                    />
+                                    <textarea
+                                      value={inlineCharacterDescription}
+                                      onChange={(event) => setInlineCharacterDescription(event.target.value)}
+                                      placeholder="Describe the character appearance, personality, and style."
+                                      className={styles.inlineCharacterCreatorTextarea}
+                                      disabled={isStoryProcessLocked}
+                                      rows={3}
+                                    />
+                                    <div className={styles.inlineCharacterCreatorUploadRow}>
+                                      <label className={styles.inlineCharacterCreatorUploadLabel}>
+                                        Upload character image
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          onChange={handleInlineCharacterImageChange}
+                                          className={styles.inlineCharacterCreatorUploadInput}
+                                          disabled={isStoryProcessLocked}
+                                        />
+                                      </label>
+                                      {inlineCharacterImageData ? (
+                                        <div className={styles.inlineCharacterCreatorPreviewWrap}>
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={inlineCharacterImageData}
+                                            alt={inlineCharacterImageName || "Uploaded character reference"}
+                                            className={styles.inlineCharacterCreatorPreviewImage}
+                                          />
+                                          <span className={styles.inlineCharacterCreatorPreviewName}>
+                                            {inlineCharacterImageName || "Reference image selected"}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={handleRemoveInlineCharacterImage}
+                                            className={styles.inlineCharacterCreatorRemoveUpload}
+                                            disabled={isStoryProcessLocked}
+                                          >
+                                            Remove
+                                          </button>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className={styles.inlineCharacterCreatorActions}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsInlineCharacterCreatorOpen(false);
+                                        setInlineCharacterImageData("");
+                                        setInlineCharacterImageName("");
+                                        setInlineCharacterError("");
+                                      }}
+                                      className={styles.inlineCharacterCreatorCancel}
+                                      disabled={isStoryProcessLocked}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleCreateCharacterInlineAndContinue}
+                                      className={styles.inlineCharacterCreatorConfirm}
+                                      disabled={isStoryProcessLocked}
+                                    >
+                                      {isCreatingInlineCharacter ? "Creating character..." : "Create & Continue"}
+                                    </button>
+                                  </div>
+                                  {inlineCharacterError && (
+                                    <p className={styles.inlineCharacterCreatorError}>{inlineCharacterError}</p>
+                                  )}
+                                </div>
+                              )}
                               <p className={styles.dreamingCharacterStatus}>
                                 {!hasActiveStoryCharacterChoice
                                   ? pendingUseAiStoryCharacter
                                     ? "AI creativity selected — tap Continue."
                                     : pendingStoryCharacter
                                       ? `${pendingStoryCharacter.name} selected — tap Continue.`
-                                      : "Scroll to pick a character, or let AI decide."
+                                      : (isLoadingStoryCharacters || isLoadingQueryStoryCharacter)
+                                        ? "Loading your saved characters..."
+                                        : storyCharacterOptions.length === 0
+                                          ? "No saved characters yet. Create one or let AI decide."
+                                          : "Scroll to pick a character, or let AI decide."
                                   : activeStoryCharacterSelection?.type === "existing" && activeStoryCharacter
                                     ? `${activeStoryCharacter.name} locked in.`
                                     : "AI creativity locked in."}
@@ -1947,11 +3317,7 @@ export default function ChatPage() {
                             </div>
                             {visibleSteps >= activeThinkingSteps.length && (
                               <span className={styles.dreamingFinalizingText}>
-                                {activeRunMode === "story"
-                                  ? "Finalizing the story..."
-                                  : activeRunMode === "video"
-                                    ? "Finalizing the video..."
-                                    : "Finalizing the response..."}
+                                {activeInFlightStageLabel || "in_progress"}
                               </span>
                             )}
                           </div>

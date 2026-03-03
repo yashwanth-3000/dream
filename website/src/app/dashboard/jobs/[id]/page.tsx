@@ -299,7 +299,7 @@ export default function DashboardJobDetailPage() {
     | undefined;
 
   // Story-specific data
-  type RightPage = string | { page_number?: number; chapter?: string; text?: string };
+  type RightPage = string | { page_number?: number; chapter?: string; text?: string; audio_url?: string };
   const story = resultPayload.story as
     | {
         title?: string;
@@ -326,7 +326,7 @@ export default function DashboardJobDetailPage() {
   const spreads = (resultPayload.spreads ?? []) as Array<{
     spread_index?: number;
     left?: { kind?: string; image_url?: string; title?: string; chapter?: string; text?: string };
-    right?: { kind?: string; image_url?: string; title?: string; chapter?: string; text?: string };
+    right?: { kind?: string; image_url?: string; title?: string; chapter?: string; text?: string; audio_url?: string };
   }>;
 
   // Common data
@@ -377,7 +377,7 @@ export default function DashboardJobDetailPage() {
     const rightPageMap = new Map(
       rightPages
         .filter(
-          (p): p is { page_number: number; chapter?: string; text?: string } =>
+          (p): p is { page_number: number; chapter?: string; text?: string; audio_url?: string } =>
             typeof p === "object" &&
             p !== null &&
             typeof (p as Record<string, unknown>).page_number === "number"
@@ -419,7 +419,11 @@ export default function DashboardJobDetailPage() {
         rightPage?.chapter ??
         (typeof entry === "object" ? (entry as { chapter?: string })?.chapter : undefined) ??
         spread?.right?.chapter;
-      pages.push({ chapter: pageChapter, text: pageText });
+      const pageAudioUrl =
+        rightPage?.audio_url ??
+        (typeof entry === "object" ? (entry as { audio_url?: string })?.audio_url : undefined) ??
+        spread?.right?.audio_url;
+      pages.push({ chapter: pageChapter, text: pageText, audioUrl: pageAudioUrl });
     }
 
     if (story.end_page_text) {
@@ -949,7 +953,7 @@ export default function DashboardJobDetailPage() {
                     <div className="min-w-0 flex-1 space-y-3">
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>
-                          {backstory?.name ? `${backstory.name} Render` : displayImages[0].label}
+                          {displayImages[0].label}
                         </p>
                         <a
                           href={displayImages[0].url}

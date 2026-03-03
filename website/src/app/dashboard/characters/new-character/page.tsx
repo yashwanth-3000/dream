@@ -35,9 +35,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { appendStoredCharacter } from "@/lib/custom-characters";
 import { createJob } from "@/lib/jobs";
-import { dashboardCharacters } from "@/lib/dashboard-data";
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
@@ -70,7 +68,6 @@ type DrawingMode = "draw" | "erase";
 /* ------------------------------------------------------------------ */
 
 const MAX_UPLOADS_PER_BUCKET = 8;
-const FALLBACK_AVATAR = dashboardCharacters[0]?.avatar ?? "";
 const CHARACTER_API_ROUTE = "/api/character-test?target=main";
 
 const CANVAS_COLORS = [
@@ -118,15 +115,6 @@ function cleanText(value: string) {
 
 function hasAnyValue(entry: Record<string, string | undefined>) {
   return Object.values(entry).some(Boolean);
-}
-
-function unwrapWorkflowPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") return payload;
-  const backendResponse = (payload as { backend_response?: unknown }).backend_response;
-  if (backendResponse && typeof backendResponse === "object") {
-    return backendResponse;
-  }
-  return payload;
 }
 
 function extractErrorDetail(payload: unknown) {
@@ -864,18 +852,15 @@ export default function DashboardNewCharacterPage() {
         character_drawings: drawingsPayload,
       };
 
-      let jobIdParam = "";
-      try {
-        const job = await createJob({
-          type: "character",
-          title: name || "New Character",
-          user_prompt: buildUserPrompt(draft, name, description),
-          input_payload: { name, role: draft.role, ageBand: draft.ageBand, mood: draft.mood },
-          triggered_by: "character-builder",
-          engine: "a2a-crew-ai-character-maker",
-        });
-        jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
-      } catch { /* job tracking is best-effort */ }
+      const job = await createJob({
+        type: "character",
+        title: name || "New Character",
+        user_prompt: buildUserPrompt(draft, name, description),
+        input_payload: { name, role: draft.role, ageBand: draft.ageBand, mood: draft.mood },
+        triggered_by: "character-builder",
+        engine: "a2a-crew-ai-character-maker",
+      });
+      const jobIdParam = `&job_id=${encodeURIComponent(job.id)}`;
 
       const response = await fetch(`${CHARACTER_API_ROUTE}${jobIdParam}`, {
         method: "POST",
@@ -902,37 +887,6 @@ export default function DashboardNewCharacterPage() {
             : `Character generation failed with status ${response.status}.`
         );
       }
-
-      const workflowPayload = unwrapWorkflowPayload(parsedResponse);
-      const responseImage =
-        workflowPayload && typeof workflowPayload === "object"
-          ? (workflowPayload as { generated_images?: string[] }).generated_images?.[0]
-          : undefined;
-      const backstory =
-        workflowPayload && typeof workflowPayload === "object"
-          ? (workflowPayload as {
-              backstory?: { narrative_backstory?: string; archetype?: string; origin?: string };
-            }).backstory
-          : undefined;
-
-      const avatarSource =
-        draft.drawings[0]?.file ?? draft.references[0]?.file ?? null;
-      const fallbackAvatar = avatarSource
-        ? await fileToDataUrl(avatarSource)
-        : FALLBACK_AVATAR;
-      const avatar = responseImage || fallbackAvatar;
-
-      appendStoredCharacter({
-        id: makeLocalId("char_user"),
-        name,
-        role: draft.role.trim() || backstory?.archetype || "Story Companion",
-        ageBand: draft.ageBand || "5-8",
-        mood: draft.mood.trim() || "Curious and kind",
-        avatar,
-        description: backstory?.narrative_backstory || description,
-        visualNotes: draft.visualNotes.trim(),
-        createdAt: new Date().toISOString(),
-      });
 
       revokeAssets(draft.drawings);
       revokeAssets(draft.references);

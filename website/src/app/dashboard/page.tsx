@@ -67,7 +67,7 @@ export default function DashboardOverviewPage() {
     let active = true;
 
     async function load() {
-      const data = await fetchJobs();
+      const data = await fetchJobs({ limit: 20, summary: true });
       if (!active) return;
       setJobs(data);
     }

@@ -58,11 +58,13 @@ function getAgeBand(job: Job): string {
 }
 
 function getPageCount(job: Job): number {
+  if (job.result_payload && job.result_payload._summary) return 0;
   const story = job.result_payload?.story as { right_pages?: unknown[] } | undefined;
   return (story?.right_pages?.length ?? 0) + 2; // title + end
 }
 
 function getSpreadsCount(job: Job): number {
+  if (job.result_payload && job.result_payload._summary) return 0;
   const spreads = job.result_payload?.spreads as unknown[] | undefined;
   return spreads?.length ?? 0;
 }
@@ -100,7 +102,7 @@ export default function DashboardStoriesPage() {
 
   const loadStories = useCallback(async () => {
     try {
-      const data = await fetchJobs({ type: "story" });
+      const data = await fetchJobs({ type: "story", limit: 60, summary: true });
       setJobs(data);
     } finally {
       setLoading(false);
@@ -292,7 +294,10 @@ export default function DashboardStoriesPage() {
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="space-y-0.5 text-sm" style={{ color: "#9a7a65" }}>
-                        <p>{getPageCount(job)} pages · {getSpreadsCount(job)} spreads</p>
+                        <p>
+                          {getPageCount(job) > 0 ? `${getPageCount(job)} pages` : "Pages —"} ·{" "}
+                          {getSpreadsCount(job) > 0 ? `${getSpreadsCount(job)} spreads` : "Spreads —"}
+                        </p>
                         <p className="text-[11px]">Ages {getAgeBand(job)} · {formatRelativeTime(job.created_at)}</p>
                       </div>
                     </td>
@@ -404,7 +409,10 @@ export default function DashboardStoriesPage() {
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Details</p>
-                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>{getPageCount(job)} pages · {getSpreadsCount(job)} spreads</p>
+                    <p className="mt-1 font-medium" style={{ color: "#2b180a" }}>
+                      {getPageCount(job) > 0 ? `${getPageCount(job)} pages` : "Pages —"} ·{" "}
+                      {getSpreadsCount(job) > 0 ? `${getSpreadsCount(job)} spreads` : "Spreads —"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#9a7a65" }}>Created</p>
