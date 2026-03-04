@@ -11,6 +11,7 @@ SelectedAction = Literal["create", "regenerate"]
 SelectedBy = Literal["agent", "explicit_mode", "rule_fallback"]
 ChatRole = Literal["user", "assistant"]
 ChatMode = Literal["normal", "search"]
+QuizDifficulty = Literal["easy", "medium", "hard"]
 
 
 class WorldReference(BaseModel):
@@ -99,6 +100,21 @@ class StoryBookOrchestrationResponse(BaseModel):
     backend_response: dict[str, Any]
 
 
+class QuizOrchestrationRequest(BaseModel):
+    user_prompt: str = Field(min_length=1, description="Primary quiz topic or context")
+    story_title: str | None = None
+    story_text: str | None = None
+    age_band: str | None = None
+    difficulty: QuizDifficulty | None = None
+    question_count: int = Field(default=5, ge=1, le=10)
+
+
+class QuizOrchestrationResponse(BaseModel):
+    backend_endpoint: str
+    backend_status_code: int
+    backend_response: dict[str, Any]
+
+
 class ChatMessage(BaseModel):
     role: ChatRole
     content: str = Field(min_length=1, max_length=4000)
@@ -141,7 +157,7 @@ class ServiceHealthResponse(BaseModel):
 # Job system models
 # ---------------------------------------------------------------------------
 
-JobType = Literal["character", "story", "video"]
+JobType = Literal["character", "story", "video", "quiz"]
 JobStatus = Literal["queued", "processing", "completed", "failed"]
 
 

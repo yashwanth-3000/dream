@@ -3,7 +3,7 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, BookOpenText, Clapperboard, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
+import { ArrowUp, BookOpenText, Brain, Clapperboard, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Utility function for className merging
@@ -326,7 +326,7 @@ const PromptInputAction: React.FC<PromptInputActionProps> = ({ tooltip, children
 };
 
 // ── Modes ─────────────────────────────────────────────────────────────────────
-export type ModeId = "search" | "story" | "video";
+export type ModeId = "search" | "story" | "video" | "quiz";
 
 const MODE_CONFIG: Record<
   ModeId,
@@ -355,9 +355,15 @@ const MODE_CONFIG: Record<
     activeClass: "bg-violet-50 border-violet-300 text-violet-700",
     icon: Clapperboard,
   },
+  quiz: {
+    label: "Quiz",
+    description: "Generate a kids quiz with options, hints, and explanations",
+    activeClass: "bg-cyan-50 border-cyan-300 text-cyan-700",
+    icon: Brain,
+  },
 };
 
-const VISIBLE_MODES: ModeId[] = ["search", "story"];
+const VISIBLE_MODES: ModeId[] = ["search", "story", "quiz"];
 
 export interface CharacterSelection {
   type: "existing" | "create";

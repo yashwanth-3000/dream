@@ -48,15 +48,75 @@ async def init_db() -> None:
     db = await get_db()
     try:
         await db.executescript(_SCHEMA_SQL)
+        await _migrate_jobs_table_for_quiz(db)
         await db.commit()
     finally:
         await db.close()
 
 
+async def _jobs_table_supports_quiz(db: aiosqlite.Connection) -> bool:
+    cursor = await db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'"
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return False
+    create_sql = str(row["sql"] or "").lower()
+    return "'quiz'" in create_sql
+
+
+async def _migrate_jobs_table_for_quiz(db: aiosqlite.Connection) -> None:
+    if await _jobs_table_supports_quiz(db):
+        return
+
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await db.execute("DROP TABLE IF EXISTS jobs__new")
+        await db.execute(
+            """
+            CREATE TABLE jobs__new (
+                id              TEXT PRIMARY KEY,
+                type            TEXT NOT NULL CHECK(type IN ('character','story','video','quiz')),
+                status          TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','completed','failed')),
+                title           TEXT NOT NULL DEFAULT '',
+                user_prompt     TEXT NOT NULL DEFAULT '',
+                input_payload   TEXT NOT NULL DEFAULT '{}',
+                result_payload  TEXT NOT NULL DEFAULT '{}',
+                progress        REAL NOT NULL DEFAULT 0.0,
+                current_step    TEXT NOT NULL DEFAULT '',
+                error_message   TEXT NOT NULL DEFAULT '',
+                triggered_by    TEXT NOT NULL DEFAULT 'user',
+                engine          TEXT NOT NULL DEFAULT '',
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute(
+            """
+            INSERT INTO jobs__new (
+                id, type, status, title, user_prompt, input_payload, result_payload, progress,
+                current_step, error_message, triggered_by, engine, created_at, updated_at
+            )
+            SELECT
+                id, type, status, title, user_prompt, input_payload, result_payload, progress,
+                current_step, error_message, triggered_by, engine, created_at, updated_at
+            FROM jobs
+            """
+        )
+        await db.execute("DROP TABLE jobs")
+        await db.execute("ALTER TABLE jobs__new RENAME TO jobs")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_type ON jobs(type)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC)")
+    finally:
+        await db.execute("PRAGMA foreign_keys=ON")
+
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS jobs (
     id              TEXT PRIMARY KEY,
-    type            TEXT NOT NULL CHECK(type IN ('character','story','video')),
+    type            TEXT NOT NULL CHECK(type IN ('character','story','video','quiz')),
     status          TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','completed','failed')),
     title           TEXT NOT NULL DEFAULT '',
     user_prompt     TEXT NOT NULL DEFAULT '',

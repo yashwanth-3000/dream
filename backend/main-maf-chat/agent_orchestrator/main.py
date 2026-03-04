@@ -26,6 +26,8 @@ from .models import (
     JobDeleteResponse,
     JobEventResponse,
     JobResponse,
+    QuizOrchestrationRequest,
+    QuizOrchestrationResponse,
     ServiceHealthResponse,
     StoryBookOrchestrationRequest,
     StoryBookOrchestrationResponse,
@@ -106,6 +108,17 @@ def _build_story_backend_payload(payload: StoryBookOrchestrationRequest) -> dict
     }
 
 
+def _build_quiz_backend_payload(payload: QuizOrchestrationRequest) -> dict[str, object]:
+    return {
+        "user_prompt": payload.user_prompt.strip(),
+        "story_title": payload.story_title,
+        "story_text": payload.story_text,
+        "age_band": payload.age_band,
+        "difficulty": payload.difficulty,
+        "question_count": payload.question_count,
+    }
+
+
 def _parse_json_object(raw: str) -> dict[str, object] | None:
     if not raw:
         return None
@@ -117,7 +130,7 @@ def _parse_json_object(raw: str) -> dict[str, object] | None:
 
 
 def _looks_like_final_payload(payload: dict[str, object]) -> bool:
-    final_keys = {"workflow_used", "story", "spreads", "generated_images", "scene_prompts", "characters"}
+    final_keys = {"workflow_used", "story", "spreads", "generated_images", "scene_prompts", "characters", "quiz"}
     return any(key in payload for key in final_keys)
 
 
@@ -182,6 +195,10 @@ def _derive_title(result_payload: dict[str, Any], job_type: str, user_prompt: st
         story = result_payload.get("story")
         if isinstance(story, dict) and story.get("title"):
             return str(story["title"])
+    elif job_type == "quiz":
+        quiz = result_payload.get("quiz")
+        if isinstance(quiz, dict) and quiz.get("quiz_title"):
+            return str(quiz["quiz_title"])
     elif job_type == "character":
         backstory = result_payload.get("backstory")
         if isinstance(backstory, dict) and backstory.get("name"):
@@ -322,6 +339,17 @@ async def storybook_protocol_health(settings: Settings = Depends(get_settings)) 
     backend = A2ABackendClient(settings)
     try:
         result = await backend.storybook_health()
+        return {"status": "ok", "backend_endpoint": result.endpoint,
+                "backend_status_code": result.status_code, "backend_response": result.payload}
+    except A2ABackendError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/orchestrate/quiz-health")
+async def quiz_protocol_health(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    backend = A2ABackendClient(settings)
+    try:
+        result = await backend.quiz_health()
         return {"status": "ok", "backend_endpoint": result.endpoint,
                 "backend_status_code": result.status_code, "backend_response": result.payload}
     except A2ABackendError as exc:
@@ -708,6 +736,137 @@ async def orchestrate_storybook_stream(
                 )
                 if saved_character_job_ids:
                     final_payload["saved_character_job_ids"] = saved_character_job_ids
+            await jm.complete_job(job_id, final_payload, title=title)
+        elif job_id:
+            await jm.fail_job(job_id, "Stream ended without final payload.")
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson",
+        headers={"cache-control": "no-store", "x-accel-buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Quiz orchestration (with job tracking)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/orchestrate/quiz", response_model=QuizOrchestrationResponse)
+async def orchestrate_quiz(
+    payload: QuizOrchestrationRequest,
+    job_id: str | None = Query(None, alias="job_id"),
+    settings: Settings = Depends(get_settings),
+) -> QuizOrchestrationResponse:
+    backend = A2ABackendClient(settings)
+
+    if job_id:
+        await jm.start_job(job_id, step="sending_to_backend")
+
+    try:
+        backend_payload = _build_quiz_backend_payload(payload)
+        result = await backend.create_quiz(backend_payload)
+    except A2ABackendError as exc:
+        if job_id:
+            await jm.fail_job(job_id, str(exc))
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    response = QuizOrchestrationResponse(
+        backend_endpoint=result.endpoint,
+        backend_status_code=result.status_code,
+        backend_response=result.payload,
+    )
+
+    if job_id:
+        result_data = result.payload or {}
+        title = _derive_title(result_data, "quiz", payload.user_prompt)
+        await jm.complete_job(job_id, result_data, title=title)
+
+    return response
+
+
+@app.post("/api/v1/orchestrate/quiz/stream")
+async def orchestrate_quiz_stream(
+    payload: QuizOrchestrationRequest,
+    job_id: str | None = Query(None, alias="job_id"),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    backend = A2ABackendClient(settings)
+    backend_payload = _build_quiz_backend_payload(payload)
+
+    if job_id:
+        await jm.start_job(job_id, step="streaming")
+
+    async def event_stream() -> AsyncIterator[str]:
+        yield json.dumps({"type": "status", "source": "main",
+                          "message": "Main orchestrator accepted request and started stream.",
+                          **({"job_id": job_id} if job_id else {})}, ensure_ascii=True) + "\n"
+
+        if job_id:
+            await jm.update_progress(job_id, step="forwarding", message="Forwarding to quiz backend via A2A.", progress=5.0)
+
+        yield json.dumps({"type": "status", "source": "main",
+                          "message": "Forwarding request to quiz backend via A2A."}, ensure_ascii=True) + "\n"
+
+        final_payload: dict[str, Any] | None = None
+
+        try:
+            async for event in backend.stream_quiz_operation(backend_payload):
+                event_type = str(event.get("type") or "").strip().lower()
+                if event_type == "final":
+                    final_payload = event.get("payload")
+                    out = {"type": "final", "backend_endpoint": event.get("endpoint"),
+                           "backend_status_code": event.get("status_code"),
+                           "backend_response": final_payload}
+                    yield json.dumps(out, ensure_ascii=True) + "\n"
+                elif event_type == "progress":
+                    out = {"type": "progress", "source": "backend",
+                           "stage": str(event.get("stage") or "progress"),
+                           "message": str(event.get("message") or "Progress update received.")}
+                    data = event.get("data")
+                    if isinstance(data, dict):
+                        out["data"] = data
+                    yield json.dumps(out, ensure_ascii=True) + "\n"
+                    if job_id:
+                        await jm.update_progress(job_id, step=out["stage"], message=out["message"])
+                elif event_type == "status":
+                    out = {"type": "status", "source": "backend",
+                           "state": str(event.get("state") or "").strip().lower() or None,
+                           "message": str(event.get("message") or "Backend status update received.")}
+                    yield json.dumps(out, ensure_ascii=True) + "\n"
+                    if job_id:
+                        await jm.update_progress(job_id, step="backend_status", message=out["message"])
+                elif event_type == "update":
+                    raw_message = str(event.get("message") or "Backend update received.")
+                    parsed_message = _parse_json_object(raw_message)
+                    if isinstance(parsed_message, dict):
+                        progress_payload = _extract_progress_payload(parsed_message)
+                        if progress_payload is not None:
+                            yield json.dumps(progress_payload, ensure_ascii=True) + "\n"
+                            if job_id:
+                                await jm.update_progress(job_id, step=str(progress_payload.get("stage", "progress")),
+                                                         message=str(progress_payload.get("message", "")))
+                            continue
+                        if _looks_like_final_payload(parsed_message):
+                            continue
+                    yield json.dumps({"type": "update", "source": "backend", "message": raw_message}, ensure_ascii=True) + "\n"
+                else:
+                    yield json.dumps({"type": "update", "source": "backend",
+                                      "message": f"Unhandled backend event: {event_type or 'unknown'}"}, ensure_ascii=True) + "\n"
+        except A2ABackendError as exc:
+            yield json.dumps({"type": "error", "source": "main", "message": "Quiz stream failed.",
+                              "detail": str(exc)}, ensure_ascii=True) + "\n"
+            if job_id:
+                await jm.fail_job(job_id, str(exc))
+            return
+        except Exception as exc:
+            yield json.dumps({"type": "error", "source": "main", "message": "Unhandled streaming error.",
+                              "detail": str(exc)}, ensure_ascii=True) + "\n"
+            if job_id:
+                await jm.fail_job(job_id, str(exc))
+            return
+
+        if job_id and isinstance(final_payload, dict):
+            title = _derive_title(final_payload, "quiz", payload.user_prompt)
             await jm.complete_job(job_id, final_payload, title=title)
         elif job_id:
             await jm.fail_job(job_id, "Stream ended without final payload.")

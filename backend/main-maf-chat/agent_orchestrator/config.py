@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     a2a_story_rpc_path: str = "/a2a"
     a2a_story_use_protocol: bool = True
     a2a_story_create_path: str = "/api/v1/stories/create"
+    a2a_quiz_backend_base_url: str = "http://127.0.0.1:8030"
+    a2a_quiz_rpc_path: str = "/a2a"
+    a2a_quiz_use_protocol: bool = True
+    a2a_quiz_create_path: str = "/api/v1/quizzes/create"
     a2a_timeout_seconds: float = Field(default=240.0, gt=0.0)
 
     model_config = SettingsConfigDict(
@@ -57,6 +61,8 @@ class Settings(BaseSettings):
             raise ValueError("A2A-only mode: A2A_USE_PROTOCOL must be true.")
         if not self.a2a_story_use_protocol:
             raise ValueError("A2A-only mode: A2A_STORY_USE_PROTOCOL must be true.")
+        if not self.a2a_quiz_use_protocol:
+            raise ValueError("A2A-only mode: A2A_QUIZ_USE_PROTOCOL must be true.")
 
         if self.agent_provider == "openai":
             if not self.openai_api_key:
@@ -96,6 +102,14 @@ class Settings(BaseSettings):
     @property
     def a2a_story_rpc_url(self) -> str:
         return self._join_url(self.a2a_story_backend_base_url, self.a2a_story_rpc_path)
+
+    @property
+    def a2a_quiz_create_url(self) -> str:
+        return self._join_url(self.a2a_quiz_backend_base_url, self.a2a_quiz_create_path)
+
+    @property
+    def a2a_quiz_rpc_url(self) -> str:
+        return self._join_url(self.a2a_quiz_backend_base_url, self.a2a_quiz_rpc_path)
 
     @property
     def exa_mcp_tool_names(self) -> list[str]:

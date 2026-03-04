@@ -1,4 +1,4 @@
-export type JobType = "character" | "story" | "video";
+export type JobType = "character" | "story" | "video" | "quiz";
 export type JobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface JobAsset {

@@ -65,6 +65,7 @@ class A2ABackendClient:
         self._settings = settings
         self._a2a_agent: Any | None = None
         self._a2a_story_agent: Any | None = None
+        self._a2a_quiz_agent: Any | None = None
 
     async def health(self) -> dict[str, Any]:
         url = f"{self._settings.a2a_backend_base_url.rstrip('/')}/health"
@@ -86,6 +87,17 @@ class A2ABackendClient:
     async def storybook_health(self) -> BackendCallResult:
         self._require_a2a_enabled(self._settings.a2a_story_use_protocol, "A2A_STORY_USE_PROTOCOL")
         return await self._invoke_story_via_a2a(
+            operation="healthcheck",
+            payload={"operation": "healthcheck"},
+        )
+
+    async def create_quiz(self, payload: dict[str, Any]) -> BackendCallResult:
+        self._require_a2a_enabled(self._settings.a2a_quiz_use_protocol, "A2A_QUIZ_USE_PROTOCOL")
+        return await self._invoke_quiz_via_a2a_via_stream(operation="quiz_create", payload=payload)
+
+    async def quiz_health(self) -> BackendCallResult:
+        self._require_a2a_enabled(self._settings.a2a_quiz_use_protocol, "A2A_QUIZ_USE_PROTOCOL")
+        return await self._invoke_quiz_via_a2a(
             operation="healthcheck",
             payload={"operation": "healthcheck"},
         )
@@ -112,6 +124,14 @@ class A2ABackendClient:
     ) -> AsyncIterator[dict[str, Any]]:
         self._require_a2a_enabled(self._settings.a2a_story_use_protocol, "A2A_STORY_USE_PROTOCOL")
         async for event in self._stream_story_via_a2a(operation="story_create", payload=payload):
+            yield event
+
+    async def stream_quiz_operation(
+        self,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        self._require_a2a_enabled(self._settings.a2a_quiz_use_protocol, "A2A_QUIZ_USE_PROTOCOL")
+        async for event in self._stream_quiz_via_a2a(operation="quiz_create", payload=payload):
             yield event
 
     async def _invoke_via_a2a(self, operation: str, payload: dict[str, Any]) -> BackendCallResult:
@@ -206,6 +226,73 @@ class A2ABackendClient:
             status_code=200,
             payload=parsed_payload,
         )
+
+    async def _invoke_quiz_via_a2a(self, operation: str, payload: dict[str, Any]) -> BackendCallResult:
+        if A2A_IMPORT_ERROR is not None or AFMessage is None or A2AAgent is None:
+            raise A2ABackendError(
+                f"A2A client import failed: {A2A_IMPORT_ERROR}. semconv_patched={PATCHED_SEMCONV_ATTRS}"
+            )
+
+        if self._a2a_quiz_agent is None:
+            self._a2a_quiz_agent = A2AAgent(
+                url=self._settings.a2a_quiz_rpc_url,
+                timeout=self._settings.a2a_timeout_seconds,
+                name="dream-quiz-a2a-client",
+            )
+
+        summary_text = (
+            str(payload.get("user_prompt") or "").strip()
+            or f"{operation} quiz request"
+        )
+
+        request_message = AFMessage(
+            role="user",
+            text=summary_text,
+            additional_properties={
+                "operation": operation,
+                "payload": payload,
+            },
+        )
+
+        try:
+            response = await self._a2a_quiz_agent.run(request_message)
+        except Exception as exc:
+            raise A2ABackendError(
+                f"A2A quiz protocol call failed for {self._settings.a2a_quiz_rpc_url}: {exc}"
+            ) from exc
+
+        parsed_payload = self._extract_json_payload_from_agent_response(response)
+        if parsed_payload is None:
+            raise A2ABackendError(
+                "A2A quiz protocol response could not be parsed as JSON payload. "
+                f"response_text_preview={(response.text or '')[:800]}"
+            )
+
+        return BackendCallResult(
+            endpoint=self._settings.a2a_quiz_rpc_url,
+            status_code=200,
+            payload=parsed_payload,
+        )
+
+    async def _invoke_quiz_via_a2a_via_stream(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+    ) -> BackendCallResult:
+        async for event in self._stream_quiz_via_a2a(operation=operation, payload=payload):
+            if str(event.get("type") or "").strip().lower() != "final":
+                continue
+            final_payload = event.get("payload")
+            if not isinstance(final_payload, dict):
+                raise A2ABackendError(
+                    "A2A quiz stream returned a final event without a JSON object payload."
+                )
+            return BackendCallResult(
+                endpoint=str(event.get("endpoint") or self._settings.a2a_quiz_rpc_url),
+                status_code=int(event.get("status_code") or 200),
+                payload=final_payload,
+            )
+        raise A2ABackendError("A2A quiz stream ended before a final payload was received.")
 
     async def _stream_via_a2a(
         self,
@@ -463,6 +550,207 @@ class A2ABackendClient:
         yield {
             "type": "final",
             "endpoint": self._settings.a2a_story_rpc_url,
+            "status_code": 200,
+            "payload": final_payload,
+        }
+
+    async def _stream_quiz_via_a2a(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+    ) -> AsyncIterator[dict[str, Any]]:
+        if (
+            A2A_SDK_IMPORT_ERROR is not None
+            or JsonRpcTransport is None
+            or A2AMessage is None
+            or MessageSendConfiguration is None
+            or MessageSendParams is None
+            or A2APart is None
+            or A2ARole is None
+            or A2ATextPart is None
+        ):
+            raise A2ABackendError(
+                "A2A quiz streaming client import failed: "
+                f"{A2A_SDK_IMPORT_ERROR}. semconv_patched={PATCHED_SEMCONV_ATTRS}"
+            )
+
+        summary_text = (
+            str(payload.get("user_prompt") or "").strip()
+            or f"{operation} quiz request"
+        )
+
+        metadata: dict[str, Any] = {
+            "operation": operation,
+            "payload": payload,
+        }
+
+        request_message = A2AMessage(
+            role=A2ARole.user,
+            message_id=str(uuid4()),
+            metadata=metadata,
+            parts=[
+                A2APart(
+                    root=A2ATextPart(
+                        text=summary_text,
+                        metadata=metadata,
+                    )
+                )
+            ],
+        )
+        request_config = MessageSendConfiguration(
+            blocking=True,
+            accepted_output_modes=["application/json", "text/plain"],
+        )
+        request_params = MessageSendParams(
+            message=request_message,
+            configuration=request_config,
+            metadata=metadata,
+        )
+
+        final_payload: dict[str, Any] | None = None
+        last_known_state = "unknown"
+        result_artifact_parts: list[str] = []
+        result_artifact_seen = False
+
+        timeout_seconds = self._settings.a2a_timeout_seconds
+        timeout = httpx.Timeout(
+            connect=timeout_seconds,
+            read=None,
+            write=timeout_seconds,
+            pool=timeout_seconds,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as http_client:
+                transport = JsonRpcTransport(
+                    httpx_client=http_client,
+                    url=self._settings.a2a_quiz_rpc_url,
+                )
+                async for stream_event in transport.send_message_streaming(request_params):
+                    if (
+                        TaskStatusUpdateEvent is not None
+                        and isinstance(stream_event, TaskStatusUpdateEvent)
+                    ):
+                        raw_state = str(stream_event.status.state)
+                        state = raw_state.split(".")[-1].strip().lower() or raw_state
+                        last_known_state = state
+                        status_message = self._extract_status_message_text(stream_event)
+                        message = (
+                            status_message
+                            or f"A2A task state changed to {state}."
+                        )
+                        yield {
+                            "type": "status",
+                            "state": state,
+                            "message": message,
+                        }
+                        continue
+
+                    if (
+                        TaskArtifactUpdateEvent is not None
+                        and isinstance(stream_event, TaskArtifactUpdateEvent)
+                    ):
+                        artifact = stream_event.artifact
+                        artifact_name = str(artifact.name or "").strip().lower()
+                        text_parts = self._extract_text_parts_from_a2a_parts(artifact.parts)
+
+                        if artifact_name == "quiz-workflow-progress":
+                            for text_part in text_parts:
+                                progress_payload = self._parse_json_like_text(text_part)
+                                if (
+                                    isinstance(progress_payload, dict)
+                                    and str(progress_payload.get("kind") or "").lower() == "progress"
+                                ):
+                                    yield {
+                                        "type": "progress",
+                                        "stage": str(progress_payload.get("stage") or "progress"),
+                                        "message": str(progress_payload.get("message") or "Progress update."),
+                                        "data": (
+                                            progress_payload.get("data")
+                                            if isinstance(progress_payload.get("data"), dict)
+                                            else None
+                                        ),
+                                    }
+                                else:
+                                    yield {
+                                        "type": "update",
+                                        "message": text_part,
+                                    }
+                            continue
+
+                        if artifact_name == "quiz-workflow-result":
+                            result_artifact_seen = True
+                            for text_part in text_parts:
+                                result_artifact_parts.append(text_part)
+
+                            parsed_result = self._parse_json_like_text("".join(result_artifact_parts))
+                            if isinstance(parsed_result, dict):
+                                final_payload = parsed_result
+                            continue
+
+                        if artifact_name == "quiz-workflow-error":
+                            error_payload = self._parse_json_like_text("".join(text_parts))
+                            if isinstance(error_payload, dict):
+                                detail = str(error_payload.get("detail") or "Unknown error.")
+                            else:
+                                detail = " ".join(text_parts).strip() or "Unknown error."
+                            raise A2ABackendError(
+                                f"A2A quiz backend reported an error artifact: {detail}"
+                            )
+
+                        combined = " ".join(part for part in text_parts if part.strip())
+                        if combined:
+                            yield {
+                                "type": "update",
+                                "message": combined,
+                            }
+                        continue
+
+                    fallback_message = f"A2A quiz streaming update received ({type(stream_event).__name__})."
+                    yield {
+                        "type": "status",
+                        "state": last_known_state,
+                        "message": fallback_message,
+                    }
+        except Exception as exc:
+            raw_error = str(exc)
+            if (
+                "Invalid SSE response or protocol error" in raw_error
+                and "application/json" in raw_error
+            ):
+                probe_detail = ""
+                try:
+                    async with httpx.AsyncClient(timeout=timeout) as probe_http_client:
+                        probe_transport = JsonRpcTransport(
+                            httpx_client=probe_http_client,
+                            url=self._settings.a2a_quiz_rpc_url,
+                        )
+                        await probe_transport.send_message(request_params)
+                except Exception as probe_exc:  # pragma: no cover - defensive probe for clearer diagnostics
+                    probe_detail = f" JSON-RPC detail: {probe_exc}"
+
+                raise A2ABackendError(
+                    f"A2A quiz streaming call failed for {self._settings.a2a_quiz_rpc_url}: {exc}. "
+                    "The backend returned JSON instead of SSE, which usually means the request was rejected before streaming "
+                    f"(commonly payload too large).{probe_detail}"
+                ) from exc
+
+            raise A2ABackendError(
+                f"A2A quiz streaming call failed for {self._settings.a2a_quiz_rpc_url}: {exc}"
+            ) from exc
+
+        if result_artifact_seen and final_payload is None:
+            raise A2ABackendError(
+                "A2A quiz stream received result artifact but could not parse it as JSON."
+            )
+
+        if final_payload is None:
+            raise A2ABackendError(
+                "A2A quiz stream ended without a parsed final payload artifact."
+            )
+
+        yield {
+            "type": "final",
+            "endpoint": self._settings.a2a_quiz_rpc_url,
             "status_code": 200,
             "payload": final_payload,
         }

@@ -15,6 +15,7 @@ import {
   BookOpenText,
   Clapperboard,
   UserRound,
+  Brain,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -70,6 +71,11 @@ const modeConfig: Record<
     icon: UserRound,
     badgeClass: "bg-rose-100 text-rose-900 border-rose-300",
   },
+  quiz: {
+    label: "Quiz Mode",
+    icon: Brain,
+    badgeClass: "bg-sky-100 text-sky-900 border-sky-300",
+  },
 };
 
 function previewItemsForJob(job: Job) {
@@ -77,6 +83,7 @@ function previewItemsForJob(job: Job) {
     story: ["Cover", "Scene", "Image"],
     video: ["Thumbnail", "Frame", "Frame"],
     character: ["Portrait", "Style", "Turnaround"],
+    quiz: ["Question", "Option", "Hint"],
   };
   const labels = labelsByType[job.type];
   return job.assets.slice(0, 3).map((asset, idx) => ({
@@ -207,6 +214,7 @@ export default function DashboardJobsPage() {
           { value: "story", label: modeConfig.story.label },
           { value: "video", label: modeConfig.video.label },
           { value: "character", label: modeConfig.character.label },
+          { value: "quiz", label: modeConfig.quiz.label },
         ] as const).map((tab) => (
           <button
             key={tab.value}
@@ -456,7 +464,7 @@ export default function DashboardJobsPage() {
           className="rounded-2xl border-dashed p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          No jobs yet. Create your first storybook or character to get started.
+          No jobs yet. Create your first storybook, character, video, or quiz to get started.
         </div>
       )}
 

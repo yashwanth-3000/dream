@@ -1,0 +1,23 @@
+# Runtime
+APP_ENV=dev
+APP_DEBUG=true
+
+# Agent provider: openai (local) or azure
+AGENT_PROVIDER=openai
+
+# OpenAI (required)
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_TEMPERATURE=0.4
+
+# Azure OpenAI (required only when AGENT_PROVIDER=azure)
+AZURE_OPENAI_ENDPOINT=
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=
+AZURE_OPENAI_API_VERSION=preview
+
+# A2A card/rpc for this service
+A2A_PUBLIC_BASE_URL=http://127.0.0.1:8030
+A2A_RPC_PATH=/a2a
+A2A_AGENT_NAME=Dream MAF Quiz Agent
+A2A_AGENT_VERSION=0.1.0

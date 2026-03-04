@@ -1,0 +1,10 @@
+fastapi==0.133.0
+uvicorn[standard]==0.41.0
+httpx==0.28.1
+pydantic==2.12.5
+pydantic-settings==2.13.1
+openai==2.8.0
+agent-framework-core==1.0.0rc1
+agent-framework-a2a==1.0.0b260219
+a2a-sdk==0.3.5
+pytest==8.4.2

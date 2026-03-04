@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+required_vars=(
+  AZURE_SUBSCRIPTION_ID
+  AZURE_RESOURCE_GROUP
+  AZURE_LOCATION
+  AZURE_CONTAINERAPP_ENV
+  AZURE_ACR_NAME
+  AZURE_CONTAINERAPP_NAME
+  OPENAI_API_KEY
+)
+
+for var_name in "${required_vars[@]}"; do
+  if [[ -z "${!var_name:-}" ]]; then
+    echo "Missing required env var: ${var_name}" >&2
+    exit 1
+  fi
+done
+
+IMAGE_TAG="dream-quiz-a2a:$(date +%Y%m%d%H%M%S)"
+
+az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+
+ACR_LOGIN_SERVER="$(az acr show --name "${AZURE_ACR_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" --query loginServer -o tsv)"
+
+echo "Building image ${IMAGE_TAG}..."
+az acr build \
+  --registry "${AZURE_ACR_NAME}" \
+  --image "${IMAGE_TAG}" \
+  "${ROOT_DIR}" \
+  --output none
+
+ACR_USER="$(az acr credential show --name "${AZURE_ACR_NAME}" --query username -o tsv)"
+ACR_PASS="$(az acr credential show --name "${AZURE_ACR_NAME}" --query passwords[0].value -o tsv)"
+IMAGE_NAME="${ACR_LOGIN_SERVER}/${IMAGE_TAG}"
+
+if az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" >/dev/null 2>&1; then
+  az containerapp secret set \
+    --name "${AZURE_CONTAINERAPP_NAME}" \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --secrets openai-api-key="${OPENAI_API_KEY}" \
+    --output none
+
+  az containerapp update \
+    --name "${AZURE_CONTAINERAPP_NAME}" \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --image "${IMAGE_NAME}" \
+    --set-env-vars \
+      OPENAI_API_KEY=secretref:openai-api-key \
+      OPENAI_MODEL=gpt-4o-mini \
+      OPENAI_TEMPERATURE=0.4 \
+    --output none
+else
+  az containerapp create \
+    --name "${AZURE_CONTAINERAPP_NAME}" \
+    --resource-group "${AZURE_RESOURCE_GROUP}" \
+    --environment "${AZURE_CONTAINERAPP_ENV}" \
+    --image "${IMAGE_NAME}" \
+    --target-port 8080 \
+    --ingress external \
+    --registry-server "${ACR_LOGIN_SERVER}" \
+    --registry-username "${ACR_USER}" \
+    --registry-password "${ACR_PASS}" \
+    --cpu 1.0 \
+    --memory 2Gi \
+    --min-replicas 1 \
+    --max-replicas 3 \
+    --secrets openai-api-key="${OPENAI_API_KEY}" \
+    --env-vars \
+      OPENAI_API_KEY=secretref:openai-api-key \
+      OPENAI_MODEL=gpt-4o-mini \
+      OPENAI_TEMPERATURE=0.4 \
+    --output none
+fi
+
+FQDN="$(az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.configuration.ingress.fqdn -o tsv)"
+
+echo "Deployment complete"
+echo "App URL: https://${FQDN}"

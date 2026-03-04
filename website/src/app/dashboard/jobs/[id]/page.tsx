@@ -19,6 +19,7 @@ import {
   BookOpenText,
   UserRound,
   Video,
+  Brain,
   Sparkles,
   X,
 } from "lucide-react";
@@ -78,6 +79,7 @@ const modeConfig: Record<
   story: { label: "Storybook Mode", icon: BookOpenText },
   video: { label: "Legacy Video Mode", icon: Video },
   character: { label: "Character Mode", icon: UserRound },
+  quiz: { label: "Quiz Mode", icon: Brain },
 };
 
 
@@ -96,6 +98,7 @@ function formatRelativeTime(iso: string): string {
 
 function imageLabelForJobType(type: JobType, idx: number): string {
   if (type === "story") return idx === 0 ? "Cover" : `Scene ${idx}`;
+  if (type === "quiz") return idx === 0 ? "Question" : `Quiz Asset ${idx + 1}`;
   return `Image ${idx + 1}`;
 }
 

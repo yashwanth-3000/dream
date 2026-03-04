@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, Clapperboard, Gamepad2, RotateCw } from "lucide-react";
+import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, Clapperboard, Gamepad2, RotateCw, CheckCircle2 } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
 import { type StoryPage } from "@/lib/dashboard-data";
@@ -72,6 +72,36 @@ interface StoryBookMessageData {
   cover: string;
   pages: StoryPage[];
   jobId?: string;
+}
+
+interface QuizCardQuestion {
+  number: number;
+  question: string;
+  options: string[];
+  hints: string[];
+  explanation?: string;
+  learningGoal?: string;
+  correctOptionIndex?: number | null;
+}
+
+interface QuizCardData {
+  title: string;
+  instructions: string;
+  questions: QuizCardQuestion[];
+}
+
+interface QuizAnswerSelection {
+  selectedIndex: number;
+  isCorrect: boolean;
+  attempts: number;
+}
+
+interface QuizRequestOptions {
+  preludeSteps?: ThinkingStep[];
+  titleHint?: string;
+  triggeredBy?: string;
+  sourceStoryJobId?: string;
+  sourceStoryTitle?: string;
 }
 
 interface Message {
@@ -286,6 +316,29 @@ const CHAT_PENDING_THINKING_STEPS: ThinkingStep[] = [
   },
 ];
 
+const QUIZ_THINKING_STEPS: ThinkingStep[] = [
+  {
+    title: "Reading your quiz request",
+    detail: "Understanding the topic, age band, and difficulty before drafting questions.",
+  },
+  {
+    title: "Designing question flow",
+    detail: "Balancing easy, medium, and challenge questions with clear learning goals.",
+  },
+  {
+    title: "Generating options and hints",
+    detail: "Creating four options per question and adding hints for wrong attempts.",
+  },
+  {
+    title: "Validating correctness",
+    detail: "Checking each correct answer and writing a short explanation.",
+  },
+  {
+    title: "Finalizing quiz payload",
+    detail: "Packaging quiz title, instructions, and all questions for delivery.",
+  },
+];
+
 const DEFAULT_GAMEPLAY_CATEGORY: GameplayCategory = GAMEPLAY_CATEGORY_OPTIONS[0]?.id ?? "minecraft";
 const DEFAULT_GAMEPLAY_BACKGROUND_ID = getDefaultGameplayBackgroundId(DEFAULT_GAMEPLAY_CATEGORY);
 
@@ -298,6 +351,7 @@ const AUTO_SCROLL_THRESHOLD_PX = 120;
 function getThinkingSteps(mode: ModeId | "normal", videoType: VideoGenerationType | null = null): ThinkingStep[] {
   if (mode === "story") return STORY_THINKING_STEPS;
   if (mode === "video") return videoType === "gameplay" ? VIDEO_GAMEPLAY_THINKING_STEPS : VIDEO_NORMAL_THINKING_STEPS;
+  if (mode === "quiz") return QUIZ_THINKING_STEPS;
   if (mode === "normal" || mode === "search") return CHAT_PENDING_THINKING_STEPS;
   return COMMON_THINKING_STEPS;
 }
@@ -665,6 +719,43 @@ function buildStoryBookFromResponse(
   };
 }
 
+function buildStoryNarrativeForQuiz(storyBook: StoryBookMessageData, maxChars = 9000): string {
+  const sections: string[] = [];
+  for (const page of storyBook.pages) {
+    const text = (page.text || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const chapter = (page.chapter || "").trim();
+    if (chapter) {
+      sections.push(`${chapter}: ${text}`);
+      continue;
+    }
+    sections.push(text);
+  }
+
+  const merged = sections.join("\n\n").trim();
+  if (!merged) return "";
+  if (merged.length <= maxChars) return merged;
+  return `${merged.slice(0, Math.max(1, maxChars - 1))}…`;
+}
+
+function buildQuizPromptFromStoryBook(storyBook: StoryBookMessageData): string {
+  const storyTitle = (storyBook.title || "Untitled Story").trim() || "Untitled Story";
+  const ageBand = (storyBook.ageBand || "5-8").trim() || "5-8";
+  const narrative = buildStoryNarrativeForQuiz(storyBook);
+  const safeNarrative = narrative || `${storyTitle} story details were generated in chat.`;
+
+  return [
+    "Create a kid-friendly multiple-choice quiz from the storybook below.",
+    "Return a clear quiz_title, short instructions, and questions with options, hints, and explanation.",
+    "Keep language simple and aligned with the story events and character arc.",
+    `Story title: ${storyTitle}`,
+    `Target age band: ${ageBand}`,
+    "",
+    "Story content:",
+    safeNarrative,
+  ].join("\n");
+}
+
 function stageToReadableTitle(stage: string): string {
   const normalized = stage.trim().replace(/[_-]+/g, " ");
   if (!normalized) return "Progress";
@@ -701,6 +792,12 @@ function buildProgressStepKey(stage: string, data: unknown): string {
       : Number.isFinite(Number(payload.character_index))
         ? Number(payload.character_index)
         : null;
+  const questionNumber =
+    typeof payload.question_number === "number"
+      ? Number(payload.question_number)
+      : Number.isFinite(Number(payload.question_number))
+        ? Number(payload.question_number)
+        : null;
 
   if (sceneIndex !== null) {
     key += `:scene:${sceneIndex}`;
@@ -711,10 +808,147 @@ function buildProgressStepKey(stage: string, data: unknown): string {
   if (characterIndex !== null) {
     key += `:character:${characterIndex}`;
   }
+  if (questionNumber !== null) {
+    key += `:question:${questionNumber}`;
+  }
   if (attempt !== null) {
     key += `:attempt:${attempt}`;
   }
   return key;
+}
+
+function parseEmbeddedProgressData(message: string): { cleanMessage: string; data?: unknown } {
+  const marker = "| data=";
+  const markerIndex = message.indexOf(marker);
+  if (markerIndex < 0) {
+    return { cleanMessage: message.trim() };
+  }
+
+  const cleanMessage = message.slice(0, markerIndex).trim();
+  const rawData = message.slice(markerIndex + marker.length).trim();
+  if (!rawData) {
+    return { cleanMessage };
+  }
+
+  try {
+    return { cleanMessage, data: JSON.parse(rawData) as unknown };
+  } catch {
+    return { cleanMessage, data: rawData };
+  }
+}
+
+function normalizeQuizProgressEvent(eventObj: Record<string, unknown>) {
+  const stageRaw = typeof eventObj.stage === "string" ? eventObj.stage.trim() : "";
+  const stage = stageRaw || "progress";
+  const rawMessage =
+    typeof eventObj.message === "string" && eventObj.message.trim()
+      ? eventObj.message.trim()
+      : "Progress update received.";
+  const embedded = parseEmbeddedProgressData(rawMessage);
+  const message = embedded.cleanMessage || "Progress update received.";
+  const eventData = eventObj.data !== undefined ? eventObj.data : embedded.data;
+  return { stage, message, data: eventData };
+}
+
+function unwrapQuizPayload(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const payloadRecord = payload as Record<string, unknown>;
+  const backendResponse = payloadRecord.backend_response;
+  if (backendResponse && typeof backendResponse === "object") {
+    return backendResponse as Record<string, unknown>;
+  }
+  return payloadRecord;
+}
+
+function buildQuizCardData(payload: Record<string, unknown> | null): QuizCardData | null {
+  if (!payload) return null;
+  const quizPacket = payload.quiz;
+  if (!quizPacket || typeof quizPacket !== "object") return null;
+
+  const quiz = quizPacket as Record<string, unknown>;
+  const title = typeof quiz.quiz_title === "string" && quiz.quiz_title.trim()
+    ? quiz.quiz_title.trim()
+    : "Kid Quiz";
+  const instructions = typeof quiz.instructions === "string" ? quiz.instructions.trim() : "";
+  const rawQuestions = Array.isArray(quiz.questions) ? quiz.questions : [];
+  if (!rawQuestions.length) return null;
+
+  const questions: QuizCardQuestion[] = rawQuestions
+    .map((entry, index) => {
+      const question = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+      const questionText = typeof question.question === "string" ? question.question.trim() : "";
+      const options = Array.isArray(question.options)
+        ? question.options.filter((opt): opt is string => typeof opt === "string" && opt.trim().length > 0).map((opt) => opt.trim())
+        : [];
+      const hints = Array.isArray(question.hints)
+        ? question.hints.filter((hint): hint is string => typeof hint === "string" && hint.trim().length > 0).map((hint) => hint.trim())
+        : [];
+      const explanation = typeof question.correct_explanation === "string" && question.correct_explanation.trim()
+        ? question.correct_explanation.trim()
+        : undefined;
+      const learningGoal = typeof question.learning_goal === "string" && question.learning_goal.trim()
+        ? question.learning_goal.trim()
+        : undefined;
+      const correctOptionIndexRaw = Number(question.correct_option_index);
+      const correctOptionIndex = Number.isFinite(correctOptionIndexRaw)
+        ? correctOptionIndexRaw
+        : null;
+      const questionNumberRaw = Number(question.question_number);
+      const questionNumber = Number.isFinite(questionNumberRaw) && questionNumberRaw > 0
+        ? questionNumberRaw
+        : index + 1;
+
+      return {
+        number: questionNumber,
+        question: questionText || `Question ${index + 1}`,
+        options,
+        hints,
+        explanation,
+        learningGoal,
+        correctOptionIndex,
+      };
+    })
+    .filter((item) => item.question || item.options.length > 0 || item.hints.length > 0);
+
+  if (!questions.length) return null;
+  return { title, instructions, questions };
+}
+
+function buildQuizAssistantContent(payload: Record<string, unknown> | null): string {
+  const quizCard = buildQuizCardData(payload);
+  if (!quizCard) {
+    if (!payload) return "Quiz generated, but response payload was empty.";
+    return "Quiz generation finished, but quiz questions were missing from the payload.";
+  }
+
+  if (!quizCard.questions.length) {
+    return `${quizCard.title} is ready, but no questions were returned.`;
+  }
+
+  const lines: string[] = [
+    `Quiz ready: ${quizCard.title}`,
+  ];
+  if (quizCard.instructions) {
+    lines.push(quizCard.instructions);
+  }
+  lines.push("");
+
+  quizCard.questions.forEach((question, index) => {
+    lines.push(`Question ${index + 1}: ${question.question}`);
+
+    question.options.forEach((option, optionIndex) => {
+      const letter = String.fromCharCode(65 + optionIndex);
+      lines.push(`- ${letter}. ${option}`);
+    });
+
+    if (question.hints.length > 0) {
+      lines.push(`- Hint: ${question.hints[0]}`);
+    }
+    lines.push("");
+  });
+
+  lines.push("Open Quiz Test in dashboard for interactive answer checks and detailed logs.");
+  return lines.join("\n").trim();
 }
 
 function buildChatSuccessThinkingSteps(meta: {
@@ -979,6 +1213,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isAwaitingBackendReply, setIsAwaitingBackendReply] = useState(false);
   const [isAwaitingStoryReply, setIsAwaitingStoryReply] = useState(false);
+  const [isAwaitingQuizReply, setIsAwaitingQuizReply] = useState(false);
   const [isClosingLogs, setIsClosingLogs] = useState(false);
   const [isThinkingStreamActive, setIsThinkingStreamActive] = useState(false);
   const [hasActiveStoryCharacterChoice, setHasActiveStoryCharacterChoice] = useState(false);
@@ -1016,6 +1251,12 @@ export default function ChatPage() {
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [openJsonByKey, setOpenJsonByKey] = useState<Record<string, boolean>>({});
   const [expandedReferencesByMessage, setExpandedReferencesByMessage] = useState<Record<string, boolean>>({});
+  const [quizActiveQuestionIndexByMessage, setQuizActiveQuestionIndexByMessage] = useState<Record<string, number>>({});
+  const [quizSelectionsByMessage, setQuizSelectionsByMessage] = useState<
+    Record<string, Record<number, QuizAnswerSelection>>
+  >({});
+  const [quizViewModeByMessage, setQuizViewModeByMessage] = useState<Record<string, "quiz" | "conclusion">>({});
+  const [quizConfettiTokenByMessage, setQuizConfettiTokenByMessage] = useState<Record<string, number>>({});
   const scrollerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const characterCarouselRef = useRef<HTMLDivElement>(null);
@@ -1075,6 +1316,116 @@ export default function ChatPage() {
     setExpandedReferencesByMessage((prev) => ({
       ...prev,
       [messageId]: !prev[messageId],
+    }));
+  }, []);
+
+  const triggerQuizConfetti = useCallback((messageId: string) => {
+    const token = Date.now();
+    setQuizConfettiTokenByMessage((prev) => ({
+      ...prev,
+      [messageId]: token,
+    }));
+    setTimeout(() => {
+      setQuizConfettiTokenByMessage((prev) => {
+        if (prev[messageId] !== token) return prev;
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      });
+    }, 1300);
+  }, []);
+
+  const handleQuizOptionSelect = useCallback((
+    messageId: string,
+    quizData: QuizCardData,
+    questionIndex: number,
+    optionIndex: number,
+  ) => {
+    const question = quizData.questions[questionIndex];
+    if (!question) return;
+    const hasAnswerKey =
+      typeof question.correctOptionIndex === "number"
+      && question.correctOptionIndex >= 0
+      && question.correctOptionIndex < question.options.length;
+    const isCorrect = hasAnswerKey ? optionIndex === question.correctOptionIndex : true;
+    const currentSelections = quizSelectionsByMessage[messageId] ?? {};
+    const existing = currentSelections[questionIndex];
+    if (existing?.isCorrect) return;
+    const nextSelections: Record<number, QuizAnswerSelection> = {
+      ...currentSelections,
+      [questionIndex]: {
+        selectedIndex: optionIndex,
+        isCorrect,
+        attempts: (existing?.attempts ?? 0) + 1,
+      },
+    };
+    const solvedCount = Object.values(nextSelections).filter((entry) => entry?.isCorrect).length;
+    const completedNow = solvedCount >= quizData.questions.length;
+
+    setQuizSelectionsByMessage((prev) => ({
+      ...prev,
+      [messageId]: nextSelections,
+    }));
+
+    if (isCorrect) {
+      triggerQuizConfetti(messageId);
+      if (completedNow) {
+        setQuizViewModeByMessage((prev) => ({
+          ...prev,
+          [messageId]: "conclusion",
+        }));
+        setTimeout(() => triggerQuizConfetti(messageId), 170);
+      }
+    }
+  }, [quizSelectionsByMessage, triggerQuizConfetti]);
+
+  const handleQuizPrevQuestion = useCallback((messageId: string) => {
+    setQuizActiveQuestionIndexByMessage((prev) => ({
+      ...prev,
+      [messageId]: Math.max((prev[messageId] ?? 0) - 1, 0),
+    }));
+  }, []);
+
+  const handleQuizNextQuestion = useCallback((messageId: string, totalQuestions: number) => {
+    const maxIndex = Math.max(0, totalQuestions - 1);
+    setQuizActiveQuestionIndexByMessage((prev) => ({
+      ...prev,
+      [messageId]: Math.min((prev[messageId] ?? 0) + 1, maxIndex),
+    }));
+  }, []);
+
+  const handleQuizShowConclusion = useCallback((messageId: string) => {
+    setQuizViewModeByMessage((prev) => ({
+      ...prev,
+      [messageId]: "conclusion",
+    }));
+    triggerQuizConfetti(messageId);
+  }, [triggerQuizConfetti]);
+
+  const handleQuizReview = useCallback((messageId: string) => {
+    setQuizViewModeByMessage((prev) => ({
+      ...prev,
+      [messageId]: "quiz",
+    }));
+    setQuizActiveQuestionIndexByMessage((prev) => ({
+      ...prev,
+      [messageId]: 0,
+    }));
+  }, []);
+
+  const handleQuizRestart = useCallback((messageId: string) => {
+    setQuizSelectionsByMessage((prev) => {
+      const next = { ...prev };
+      delete next[messageId];
+      return next;
+    });
+    setQuizActiveQuestionIndexByMessage((prev) => ({
+      ...prev,
+      [messageId]: 0,
+    }));
+    setQuizViewModeByMessage((prev) => ({
+      ...prev,
+      [messageId]: "quiz",
     }));
   }, []);
 
@@ -1155,8 +1506,9 @@ export default function ChatPage() {
   }, [queryCharacterId]);
 
   useEffect(() => {
-    if (queryMode !== "story") return;
-    setComposerMode((current) => (current === "story" ? current : "story"));
+    if (queryMode !== "story" && queryMode !== "quiz") return;
+    const requestedMode = queryMode as ModeId;
+    setComposerMode((current) => (current === requestedMode ? current : requestedMode));
   }, [queryMode]);
 
   useEffect(() => {
@@ -1362,6 +1714,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
     if (activeRunMode === "story" && isAwaitingStoryReply) return;
+    if (activeRunMode === "quiz" && isAwaitingQuizReply) return;
 
     const imageTimers: ReturnType<typeof setTimeout>[] = [];
     const stepTimers = activeThinkingSteps.map((step, i) =>
@@ -1387,7 +1740,7 @@ export default function ChatPage() {
       imageTimers.forEach(clearTimeout);
       clearInterval(ticker);
     };
-  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, stepIntervalMs, activeRunMode, isAwaitingStoryReply]);
+  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, stepIntervalMs, activeRunMode, isAwaitingStoryReply, isAwaitingQuizReply]);
 
   // Keep the live thinking stream pinned to bottom while steps/images are added.
   useEffect(() => {
@@ -1399,6 +1752,7 @@ export default function ChatPage() {
     if (!isLoading || !isThinkingStreamActive) return;
     if ((activeRunMode === "normal" || activeRunMode === "search") && isAwaitingBackendReply) return;
     if (activeRunMode === "story" && isAwaitingStoryReply) return;
+    if (activeRunMode === "quiz" && isAwaitingQuizReply) return;
     const imageStageTotal = activeThinkingSteps.find((step) => step.imageUrls?.length)?.imageUrls?.length ?? 0;
     const closeDelayMs = 240;
     let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1427,6 +1781,8 @@ export default function ChatPage() {
             ? finalVideoType === "gameplay"
               ? "Great concept. I am shaping it into a high-energy gameplay-style video flow with tight pacing and strong visual hooks."
               : "Great concept. I am shaping it into a polished narrative video with clear scene progression and balanced audio pacing."
+            : activeRunMode === "quiz"
+              ? "Great topic. I am preparing a child-friendly quiz with clear options, hints, and explanations."
             : "Great prompt. I am preparing a focused response with clear structure and polished wording.";
         setMessages(prev => [
           ...prev,
@@ -1458,6 +1814,7 @@ export default function ChatPage() {
         setHasActiveVideoTypeChoice(false);
         setIsAwaitingBackendReply(false);
         setIsAwaitingStoryReply(false);
+        setIsAwaitingQuizReply(false);
         activeStoryCharacterSelectionRef.current = null;
         activeVideoTypeRef.current = null;
         activeGameplaySelectionRef.current = null;
@@ -1472,7 +1829,7 @@ export default function ChatPage() {
       clearTimeout(finishTimer);
       if (closeTimer) clearTimeout(closeTimer);
     };
-  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, isAwaitingBackendReply, isAwaitingStoryReply, scrollToBottom]);
+  }, [isLoading, isThinkingStreamActive, activeThinkingSteps, activeRunMode, isAwaitingBackendReply, isAwaitingStoryReply, isAwaitingQuizReply, scrollToBottom]);
 
   const addAssistantReply = useCallback((mode: ModeId | "normal", startImmediately: boolean) => {
     const stepsForRun = getThinkingSteps(mode).map((step) => ({
@@ -1549,6 +1906,7 @@ export default function ChatPage() {
     setHasActiveVideoTypeChoice(false);
     setIsAwaitingBackendReply(false);
     setIsAwaitingStoryReply(false);
+    setIsAwaitingQuizReply(false);
     activeStoryCharacterSelectionRef.current = null;
     activeVideoTypeRef.current = null;
     activeGameplaySelectionRef.current = null;
@@ -2029,6 +2387,393 @@ export default function ChatPage() {
     }
   }, [finalizeBackendAssistantReply]);
 
+  const requestQuizAssistantReply = useCallback(async (
+    quizPrompt: string,
+    options: QuizRequestOptions = {},
+  ) => {
+    const requestStartedAt = Date.now();
+    const timelineOrder: string[] = [];
+    const timelineMap = new Map<string, ThinkingStep>();
+    const preludeSteps = options.preludeSteps ?? [];
+
+    const syncTimeline = () => {
+      const steps = timelineOrder
+        .map((key) => timelineMap.get(key))
+        .filter((step): step is ThinkingStep => Boolean(step));
+      if (!steps.length) return;
+      setActiveThinkingSteps(steps);
+      setVisibleSteps(steps.length);
+      const imageCount = steps.reduce((sum, step) => sum + (step.imageUrls?.length ?? 0), 0);
+      setVisibleImageCount(imageCount);
+      setElapsedSeconds(Math.max(1, Math.round((Date.now() - requestStartedAt) / 1000)));
+    };
+
+    const upsertTimelineStep = (
+      key: string,
+      title: string,
+      detail: string,
+      data?: unknown,
+      imageUrl?: string,
+      stageKey?: string,
+    ) => {
+      const existing = timelineMap.get(key);
+      const nextImages = imageUrl
+        ? Array.from(new Set([...(existing?.imageUrls ?? []), imageUrl]))
+        : (existing?.imageUrls ?? []);
+      timelineMap.set(key, {
+        title,
+        detail,
+        stageKey: stageKey ?? existing?.stageKey,
+        data: data ?? existing?.data,
+        imageUrls: nextImages.length ? nextImages : undefined,
+      });
+      if (!timelineOrder.includes(key)) {
+        timelineOrder.push(key);
+      }
+      syncTimeline();
+    };
+
+    if (preludeSteps.length) {
+      preludeSteps.forEach((step, index) => {
+        const key = `prelude:${index}`;
+        timelineMap.set(key, {
+          title: step.title,
+          detail: step.detail,
+          stageKey: step.stageKey,
+          data: step.data,
+          imageUrls: step.imageUrls ? [...step.imageUrls] : undefined,
+        });
+        timelineOrder.push(key);
+      });
+      syncTimeline();
+    }
+
+    upsertTimelineStep(
+      "quiz_request_prepared",
+      "Preparing quiz request",
+      "Assembling quiz payload for A2A quiz generation.",
+      {
+        question_count: 5,
+        difficulty: "medium",
+      },
+    );
+
+    setIsAwaitingQuizReply(true);
+
+    const requestPayload: Record<string, unknown> = {
+      user_prompt: quizPrompt.trim(),
+      question_count: 5,
+      difficulty: "medium",
+    };
+    const sourceStoryJobId = (options.sourceStoryJobId || "").trim();
+    const sourceStoryTitle = (options.sourceStoryTitle || "").trim();
+    if (sourceStoryJobId) {
+      requestPayload.source_story_job_id = sourceStoryJobId;
+    }
+    if (sourceStoryTitle) {
+      requestPayload.source_story_title = sourceStoryTitle;
+    }
+
+    let jobId: string | undefined;
+
+    try {
+      try {
+        const trimmedQuizPrompt = quizPrompt.trim();
+        const titleHint = (options.titleHint || "").trim();
+        const jobPrompt = titleHint || trimmedQuizPrompt;
+        const createdJob = await createJob({
+          type: "quiz",
+          title: jobPrompt.slice(0, 80) || "Quiz Generation",
+          user_prompt: jobPrompt,
+          input_payload: requestPayload,
+          triggered_by: options.triggeredBy || "chat-quiz-mode",
+          engine: "a2a-maf-quiz-maker",
+        });
+        jobId = createdJob.id;
+        upsertTimelineStep(
+          "quiz_job_created",
+          "Job tracking",
+          `Created quiz job ${createdJob.id}.`,
+          { job_id: createdJob.id },
+        );
+      } catch (jobError) {
+        upsertTimelineStep(
+          "quiz_job_created",
+          "Job tracking",
+          `Job creation skipped: ${jobError instanceof Error ? jobError.message : "unknown error"}`,
+          { warning: "job_creation_failed" },
+        );
+      }
+
+      const jobQuery = jobId ? `&job_id=${encodeURIComponent(jobId)}` : "";
+      const response = await fetch(`/api/quiz-test?target=main&stream=1${jobQuery}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
+
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/x-ndjson")) {
+        const rawText = await response.text();
+        let parsed: unknown = null;
+        if (rawText.trim()) {
+          try {
+            parsed = JSON.parse(rawText);
+          } catch {
+            parsed = { raw: rawText };
+          }
+        }
+        if (!response.ok) {
+          const detail =
+            parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
+              ? String((parsed as { detail?: unknown }).detail || "")
+              : `Quiz request failed (${response.status}).`;
+          throw new Error(detail || `Quiz request failed (${response.status}).`);
+        }
+
+        const fallbackEnvelope = {
+          backend_endpoint: "",
+          backend_status_code: response.status,
+          backend_response: parsed,
+        } as Record<string, unknown>;
+        const quizPayload = unwrapQuizPayload(fallbackEnvelope);
+        const assistantContent = buildQuizAssistantContent(quizPayload);
+        finalizeBackendAssistantReply(
+          assistantContent,
+          "quiz",
+          timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+          fallbackEnvelope,
+          [],
+          null,
+          jobId,
+        );
+        return;
+      }
+
+      if (!response.body) {
+        throw new Error("Stream was requested, but backend returned an empty body.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalEnvelope: Record<string, unknown> | null = null;
+      let streamError: string | null = null;
+
+      const consumeLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        let event: unknown;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
+          upsertTimelineStep(
+            `quiz_stream_parse_${timelineOrder.length}`,
+            "Stream parse warning",
+            "Received a stream line that could not be parsed as JSON.",
+            { raw_line: trimmed },
+          );
+          return;
+        }
+
+        if (!event || typeof event !== "object") return;
+        const eventObj = event as Record<string, unknown>;
+        const eventType = String(eventObj.type || "").toLowerCase().trim();
+
+        if (eventType === "progress") {
+          const normalizedProgress = normalizeQuizProgressEvent(eventObj);
+          const timelineKey = buildProgressStepKey(
+            normalizedProgress.stage,
+            normalizedProgress.data,
+          );
+          upsertTimelineStep(
+            timelineKey,
+            stageToReadableTitle(normalizedProgress.stage),
+            normalizedProgress.message,
+            normalizedProgress.data,
+            undefined,
+            normalizedProgress.stage,
+          );
+          return;
+        }
+
+        if (eventType === "status") {
+          const state = String(eventObj.state || "").trim();
+          const message = String(eventObj.message || "Status update received.");
+          const title = state ? `A2A status: ${state}` : "A2A status";
+          const key = state ? `status:${state}` : `status:${timelineOrder.length}`;
+          upsertTimelineStep(key, title, message, eventObj);
+          return;
+        }
+
+        if (eventType === "update") {
+          const message = String(eventObj.message || "Backend update received.");
+          upsertTimelineStep(
+            `update:${timelineOrder.length}`,
+            "Backend update",
+            message,
+            eventObj,
+          );
+          return;
+        }
+
+        if (eventType === "error") {
+          streamError =
+            String(eventObj.detail || eventObj.message || "Quiz stream failed with an unknown error.");
+          upsertTimelineStep("quiz_stream_error", "Stream error", streamError, eventObj);
+          return;
+        }
+
+        if (eventType === "final") {
+          finalEnvelope = {
+            backend_endpoint: eventObj.backend_endpoint || eventObj.endpoint || "",
+            backend_status_code: eventObj.backend_status_code || eventObj.status_code || 200,
+            backend_response: eventObj.backend_response || eventObj.payload || null,
+          };
+          upsertTimelineStep(
+            "quiz_final_response",
+            "Final response",
+            "Quiz payload received from backend.",
+            finalEnvelope,
+          );
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) consumeLine(line);
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) consumeLine(buffer);
+
+      if (streamError) {
+        throw new Error(streamError);
+      }
+
+      if (!finalEnvelope) {
+        throw new Error("Quiz stream ended before final payload was received.");
+      }
+
+      let quizJobId = jobId;
+      if (jobId) {
+        try {
+          const refreshedJob = await fetchJob(jobId);
+          if (refreshedJob?.id) quizJobId = refreshedJob.id;
+        } catch {
+          // Best effort only.
+        }
+      }
+
+      const quizPayload = unwrapQuizPayload(finalEnvelope);
+      const assistantContent = buildQuizAssistantContent(quizPayload);
+      finalizeBackendAssistantReply(
+        assistantContent,
+        "quiz",
+        timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+        finalEnvelope,
+        [],
+        null,
+        quizJobId,
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Quiz generation failed.";
+      upsertTimelineStep("quiz_error", "Quiz generation failed", detail, {
+        detail,
+        job_id: jobId || null,
+      });
+      finalizeBackendAssistantReply(
+        detail,
+        "quiz",
+        timelineOrder.map((key) => timelineMap.get(key)).filter((step): step is ThinkingStep => Boolean(step)),
+        {
+          detail,
+          job_id: jobId || null,
+          duration_ms: Math.max(1, Date.now() - requestStartedAt),
+        },
+        [],
+        null,
+        jobId,
+      );
+    }
+  }, [finalizeBackendAssistantReply]);
+
+  const handleGenerateQuizFromStory = useCallback((storyBook: StoryBookMessageData, storyJobId?: string) => {
+    if (isLoading || isThinkingStreamActive || isClosingLogs) return;
+    const storyTitle = (storyBook.title || "Generated Storybook").trim() || "Generated Storybook";
+    const quizPrompt = buildQuizPromptFromStoryBook(storyBook);
+    const userContent = `Generate a quiz for this story: ${storyTitle}`;
+    const userMessageId = Date.now().toString();
+
+    const preludeSteps: ThinkingStep[] = [
+      {
+        title: "Linking storybook context",
+        detail: `Using "${storyTitle}" as source material for quiz generation.`,
+        stageKey: "storybook_context_linked",
+        data: {
+          source_story_title: storyTitle,
+          source_story_job_id: storyJobId || null,
+          story_page_count: storyBook.pages.length,
+        },
+      },
+    ];
+
+    setComposerMode("quiz");
+    setShouldAutoScroll(true);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: userMessageId,
+        role: "user",
+        content: userContent,
+        basePrompt: userContent,
+        timestamp: new Date(),
+        mode: "quiz",
+      },
+    ]);
+
+    setActiveStoryMessageId(null);
+    setActiveVideoMessageId(null);
+    setActiveStoryCharacterSelection(null);
+    setActiveStoryCharacterId("");
+    setActiveVideoType(null);
+    setActiveGameplaySelection(null);
+    setPendingStoryCharacterId("");
+    setPendingUseAiStoryCharacter(false);
+    setPendingVideoType(null);
+    setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
+    setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
+    setHasActiveStoryCharacterChoice(false);
+    setHasActiveVideoTypeChoice(false);
+    setIsAwaitingStoryReply(false);
+    setIsAwaitingQuizReply(false);
+    activeStoryCharacterSelectionRef.current = null;
+    activeVideoTypeRef.current = null;
+    activeGameplaySelectionRef.current = null;
+
+    setTimeout(() => scrollToBottom("smooth", true), 60);
+    addAssistantReply("quiz", true);
+    void requestQuizAssistantReply(quizPrompt, {
+      preludeSteps,
+      titleHint: `Quiz from ${storyTitle}`,
+      triggeredBy: "chat-story-quiz-action",
+      sourceStoryJobId: storyJobId,
+      sourceStoryTitle: storyTitle,
+    });
+  }, [
+    isLoading,
+    isThinkingStreamActive,
+    isClosingLogs,
+    scrollToBottom,
+    addAssistantReply,
+    requestQuizAssistantReply,
+  ]);
+
   const handleToggleInlineCharacterCreator = useCallback(() => {
     if (isThinkingStreamActive || isClosingLogs) return;
     setInlineCharacterError("");
@@ -2329,7 +3074,7 @@ export default function ChatPage() {
     if (!trimmed) return;
 
     const mode = payload.mode ?? "normal";
-    const shouldUseBackendChat = mode !== "story" && mode !== "video";
+    const shouldUseBackendChat = mode !== "story" && mode !== "video" && mode !== "quiz";
     const initialCharacterSelection = mode === "story" ? null : payload.characterSelection ?? null;
     const initialVideoType: VideoGenerationType | null = null;
     const initialGameplaySelection: GameplaySelection | null = null;
@@ -2367,6 +3112,7 @@ export default function ChatPage() {
     ]);
     setIsAwaitingBackendReply(false);
     setIsAwaitingStoryReply(false);
+    setIsAwaitingQuizReply(false);
 
     if (mode === "story") {
       setActiveStoryMessageId(userMessageId);
@@ -2401,6 +3147,26 @@ export default function ChatPage() {
       setHasActiveStoryCharacterChoice(false);
       setHasActiveVideoTypeChoice(false);
       setIsAwaitingStoryReply(false);
+      setIsAwaitingQuizReply(false);
+      activeStoryCharacterSelectionRef.current = null;
+      activeVideoTypeRef.current = null;
+      activeGameplaySelectionRef.current = null;
+    } else if (mode === "quiz") {
+      setActiveStoryMessageId(null);
+      setActiveVideoMessageId(null);
+      setActiveStoryCharacterSelection(null);
+      setActiveStoryCharacterId("");
+      setActiveVideoType(null);
+      setActiveGameplaySelection(null);
+      setPendingStoryCharacterId("");
+      setPendingUseAiStoryCharacter(false);
+      setPendingVideoType(null);
+      setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
+      setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
+      setHasActiveStoryCharacterChoice(false);
+      setHasActiveVideoTypeChoice(false);
+      setIsAwaitingStoryReply(false);
+      setIsAwaitingQuizReply(false);
       activeStoryCharacterSelectionRef.current = null;
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
@@ -2419,6 +3185,7 @@ export default function ChatPage() {
       setHasActiveStoryCharacterChoice(false);
       setHasActiveVideoTypeChoice(false);
       setIsAwaitingStoryReply(false);
+      setIsAwaitingQuizReply(false);
       activeStoryCharacterSelectionRef.current = null;
       activeVideoTypeRef.current = null;
       activeGameplaySelectionRef.current = null;
@@ -2434,7 +3201,10 @@ export default function ChatPage() {
     }
 
     addAssistantReply(mode, shouldStartImmediately);
-  }, [messages, scrollToBottom, addAssistantReply, requestBackendAssistantReply]);
+    if (mode === "quiz") {
+      void requestQuizAssistantReply(trimmed);
+    }
+  }, [messages, scrollToBottom, addAssistantReply, requestBackendAssistantReply, requestQuizAssistantReply]);
 
   const isEmpty = messages.length === 0;
   const groups = groupMessages(messages);
@@ -2699,9 +3469,18 @@ export default function ChatPage() {
                                       setShouldAutoScroll(true);
                                       scrollToBottom("smooth", true);
                                     }}
+                                    disabled={isLoading || isThinkingStreamActive || isClosingLogs}
                                   >
                                     <RotateCw size={12} strokeWidth={2.5} className={styles.storyResultRegenerateIcon} />
                                     Regenerate
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`${styles.storyResultActionBtn} ${styles.storyResultActionBtnPrimary}`}
+                                    onClick={() => handleGenerateQuizFromStory(msg.storyBook!, msg.storyJobId)}
+                                    disabled={isLoading || isThinkingStreamActive || isClosingLogs}
+                                  >
+                                    Generate quiz from story
                                   </button>
                                   {msg.storyJobId ? (
                                     <Link href={`/dashboard/jobs/${msg.storyJobId}`} className={styles.storyResultActionBtn}>
@@ -2712,6 +3491,230 @@ export default function ChatPage() {
                                       Share
                                     </button>
                                   )}
+                                </div>
+                              </motion.div>
+                            );
+                          }
+
+                          const quizCardData = msg.role === "assistant" && msg.mode === "quiz"
+                            ? buildQuizCardData(unwrapQuizPayload(msg.backendJson ?? null))
+                            : null;
+                          if (quizCardData) {
+                            const totalQuestions = quizCardData.questions.length;
+                            const activeQuestionIndex = Math.min(
+                              Math.max(quizActiveQuestionIndexByMessage[msg.id] ?? 0, 0),
+                              Math.max(0, totalQuestions - 1),
+                            );
+                            const activeQuestion = quizCardData.questions[activeQuestionIndex];
+                            if (!activeQuestion) {
+                              return null;
+                            }
+
+                            const selectionsForMessage = quizSelectionsByMessage[msg.id] ?? {};
+                            const activeSelection = selectionsForMessage[activeQuestionIndex];
+                            const solvedCount = Object.values(selectionsForMessage).filter((entry) => entry?.isCorrect).length;
+                            const isCurrentSolved = Boolean(activeSelection?.isCorrect);
+                            const hasAnswerKey =
+                              typeof activeQuestion.correctOptionIndex === "number"
+                              && activeQuestion.correctOptionIndex >= 0
+                              && activeQuestion.correctOptionIndex < activeQuestion.options.length;
+                            const selectedOptionIndex = activeSelection?.selectedIndex ?? -1;
+                            const canGoPrev = activeQuestionIndex > 0;
+                            const canGoNext = activeQuestionIndex < totalQuestions - 1 && isCurrentSolved;
+                            const isLastQuestion = activeQuestionIndex === totalQuestions - 1;
+                            const progressPercent = Math.round(((activeQuestionIndex + 1) / Math.max(1, totalQuestions)) * 100);
+                            const isQuizCompleted = solvedCount >= totalQuestions && totalQuestions > 0;
+                            const quizViewMode = quizViewModeByMessage[msg.id] ?? (isQuizCompleted ? "conclusion" : "quiz");
+                            const showConclusion = quizViewMode === "conclusion" && isQuizCompleted;
+                            const showConfetti = Boolean(quizConfettiTokenByMessage[msg.id]);
+                            const confettiCount = showConfetti ? (showConclusion ? 92 : 54) : 0;
+                            const showHint = Boolean(activeSelection && !activeSelection.isCorrect && activeQuestion.hints.length > 0);
+                            const showExplanation = Boolean(isCurrentSolved && activeQuestion.explanation);
+
+                            return (
+                              <motion.div
+                                key={msg.id}
+                                initial={{ opacity: 0, y: 16 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.42, ease: easeOutExpo }}
+                                className={styles.quizStoryResult}
+                              >
+                                <div className={styles.quizStoryCard}>
+                                  {confettiCount > 0 ? (
+                                    <div className={styles.quizStoryConfettiLayer} aria-hidden>
+                                      {Array.from({ length: confettiCount }).map((_, confettiIndex) => (
+                                        <span
+                                          key={`${msg.id}-confetti-${confettiIndex}`}
+                                          className={styles.quizStoryConfettiPiece}
+                                          style={{
+                                            left: `${(confettiIndex * 3.9) % 100}%`,
+                                            animationDelay: `${(confettiIndex % 14) * 0.02}s`,
+                                            animationDuration: `${1.05 + (confettiIndex % 8) * 0.11}s`,
+                                            width: `${6 + (confettiIndex % 4)}px`,
+                                            height: `${10 + (confettiIndex % 5)}px`,
+                                          }}
+                                        />
+                                      ))}
+                                    </div>
+                                  ) : null}
+
+                                  <div className={styles.quizStoryPage}>
+                                    <div className={styles.quizStoryHeader}>
+                                      <p className={styles.quizStoryPageKicker}>Quiz Book</p>
+                                      <h3 className={styles.quizStoryHeaderTitle}>{quizCardData.title}</h3>
+                                      <div className={styles.quizStoryHeaderMetaRow}>
+                                        <span>Question {activeQuestionIndex + 1} of {totalQuestions}</span>
+                                        <span>Solved {solvedCount}/{totalQuestions}</span>
+                                      </div>
+                                      <div className={styles.quizStoryHeaderProgressTrack}>
+                                        <span
+                                          className={styles.quizStoryHeaderProgressFill}
+                                          style={{ width: `${progressPercent}%` }}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {showConclusion ? (
+                                      <div className={styles.quizStoryConclusion}>
+                                        <div className={styles.quizStoryConclusionBadge}>
+                                          <CheckCircle2 size={14} />
+                                          <span>Quiz Completed</span>
+                                        </div>
+                                        <h4 className={styles.quizStoryConclusionTitle}>
+                                          Awesome work.
+                                        </h4>
+                                        <p className={styles.quizStoryConclusionText}>
+                                          You solved {solvedCount} out of {totalQuestions} questions correctly.
+                                        </p>
+                                        {quizCardData.instructions ? (
+                                          <p className={styles.quizStoryConclusionSubtext}>{quizCardData.instructions}</p>
+                                        ) : null}
+                                        <div className={styles.quizStoryConclusionActions}>
+                                          <button
+                                            type="button"
+                                            className={styles.quizStoryNavButton}
+                                            onClick={() => handleQuizReview(msg.id)}
+                                          >
+                                            Review Questions
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className={`${styles.quizStoryNavButton} ${styles.quizStoryNavButtonPrimary}`}
+                                            onClick={() => handleQuizRestart(msg.id)}
+                                          >
+                                            Play Again
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ) : null}
+                                    {!showConclusion ? (
+                                      <>
+                                        <h4 className={styles.quizStoryQuestionTitle}>{activeQuestion.question}</h4>
+                                        {quizCardData.instructions ? (
+                                          <p className={styles.quizStoryInstructions}>{quizCardData.instructions}</p>
+                                        ) : null}
+                                        {activeQuestion.learningGoal ? (
+                                          <p className={styles.quizStoryLearningGoal}>{activeQuestion.learningGoal}</p>
+                                        ) : null}
+
+                                        <div className={styles.quizStoryOptions}>
+                                          {activeQuestion.options.map((option, optionIndex) => {
+                                            const isSelected = selectedOptionIndex === optionIndex;
+                                            const isCorrectOption =
+                                              hasAnswerKey && optionIndex === activeQuestion.correctOptionIndex;
+                                            const showCorrectState = isCurrentSolved && isCorrectOption;
+                                            const showWrongState = isSelected && !isCurrentSolved;
+
+                                            return (
+                                              <button
+                                                key={`${msg.id}-quiz-q-${activeQuestion.number}-opt-${optionIndex}`}
+                                                type="button"
+                                                className={[
+                                                  styles.quizStoryOption,
+                                                  isSelected ? styles.quizStoryOptionSelected : "",
+                                                  showCorrectState ? styles.quizStoryOptionCorrect : "",
+                                                  showWrongState ? styles.quizStoryOptionWrong : "",
+                                                ].filter(Boolean).join(" ")}
+                                                onClick={() =>
+                                                  handleQuizOptionSelect(
+                                                    msg.id,
+                                                    quizCardData,
+                                                    activeQuestionIndex,
+                                                    optionIndex,
+                                                  )}
+                                                disabled={isCurrentSolved}
+                                              >
+                                                <span className={styles.quizStoryOptionLabel}>
+                                                  {String.fromCharCode(65 + optionIndex)}
+                                                </span>
+                                                <span className={styles.quizStoryOptionText}>{option}</span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+
+                                        {isCurrentSolved ? (
+                                          <div className={styles.quizStoryFeedbackOk}>
+                                            <CheckCircle2 size={14} />
+                                            <span>Correct answer. Great job.</span>
+                                          </div>
+                                        ) : null}
+
+                                        {showHint ? (
+                                          <p className={styles.quizStoryHint}>
+                                            Hint: {activeQuestion.hints[0]}
+                                          </p>
+                                        ) : null}
+
+                                        {showExplanation ? (
+                                          <p className={styles.quizStoryExplanation}>
+                                            {activeQuestion.explanation}
+                                          </p>
+                                        ) : null}
+
+                                        <div className={styles.quizStoryNavRow}>
+                                          <button
+                                            type="button"
+                                            className={styles.quizStoryNavButton}
+                                            onClick={() => handleQuizPrevQuestion(msg.id)}
+                                            disabled={!canGoPrev}
+                                          >
+                                            Previous
+                                          </button>
+                                          {!isLastQuestion ? (
+                                            <button
+                                              type="button"
+                                              className={`${styles.quizStoryNavButton} ${styles.quizStoryNavButtonPrimary}`}
+                                              onClick={() => handleQuizNextQuestion(msg.id, totalQuestions)}
+                                              disabled={!canGoNext}
+                                            >
+                                              {isCurrentSolved ? "Next Question" : "Answer To Continue"}
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              className={`${styles.quizStoryNavButton} ${styles.quizStoryNavButtonPrimary}`}
+                                              onClick={() => handleQuizShowConclusion(msg.id)}
+                                              disabled={!isCurrentSolved}
+                                            >
+                                              {isCurrentSolved ? "See Results" : "Answer To Finish"}
+                                            </button>
+                                          )}
+                                        </div>
+                                      </>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className={styles.storyResultActions}>
+                                  <Link href="/dashboard/quiz-test" className={`${styles.storyResultActionBtn} ${styles.storyResultActionBtnPrimary}`}>
+                                    Open Quiz Test
+                                  </Link>
+                                  {msg.storyJobId ? (
+                                    <Link href={`/dashboard/jobs/${msg.storyJobId}`} className={styles.storyResultActionBtn}>
+                                      Open detailed logs
+                                    </Link>
+                                  ) : null}
                                 </div>
                               </motion.div>
                             );
