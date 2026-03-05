@@ -3,7 +3,7 @@
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, BookOpenText, Brain, Clapperboard, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
+import { ArrowUp, BookOpenText, Brain, FileText, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Utility function for className merging
@@ -326,7 +326,7 @@ const PromptInputAction: React.FC<PromptInputActionProps> = ({ tooltip, children
 };
 
 // ── Modes ─────────────────────────────────────────────────────────────────────
-export type ModeId = "search" | "story" | "video" | "quiz";
+export type ModeId = "search" | "study" | "story" | "quiz";
 
 const MODE_CONFIG: Record<
   ModeId,
@@ -343,17 +343,17 @@ const MODE_CONFIG: Record<
     activeClass: "bg-sky-50 border-sky-300 text-sky-700",
     icon: Globe,
   },
+  study: {
+    label: "Study",
+    description: "Ask questions from your uploaded PDF notes",
+    activeClass: "bg-emerald-50 border-emerald-300 text-emerald-700",
+    icon: FileText,
+  },
   story: {
     label: "Storybook",
     description: "Craft a magical kid-safe storybook narrative",
     activeClass: "bg-amber-50 border-amber-300 text-amber-700",
     icon: BookOpenText,
-  },
-  video: {
-    label: "Video",
-    description: "Legacy video mode",
-    activeClass: "bg-violet-50 border-violet-300 text-violet-700",
-    icon: Clapperboard,
   },
   quiz: {
     label: "Quiz",
@@ -363,7 +363,7 @@ const MODE_CONFIG: Record<
   },
 };
 
-const VISIBLE_MODES: ModeId[] = ["search", "story", "quiz"];
+const VISIBLE_MODES: ModeId[] = ["search", "study", "story", "quiz"];
 
 export interface CharacterSelection {
   type: "existing" | "create";
@@ -408,6 +408,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
   const promptBoxRef = React.useRef<HTMLDivElement>(null);
   const activeMode = mode !== undefined ? mode : internalActiveMode;
+  const isStudyMode = activeMode === "study";
 
   const activeModeConfig = activeMode ? MODE_CONFIG[activeMode] ?? null : null;
 
@@ -418,20 +419,35 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   };
 
   const processFile = React.useCallback((file: File) => {
+    if (isStudyMode) {
+      const lowerName = file.name.toLowerCase();
+      const isPdf = file.type === "application/pdf" || lowerName.endsWith(".pdf");
+      if (!isPdf || file.size > 20 * 1024 * 1024) return;
+      setFiles([file]);
+      setFilePreviews({});
+      return;
+    }
+
     if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) return;
     setFiles([file]);
     const reader = new FileReader();
     reader.onload = (e) => setFilePreviews({ [file.name]: e.target?.result as string });
     reader.readAsDataURL(file);
-  }, []);
+  }, [isStudyMode]);
 
   const handleDragOver = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDragLeave = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDrop = React.useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
-    const imgs = Array.from(e.dataTransfer.files).filter((file) => file.type.startsWith("image/"));
-    if (imgs.length > 0) processFile(imgs[0]);
-  }, [processFile]);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (isStudyMode) {
+      const pdf = droppedFiles.find((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+      if (pdf) processFile(pdf);
+      return;
+    }
+    const img = droppedFiles.find((file) => file.type.startsWith("image/"));
+    if (img) processFile(img);
+  }, [isStudyMode, processFile]);
 
   const handleRemoveFile = (index: number) => {
     const f = files[index];
@@ -440,6 +456,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   };
 
   const handlePaste = React.useCallback((e: ClipboardEvent) => {
+    if (isStudyMode) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     for (let i = 0; i < items.length; i++) {
@@ -448,7 +465,7 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
         if (file) { e.preventDefault(); processFile(file); break; }
       }
     }
-  }, [processFile]);
+  }, [isStudyMode, processFile]);
 
   React.useEffect(() => {
     document.addEventListener("paste", handlePaste);
@@ -503,11 +520,19 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
           <div className="flex flex-wrap gap-2 p-0 pb-1">
             {files.map((file, index) => (
               <div key={index} className="relative group">
-                {file.type.startsWith("image/") && filePreviews[file.name] && (
+                {file.type.startsWith("image/") && filePreviews[file.name] ? (
                   <div className="w-16 h-16 rounded-xl overflow-hidden cursor-pointer border border-black/10" onClick={() => setSelectedImage(filePreviews[file.name])}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={filePreviews[file.name]} alt={file.name} className="h-full w-full object-cover" />
                     <button onClick={(e) => { e.stopPropagation(); handleRemoveFile(index); }} className="absolute top-1 right-1 rounded-full bg-white/90 p-0.5 shadow-sm">
+                      <X className="h-3 w-3 text-foreground/70" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/80 px-2.5 py-2 text-xs text-foreground/80">
+                    <FileText className="h-3.5 w-3.5 shrink-0 text-foreground/60" />
+                    <span className="max-w-[170px] truncate">{file.name}</span>
+                    <button onClick={() => handleRemoveFile(index)} className="rounded-full bg-black/5 p-1 transition-colors hover:bg-black/10">
                       <X className="h-3 w-3 text-foreground/70" />
                     </button>
                   </div>
@@ -535,14 +560,18 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
           {/* Left actions */}
           <div className={cn("flex items-center gap-1 transition-opacity duration-300", isRecording ? "opacity-0 invisible h-0" : "opacity-100 visible")}>
             {/* Attach */}
-            <PromptInputAction tooltip="Upload image">
+            <PromptInputAction tooltip={isStudyMode ? "Upload study PDF" : "Upload image"}>
               <button
                 onClick={() => uploadInputRef.current?.click()}
                 className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/6 hover:text-foreground"
                 disabled={isRecording}
               >
                 <Paperclip className="h-4 w-4" />
-                <input ref={uploadInputRef} type="file" className="hidden" accept="image/*"
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  className="hidden"
+                  accept={isStudyMode ? ".pdf,application/pdf" : "image/*"}
                   onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); if (e.target) e.target.value = ""; }} />
               </button>
             </PromptInputAction>

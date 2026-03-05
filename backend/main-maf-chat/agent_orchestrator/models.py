@@ -10,7 +10,7 @@ OrchestrationMode = Literal["auto", "create", "regenerate"]
 SelectedAction = Literal["create", "regenerate"]
 SelectedBy = Literal["agent", "explicit_mode", "rule_fallback"]
 ChatRole = Literal["user", "assistant"]
-ChatMode = Literal["normal", "search"]
+ChatMode = Literal["normal", "search", "study"]
 QuizDifficulty = Literal["easy", "medium", "hard"]
 
 
@@ -124,7 +124,35 @@ class ChatOrchestrationRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000, description="Kid's latest question.")
     history: list[ChatMessage] = Field(default_factory=list, description="Recent chat history.")
     age_band: str | None = Field(default=None, max_length=32, description="Optional age hint like 5-8.")
-    mode: ChatMode = Field(default="normal", description="Chat mode selected in UI: normal or search.")
+    mode: ChatMode = Field(default="normal", description="Chat mode selected in UI: normal, search, or study.")
+    study_session_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Study session identifier returned by study upload endpoint.",
+    )
+
+
+class ChatCitation(BaseModel):
+    title: str
+    url: str | None = None
+    snippet: str | None = None
+    published_date: str | None = None
+    source: str | None = None
+    score: float | None = None
+
+
+class ChatModerationCheck(BaseModel):
+    stage: str
+    blocked: bool
+    threshold: int
+    provider: str
+    scores: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class ChatModerationMetadata(BaseModel):
+    input: ChatModerationCheck | None = None
+    output: ChatModerationCheck | None = None
 
 
 class ChatOrchestrationResponse(BaseModel):
@@ -137,6 +165,21 @@ class ChatOrchestrationResponse(BaseModel):
     mcp_used: bool = False
     mcp_server: str | None = None
     mcp_output: dict[str, Any] | None = None
+    citations: list[ChatCitation] = Field(default_factory=list)
+    retrieval_provider: str | None = None
+    retrieval_used_fallback: bool = False
+    moderation: ChatModerationMetadata | None = None
+    study_session_id: str | None = None
+
+
+class StudyUploadResponse(BaseModel):
+    session_id: str
+    file_id: str
+    filename: str
+    chunks_indexed: int = 0
+    provider: str = "azure_search_study"
+    index_name: str | None = None
+    errors: list[str] = Field(default_factory=list)
 
 
 class A2AHealthResponse(BaseModel):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import nullcontext
 from typing import Any
 
 from .af_compat import PATCHED_SEMCONV_ATTRS
@@ -12,6 +13,11 @@ from .models import (
     SelectedAction,
     SelectedBy,
 )
+
+try:
+    from opentelemetry import trace
+except Exception:  # pragma: no cover - optional dependency
+    trace = None  # type: ignore[assignment]
 
 
 try:
@@ -25,6 +31,8 @@ except Exception as exc:  # pragma: no cover - import guard for runtime compatib
     MAF_IMPORT_ERROR: Exception | None = exc
 else:
     MAF_IMPORT_ERROR = None
+
+TRACER = trace.get_tracer(__name__) if trace is not None else None
 
 
 ROUTER_SYSTEM_PROMPT = """
@@ -88,47 +96,55 @@ class MAFRoutingAgent:
         self,
         payload: CharacterOrchestrationRequest,
     ) -> tuple[AgentDecision, SelectedBy, str | None]:
-        if payload.mode == "create":
-            return (
-                AgentDecision(
-                    selected_action="create",
-                    rationale="Explicit mode=create was provided.",
-                    confidence=1.0,
-                ),
-                "explicit_mode",
-                None,
-            )
+        with self._start_span("character_router.decide") as span:
+            self._set_span_attr(span, "character.mode", payload.mode)
+            if payload.mode == "create":
+                return (
+                    AgentDecision(
+                        selected_action="create",
+                        rationale="Explicit mode=create was provided.",
+                        confidence=1.0,
+                    ),
+                    "explicit_mode",
+                    None,
+                )
 
-        if payload.mode == "regenerate":
-            return (
-                AgentDecision(
-                    selected_action="regenerate",
-                    rationale="Explicit mode=regenerate was provided.",
-                    confidence=1.0,
-                ),
-                "explicit_mode",
-                None,
-            )
+            if payload.mode == "regenerate":
+                return (
+                    AgentDecision(
+                        selected_action="regenerate",
+                        rationale="Explicit mode=regenerate was provided.",
+                        confidence=1.0,
+                    ),
+                    "explicit_mode",
+                    None,
+                )
 
-        if self._agent is None:
-            fallback = self._rule_based_decision(payload, reason_prefix=self._import_error_prefix())
-            return fallback, "rule_fallback", None
+            if self._agent is None:
+                fallback = self._rule_based_decision(payload, reason_prefix=self._import_error_prefix())
+                self._set_span_attr(span, "character.selected_by", "rule_fallback")
+                return fallback, "rule_fallback", None
 
-        decision_prompt = self._build_decision_prompt(payload)
-        raw_output: str | None = None
+            decision_prompt = self._build_decision_prompt(payload)
+            raw_output: str | None = None
 
-        try:
-            response = await self._agent.run(decision_prompt)
-            raw_output = (response.text or "").strip()
-            parsed = self._parse_agent_output(raw_output)
-            if parsed is not None:
-                return parsed, "agent", raw_output
-        except Exception as exc:
-            fallback = self._rule_based_decision(payload, reason_prefix=f"Agent runtime failure: {exc}")
+            try:
+                with self._start_span("character_router.agent_run"):
+                    response = await self._agent.run(decision_prompt)
+                raw_output = (response.text or "").strip()
+                parsed = self._parse_agent_output(raw_output)
+                if parsed is not None:
+                    self._set_span_attr(span, "character.selected_by", "agent")
+                    self._set_span_attr(span, "character.selected_action", parsed.selected_action)
+                    return parsed, "agent", raw_output
+            except Exception as exc:
+                fallback = self._rule_based_decision(payload, reason_prefix=f"Agent runtime failure: {exc}")
+                self._set_span_attr(span, "character.selected_by", "rule_fallback")
+                return fallback, "rule_fallback", raw_output
+
+            fallback = self._rule_based_decision(payload, reason_prefix="Could not parse routing JSON from model output.")
+            self._set_span_attr(span, "character.selected_by", "rule_fallback")
             return fallback, "rule_fallback", raw_output
-
-        fallback = self._rule_based_decision(payload, reason_prefix="Could not parse routing JSON from model output.")
-        return fallback, "rule_fallback", raw_output
 
     def _build_decision_prompt(self, payload: CharacterOrchestrationRequest) -> str:
         snapshot = {
@@ -203,3 +219,16 @@ class MAFRoutingAgent:
         if MAF_IMPORT_ERROR is None:
             return "MAF agent unavailable."
         return f"MAF import unavailable: {MAF_IMPORT_ERROR}"
+
+    def _start_span(self, name: str):
+        if TRACER is None:
+            return nullcontext()
+        return TRACER.start_as_current_span(name)
+
+    def _set_span_attr(self, span: Any, key: str, value: Any) -> None:
+        if span is None or value is None:
+            return
+        try:
+            span.set_attribute(key, value)
+        except Exception:
+            return

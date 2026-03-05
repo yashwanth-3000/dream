@@ -2,7 +2,7 @@
 
 An AI-powered storytelling platform for kids. Children and parents describe a story idea and Dream turns it into a fully illustrated storybook complete with named characters, hand-crafted backstories, scene illustrations, and a fixed 7-spread page layout ready to read.
 
-The platform is built across four services that talk to each other using open protocols: a Next.js frontend, a MAF orchestration layer, a CrewAI character engine, and a MAF storybook engine. Every AI call goes through a proper agent, every backend call goes through A2A, and web search is grounded through MCP.
+The platform is built across four services that talk to each other using open protocols: a Next.js frontend, a MAF orchestration layer, a CrewAI character engine, and a MAF storybook engine. Every AI call goes through a proper agent, every backend call goes through A2A, web search grounding is handled through Exa MCP, and uploaded-study grounding is handled through Azure AI Search.
 
 **Built with [Microsoft Agent Framework (MAF)](https://learn.microsoft.com/en-us/agent-framework/) a structured agent SDK that wraps OpenAI and Azure OpenAI behind typed `Agent` objects with named identities, system instructions, and tool-use support. No raw `openai.chat.completions` calls exist anywhere in this codebase. Every LLM interaction is an agent.**
 
@@ -20,7 +20,7 @@ Each service has a detailed README covering agents, endpoints, environment varia
 | Main Orchestrator (MAF + MCP + A2A) | `8010` | [`backend/main-maf-chat/README.md`](backend/main-maf-chat/README.md) |
 | Character Maker (CrewAI + A2A) | `8000` | [`backend/a2a-crew-ai-character-maker/README.md`](backend/a2a-crew-ai-character-maker/README.md) |
 | Story Book Maker (MAF + A2A) | `8020` | [`backend/a2a-maf-story-book-maker/README.md`](backend/a2a-maf-story-book-maker/README.md) |
-| Exa MCP Integration | — | [`backend/mcp-exa/README.md`](backend/mcp-exa/README.md) |
+| Azure Search RAG Integration | — | [`backend/main-maf-chat/README.md`](backend/main-maf-chat/README.md) |
 
 ---
 
@@ -28,7 +28,7 @@ Each service has a detailed README covering agents, endpoints, environment varia
 
 | Feature | What Happens |
 |---------|-------------|
-| **Kid-safe chat** | Kids ask questions, two MAF agents classify and answer. Search mode activates Exa MCP for real-time web grounding. |
+| **Kid-safe chat** | Kids ask questions, two MAF agents classify and answer. Search mode uses Exa MCP for fresh web results, and Study mode uses Azure AI Search over uploaded PDFs with citations. |
 | **Character creation** | A prompt + optional drawings → Vision analysis → 4 CrewAI agents build a full character backstory and image prompt → Replicate renders the character illustration. |
 | **Storybook generation** | A prompt → MAF agents write a story plan, chapter text, and scene prompts → character generation runs in parallel via A2A → Replicate renders cover + 5 scene images → fixed 7-spread output. |
 | **Job tracking** | Every creation run is a tracked job. Progress events stream to the frontend over SSE in real time. Downloaded assets are stored locally so images don't depend on external URLs. |
@@ -45,7 +45,7 @@ Each service has a detailed README covering agents, endpoints, environment varia
 | Protocol | Where Used | Why |
 |----------|-----------|-----|
 | **A2A** (Agent-to-Agent JSON-RPC) | Orchestrator ↔ Character Maker, Orchestrator ↔ Story Maker, Story Maker ↔ Character Maker | Standard agent-to-agent call protocol. Every backend is independently deployable and replaceable — the orchestrator never knows the internal implementation, only the A2A contract. |
-| **MCP** (Model Context Protocol) | ResponderAgent ↔ Exa MCP server | Standard protocol for agents to discover and call external tools at runtime. The MAF agent decides when and how to call `web_search_exa` — the orchestrator never calls Exa directly. |
+| **MCP** (Model Context Protocol) | Orchestrator ↔ Exa MCP | Standard protocol for tool access at runtime. Search mode uses Exa MCP for fresh internet retrieval. |
 | **SSE** (Server-Sent Events) | Orchestrator → Website | Real-time job progress pushed to the browser. Each storybook stream event (Vision, Blueprint, Story, ScenePrompts, Images) is forwarded as it happens. |
 | **REST + NDJSON** | Website ↔ Orchestrator | Standard HTTP for all non-streaming calls. Streaming storybook uses NDJSON (newline-delimited JSON chunks). |
 
@@ -75,7 +75,7 @@ FastAPI service on port 8010. The single entrypoint for all backend operations.
 Everything that enters this service goes through at least one MAF agent before any downstream call is made. Three agents live here:
 
 - **QuestionReaderAgent** — classifies kid questions by safety level, reading level, response style
-- **ResponderAgent** — writes kid-safe answers; activates Exa MCP when search mode is on
+- **ResponderAgent** — writes kid-safe answers using Exa grounding in search mode and Azure Search grounding in study mode
 - **MAFRoutingAgent** — decides whether a character request needs full creation (Vision + CrewAI) or image-only regeneration (Replicate)
 
 Beyond the agents, this service owns the job lifecycle: creating job records, streaming progress events over SSE, downloading completed assets, and serving them to the frontend.
@@ -129,13 +129,15 @@ The service exposes both a REST endpoint and an A2A JSON-RPC endpoint. It also e
 
 ---
 
-### Exa MCP Integration — `backend/mcp-exa/`
+### Search + Study Retrieval
 
-Not a running service — documentation for how the main orchestrator integrates Exa's web search as an MCP tool.
+Chat retrieval uses split routing:
 
-When a user activates search mode in the chat UI, the ResponderAgent gets access to the `web_search_exa` MCP tool via `MCPStreamableHTTPTool`. The agent decides autonomously when to call it and with what query. The orchestrator never calls the Exa API directly.
+1. `mode=search` uses Exa MCP for fresh internet retrieval.
+2. `mode=study` uses Azure AI Search over uploaded PDF chunks filtered by `study_session_id`.
+3. Both modes return normalized citations to the frontend.
 
-[→ Full wiring guide: `backend/mcp-exa/README.md`]
+[→ Full wiring guide: `backend/main-maf-chat/README.md`]
 
 ---
 
@@ -174,12 +176,12 @@ dream/
     ├── main-maf-chat/                    # Main orchestrator  (port 8010)
     │   ├── agent_orchestrator/
     │   │   ├── main.py                   # FastAPI app + all route handlers
-    │   │   ├── chat_agents.py            # QuestionReader + Responder MAF agents + Exa MCP
+    │   │   ├── chat_agents.py            # QuestionReader + Responder MAF agents + Azure Search RAG
     │   │   ├── maf_router.py             # MAFRoutingAgent for character routing
     │   │   ├── backend_client.py         # A2A calls to character + story backends
     │   │   ├── job_manager.py            # Job lifecycle + SSE event bus
     │   │   ├── database.py               # SQLite (aiosqlite)
-    │   │   ├── config.py                 # Settings (openai / azure / exa / a2a)
+    │   │   ├── config.py                 # Settings (openai / azure / azure-search / a2a)
     │   │   └── models.py                 # All Pydantic request/response models
     │   ├── scripts/deploy_azure.sh
     │   ├── Dockerfile
@@ -211,8 +213,8 @@ dream/
     │   ├── requirements.txt
     │   └── README.md                     ← full service docs
     │
-    └── mcp-exa/                          # Exa MCP integration docs
-        ├── README.md                     ← full wiring guide
+    └── mcp-exa/                          # Exa MCP integration notes
+        ├── README.md                     ← active Exa MCP notes
         └── SOURCES.md                    ← reference docs used
 ```
 
@@ -254,7 +256,7 @@ dream/
 
 ```
 1. Kid types a question in /chat
-2. User selects mode: normal or search
+2. User selects mode: normal, search, or study
    ↓
 3. POST /api/chat  →  Next.js proxy  →  POST /api/v1/orchestrate/chat
    ↓
@@ -263,11 +265,9 @@ dream/
    returns: { category, safety, reading_level, response_style }
    ↓
 5. ResponderAgent (MAF)
-   normal mode:  agent.run(prompt)  →  OpenAI  →  answer
-   search mode:  MCPStreamableHTTPTool connects to https://mcp.exa.ai/mcp
-                 agent.run(prompt, tools=exa_tool)
-                 LLM autonomously calls web_search_exa with its own query
-                 weaves search results into kid-safe answer
+   normal mode: agent.run(prompt)  →  OpenAI  →  answer
+   search mode: Exa MCP web retrieval + grounded answer
+   study mode:  Azure Search retrieval from uploaded PDF chunks (session-filtered)
    ↓
 6. Response returned:
    { answer, category, safety, reading_level, mcp_used, mcp_server, mcp_output }
@@ -329,7 +329,7 @@ uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
 cd backend/main-maf-chat
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # fill in OPENAI_API_KEY + EXA_API_KEY (optional)
+cp .env.example .env   # fill in OPENAI_API_KEY (and Azure Search vars if testing search mode)
 uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
 ```
 
@@ -376,8 +376,10 @@ curl http://127.0.0.1:8010/api/v1/orchestrate/a2a-health
 | `OPENAI_MODEL` | No (`gpt-4o-mini`) | Model for all MAF agents |
 | `A2A_BACKEND_BASE_URL` | No (`http://127.0.0.1:8000`) | Character Maker URL |
 | `A2A_STORY_BACKEND_BASE_URL` | No (`http://127.0.0.1:8020`) | Story Maker URL |
-| `EXA_API_KEY` | No | Exa API key for search mode |
-| `EXA_MCP_ENABLED` | No (`true`) | Enable Exa MCP in search mode |
+| `AZURE_SEARCH_SERVICE_ENDPOINT` | Search mode | Azure AI Search endpoint |
+| `AZURE_SEARCH_INDEX_NAME` | Search mode | Azure AI Search index for hybrid fallback |
+| `AZURE_SEARCH_KNOWLEDGE_BASE_NAME` | Search mode | Azure AI Search knowledge base name for MCP |
+| `AZURE_SEARCH_API_KEY` | Search mode (if not MI) | Search data-plane key |
 
 ### Character Maker — `backend/a2a-crew-ai-character-maker/.env`
 
@@ -407,7 +409,7 @@ curl http://127.0.0.1:8010/api/v1/orchestrate/a2a-health
 | Character Engine | FastAPI · CrewAI · OpenAI Vision (`gpt-4.1-mini`) |
 | Story Engine | FastAPI · Microsoft Agent Framework (MAF) |
 | Image Generation | Replicate (`openai/gpt-image-1.5`) |
-| Web Search | Exa MCP (`web_search_exa`) via `MCPStreamableHTTPTool` |
+| Search Grounding | Exa MCP (`mode=search`) + Azure AI Search study RAG (`mode=study`) |
 | Agent-to-Agent | A2A SDK · JSON-RPC (`message/send`, `message/stream`) |
 | Job Persistence | SQLite via `aiosqlite` |
 | Real-time | Server-Sent Events (SSE) |

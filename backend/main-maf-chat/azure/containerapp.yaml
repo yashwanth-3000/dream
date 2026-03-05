@@ -1,5 +1,5 @@
 # Template for Azure Container Apps deployment.
-# This file is optional when using scripts/deploy_azure.sh, but kept for infra clarity.
+# Environment variables are shown for Azure-first setup (Foundry/OpenAI on Azure + Search + Content Safety).
 name: ${AZURE_CONTAINERAPP_NAME}
 type: Microsoft.App/containerApps
 location: ${AZURE_LOCATION}
@@ -13,6 +13,14 @@ properties:
     secrets:
       - name: azure-openai-api-key
         value: ${AZURE_OPENAI_API_KEY}
+      - name: exa-api-key
+        value: ${EXA_API_KEY}
+      - name: azure-search-api-key
+        value: ${AZURE_SEARCH_API_KEY}
+      - name: azure-content-safety-api-key
+        value: ${AZURE_CONTENT_SAFETY_API_KEY}
+      - name: appinsights-connection-string
+        value: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
   template:
     containers:
       - name: maf-orchestrator
@@ -20,8 +28,6 @@ properties:
         env:
           - name: AGENT_PROVIDER
             value: azure
-          - name: A2A_BACKEND_BASE_URL
-            value: ${A2A_BACKEND_BASE_URL}
           - name: AZURE_OPENAI_ENDPOINT
             value: ${AZURE_OPENAI_ENDPOINT}
           - name: AZURE_OPENAI_CHAT_DEPLOYMENT_NAME
@@ -30,6 +36,95 @@ properties:
             value: ${AZURE_OPENAI_API_VERSION}
           - name: AZURE_OPENAI_API_KEY
             secretRef: azure-openai-api-key
+          - name: EXA_API_KEY
+            secretRef: exa-api-key
+          - name: EXA_MCP_ENABLED
+            value: ${EXA_MCP_ENABLED}
+          - name: EXA_MCP_BASE_URL
+            value: ${EXA_MCP_BASE_URL}
+          - name: EXA_MCP_TOOLS
+            value: ${EXA_MCP_TOOLS}
+          - name: EXA_MCP_REQUIRED_IN_SEARCH
+            value: ${EXA_MCP_REQUIRED_IN_SEARCH}
+          - name: EXA_MCP_TIMEOUT_SECONDS
+            value: ${EXA_MCP_TIMEOUT_SECONDS}
+          - name: EXA_SEARCH_TOP_K
+            value: ${EXA_SEARCH_TOP_K}
+
+          - name: A2A_BACKEND_BASE_URL
+            value: ${A2A_BACKEND_BASE_URL}
+          - name: A2A_RPC_PATH
+            value: ${A2A_RPC_PATH}
+          - name: A2A_USE_PROTOCOL
+            value: "true"
+          - name: A2A_STORY_BACKEND_BASE_URL
+            value: ${A2A_STORY_BACKEND_BASE_URL}
+          - name: A2A_STORY_RPC_PATH
+            value: ${A2A_STORY_RPC_PATH}
+          - name: A2A_STORY_USE_PROTOCOL
+            value: ${A2A_STORY_USE_PROTOCOL}
+          - name: A2A_QUIZ_BACKEND_BASE_URL
+            value: ${A2A_QUIZ_BACKEND_BASE_URL}
+          - name: A2A_QUIZ_RPC_PATH
+            value: ${A2A_QUIZ_RPC_PATH}
+          - name: A2A_QUIZ_USE_PROTOCOL
+            value: ${A2A_QUIZ_USE_PROTOCOL}
+
+          - name: AZURE_SEARCH_SERVICE_ENDPOINT
+            value: ${AZURE_SEARCH_SERVICE_ENDPOINT}
+          - name: AZURE_SEARCH_USE_MANAGED_IDENTITY
+            value: ${AZURE_SEARCH_USE_MANAGED_IDENTITY}
+          - name: AZURE_SEARCH_INDEX_NAME
+            value: ${AZURE_SEARCH_INDEX_NAME}
+          - name: AZURE_SEARCH_MCP_ENABLED
+            value: ${AZURE_SEARCH_MCP_ENABLED}
+          - name: AZURE_SEARCH_FALLBACK_ENABLED
+            value: ${AZURE_SEARCH_FALLBACK_ENABLED}
+          - name: AZURE_SEARCH_API_VERSION
+            value: ${AZURE_SEARCH_API_VERSION}
+          - name: AZURE_SEARCH_MCP_API_VERSION
+            value: ${AZURE_SEARCH_MCP_API_VERSION}
+          - name: AZURE_SEARCH_API_KEY
+            secretRef: azure-search-api-key
+          - name: AZURE_SEARCH_STUDY_ENABLED
+            value: ${AZURE_SEARCH_STUDY_ENABLED}
+          - name: AZURE_SEARCH_STUDY_INDEX_NAME
+            value: ${AZURE_SEARCH_STUDY_INDEX_NAME}
+          - name: AZURE_SEARCH_STUDY_SESSION_FIELD
+            value: ${AZURE_SEARCH_STUDY_SESSION_FIELD}
+          - name: AZURE_SEARCH_STUDY_ID_FIELD
+            value: ${AZURE_SEARCH_STUDY_ID_FIELD}
+          - name: AZURE_SEARCH_STUDY_CONTENT_FIELD
+            value: ${AZURE_SEARCH_STUDY_CONTENT_FIELD}
+          - name: AZURE_SEARCH_STUDY_TITLE_FIELD
+            value: ${AZURE_SEARCH_STUDY_TITLE_FIELD}
+          - name: AZURE_SEARCH_STUDY_URL_FIELD
+            value: ${AZURE_SEARCH_STUDY_URL_FIELD}
+          - name: AZURE_SEARCH_STUDY_FILENAME_FIELD
+            value: ${AZURE_SEARCH_STUDY_FILENAME_FIELD}
+          - name: AZURE_SEARCH_STUDY_CHUNK_INDEX_FIELD
+            value: ${AZURE_SEARCH_STUDY_CHUNK_INDEX_FIELD}
+          - name: AZURE_SEARCH_STUDY_UPLOADED_AT_FIELD
+            value: ${AZURE_SEARCH_STUDY_UPLOADED_AT_FIELD}
+          - name: AZURE_SEARCH_STUDY_CHUNK_SIZE_CHARS
+            value: ${AZURE_SEARCH_STUDY_CHUNK_SIZE_CHARS}
+          - name: AZURE_SEARCH_STUDY_CHUNK_OVERLAP_CHARS
+            value: ${AZURE_SEARCH_STUDY_CHUNK_OVERLAP_CHARS}
+          - name: AZURE_SEARCH_STUDY_MAX_FILE_BYTES
+            value: ${AZURE_SEARCH_STUDY_MAX_FILE_BYTES}
+
+          - name: AZURE_CONTENT_SAFETY_ENABLED
+            value: ${AZURE_CONTENT_SAFETY_ENABLED}
+          - name: AZURE_CONTENT_SAFETY_ENDPOINT
+            value: ${AZURE_CONTENT_SAFETY_ENDPOINT}
+          - name: AZURE_CONTENT_SAFETY_API_VERSION
+            value: ${AZURE_CONTENT_SAFETY_API_VERSION}
+          - name: AZURE_CONTENT_SAFETY_API_KEY
+            secretRef: azure-content-safety-api-key
+
+          - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+            secretRef: appinsights-connection-string
+
         resources:
           cpu: 1
           memory: 2Gi

@@ -1,13 +1,14 @@
 # Dream MAF Orchestrator
 
-The central orchestration layer for the Dream platform. Built on Microsoft Agent Framework (MAF), it routes kid-safe chat through dual MAF agents (with optional Exa MCP web search), forwards character creation requests through a MAF routing agent to the CrewAI Character Maker, and passes storybook requests to the MAF Story Book Maker — all via the A2A protocol.
+The central orchestration layer for the Dream platform. Built on Microsoft Agent Framework (MAF), it routes kid-safe chat through dual MAF agents, keeps web search on Exa MCP for fresh internet grounding, adds Azure AI Search RAG for uploaded study PDFs, forwards character creation requests through a MAF routing agent to the CrewAI Character Maker, and passes storybook requests to the MAF Story Book Maker — all via the A2A protocol.
 
 **Pipeline:** Incoming request → MAF routing/chat agents → A2A protocol → specialist backends → job tracking + asset storage → structured response.
 
 **Models used:**
 
 - `gpt-4o-mini` (MAF agents) — question classification, kid-safe answering, character action routing
-- Exa MCP (`web_search_exa`) — real-time web search grounding in chat search mode
+- Exa MCP (`web_search_exa`) — retrieval path in chat search mode
+- Azure AI Search study index (`mode=study`) — retrieval path for uploaded PDF sessions
 
 
 ### Architecture
@@ -39,17 +40,21 @@ User message
         60–140 word kid-safe answer using warm, concrete language.
         - unsafe safety   → politely refuses, suggests trusted adult
         - caution safety  → responds gently with supportive guidance
-        - search mode     → injects Exa MCP tools before .run() so the
-                            agent can call web_search_exa for fresh facts
+        - search mode     → retrieves fresh web evidence from Exa MCP
+        - study mode      → retrieves evidence from uploaded PDFs in Azure AI Search
 ```
 
 **Normal mode** (`mode=normal`) — both agents run against OpenAI directly, no external calls beyond the LLM.
 
-**Search mode** (`mode=search`) — before the Responder runs, `MCPStreamableHTTPTool` connects to `https://mcp.exa.ai/mcp`, loads the `web_search_exa` tool, and passes it into `agent.run(prompt, tools=exa_tool)`. The MAF agent decides on its own whether and how to call the tool — the orchestrator does not call the search API directly.
+**Search mode** (`mode=search`) — retrieval uses Exa MCP (`web_search_exa`) for fresh internet results.
+
+**Study mode** (`mode=study`) — retrieval uses Azure AI Search filtered by `study_session_id` so answers are grounded to user-uploaded PDFs only.
+
+Retrieved evidence and citations are injected into the responder prompt as mode-specific grounding context.
 
 **Temporal queries** (e.g. "what is today's date?") are intercepted before the Responder. The server clock is injected as authoritative context and, if the LLM omits the ISO date in its reply, a deterministic correction is applied so the answer is always accurate.
 
-**MCP failure handling** — if `EXA_MCP_REQUIRED_IN_SEARCH=true` (default) and the MCP server is unreachable, the request fails with a 502. If set to `false`, the Responder falls back to answering without search rather than failing silently.
+**MCP failure handling** — Exa MCP diagnostics are surfaced in `mcp_output.errors`. If `EXA_MCP_REQUIRED_IN_SEARCH=true`, the request fails when no Exa evidence is returned.
 
 ---
 
@@ -127,7 +132,7 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 | Layer | What It Provides |
 |-------|-----------------|
 | **MAF** (`agent-framework-core`) | Structured `Agent` abstraction over OpenAI/Azure. Agents have names, system instructions, and run against a typed LLM client. No raw `openai.chat.completions` calls anywhere in this service. |
-| **MCP** (`mcp==1.24.0`) | Standard protocol for giving agents access to external tools at runtime. `MCPStreamableHTTPTool` connects to the Exa MCP server and exposes `web_search_exa` as a callable tool the agent can invoke autonomously. |
+| **MCP** (`mcp==1.24.0`) | Standard protocol for giving agents access to external tools at runtime. Search mode uses Exa MCP for web retrieval; study mode uses Azure Search REST retrieval over indexed PDF chunks. |
 | **A2A** (`a2a-sdk==0.3.5`) | Standard agent-to-agent call protocol. All calls to character and storybook backends use `message/send` JSON-RPC, not direct HTTP. This keeps backends independently deployable and replaceable without changing this service. |
 
 ---
@@ -137,7 +142,7 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 | Agent | Name | Purpose |
 |-------|------|---------|
 | QuestionReaderAgent | `dream-kid-question-reader` | Classifies kid questions by category, safety level, reading level, and response style |
-| ResponderAgent | `dream-kid-response-agent` | Generates kid-safe answer; uses Exa MCP search tools when `mode=search` |
+| ResponderAgent | `dream-kid-response-agent` | Generates kid-safe answer; uses Exa retrieval in `mode=search` and Azure study retrieval in `mode=study` |
 | MAFRoutingAgent | `dream-character-router` | Routes character requests to `create` (full pipeline) or `regenerate` (image-only) |
 
 ### Routing Logic
@@ -145,7 +150,8 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 | Request Type | Agent Path | Destination |
 |---|---|---|
 | Chat — `mode=normal` | QuestionReader + Responder MAF agents | OpenAI |
-| Chat — `mode=search` | QuestionReader + Responder MAF agents + Exa MCP | OpenAI + `mcp.exa.ai` |
+| Chat — `mode=search` | QuestionReader + Responder MAF agents + Exa MCP retrieval | OpenAI + Exa |
+| Chat — `mode=study` | QuestionReader + Responder MAF agents + Azure Search study retrieval | OpenAI + Azure AI Search |
 | Character — `mode=create` | MAF Router agent → A2A | Character Maker (`:8000`) |
 | Character — `mode=regenerate` | MAF Router agent → A2A | Character Maker (`:8000`) |
 | Character — `mode=auto` | MAF Router agent decides → A2A | Character Maker (`:8000`) |
@@ -162,7 +168,7 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 backend/main-maf-chat/
 ├── agent_orchestrator/
 │   ├── main.py                    # FastAPI entrypoint + all route handlers
-│   ├── chat_agents.py             # MAFKidsChatOrchestrator — QuestionReader + Responder agents + Exa MCP
+│   ├── chat_agents.py             # MAFKidsChatOrchestrator — QuestionReader + Responder + Exa/Azure retrieval + safety
 │   ├── maf_router.py              # MAFRoutingAgent — character create/regenerate routing decision
 │   ├── backend_client.py          # A2ABackendClient — A2A calls to character + storybook backends
 │   ├── config.py                  # Pydantic-settings with provider + A2A validation
@@ -204,12 +210,37 @@ cp .env.example .env
 | `AZURE_OPENAI_API_KEY` | Yes (azure) | — | Azure OpenAI API key |
 | `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME` | Yes (azure) | — | Deployment name for chat model |
 | `AZURE_OPENAI_API_VERSION` | No | `preview` | Azure API version string |
-| `EXA_MCP_ENABLED` | No | `true` | Enable Exa MCP web search in search mode |
-| `EXA_MCP_REQUIRED_IN_SEARCH` | No | `true` | Fail hard if Exa MCP is unavailable in search mode |
-| `EXA_MCP_BASE_URL` | No | `https://mcp.exa.ai/mcp` | Exa MCP server base URL |
-| `EXA_API_KEY` | No | — | Exa API key (appended as `exaApiKey` query param) |
-| `EXA_MCP_TOOLS` | No | `web_search_exa` | Comma-separated list of allowed MCP tool names |
-| `EXA_MCP_TIMEOUT_SECONDS` | No | `45` | Per-request timeout for Exa MCP calls |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | No | — | Enables Azure Monitor OpenTelemetry export when provided |
+| `EXA_API_KEY` | Yes (search mode) | — | Exa API key used by Exa MCP retrieval |
+| `EXA_MCP_ENABLED` | No | `true` | Enable Exa MCP retrieval path |
+| `EXA_MCP_BASE_URL` | No | `https://mcp.exa.ai/mcp` | Exa MCP endpoint |
+| `EXA_MCP_TOOLS` | No | `web_search_exa` | Tool scope/query for Exa MCP |
+| `EXA_MCP_REQUIRED_IN_SEARCH` | No | `true` | Fail `mode=search` if Exa MCP is unavailable or returns no evidence |
+| `EXA_MCP_TIMEOUT_SECONDS` | No | `20` | Exa MCP request timeout |
+| `EXA_SEARCH_TOP_K` | No | `6` | Max retained Exa citations |
+| `AZURE_SEARCH_SERVICE_ENDPOINT` | No | — | Azure AI Search service endpoint |
+| `AZURE_SEARCH_API_KEY` | No | — | Azure AI Search key (optional when managed identity is enabled) |
+| `AZURE_SEARCH_USE_MANAGED_IDENTITY` | No | `false` | Use managed identity token instead of API key for Azure Search |
+| `AZURE_SEARCH_INDEX_NAME` | No | — | Default Azure AI Search index name |
+| `AZURE_SEARCH_KNOWLEDGE_BASE_NAME` | No | — | Optional legacy knowledge-base MCP name (not required for search mode) |
+| `AZURE_SEARCH_MCP_ENABLED` | No | `true` | Legacy Azure MCP toggle (kept for compatibility) |
+| `AZURE_SEARCH_FALLBACK_ENABLED` | No | `true` | Enable Azure Search hybrid + semantic fallback retrieval |
+| `AZURE_SEARCH_API_VERSION` | No | `2025-09-01` | Azure Search GA REST API version for fallback retrieval |
+| `AZURE_SEARCH_MCP_API_VERSION` | No | `2025-11-01-preview` | Azure Search MCP endpoint API version |
+| `AZURE_SEARCH_TOP_K` | No | `6` | Number of citations/snippets retained from retrieval |
+| `AZURE_SEARCH_VECTOR_K` | No | `20` | Number of vector neighbors used in hybrid query |
+| `AZURE_SEARCH_STUDY_ENABLED` | No | `true` | Enable Azure study-mode retrieval/indexing |
+| `AZURE_SEARCH_STUDY_INDEX_NAME` | No | — | Dedicated index for uploaded-study chunks (falls back to `AZURE_SEARCH_INDEX_NAME`) |
+| `AZURE_SEARCH_STUDY_SESSION_FIELD` | No | `study_session_id` | Field used to isolate one study session |
+| `AZURE_SEARCH_STUDY_CONTENT_FIELD` | No | `content` | Field where chunk text is stored |
+| `AZURE_SEARCH_STUDY_TITLE_FIELD` | No | `title` | Field for original filename/title |
+| `AZURE_SEARCH_STUDY_MAX_FILE_BYTES` | No | `20000000` | Max upload size for one PDF |
+| `AZURE_CONTENT_SAFETY_ENABLED` | No | `false` | Enable Azure AI Content Safety checks for chat I/O |
+| `AZURE_CONTENT_SAFETY_ENDPOINT` | No | — | Azure AI Content Safety endpoint |
+| `AZURE_CONTENT_SAFETY_API_KEY` | No | — | Azure AI Content Safety API key |
+| `AZURE_CONTENT_SAFETY_API_VERSION` | No | `2024-09-01` | Content Safety API version |
+| `AZURE_CONTENT_SAFETY_BLOCK_SEVERITY` | No | `4` | Block threshold for category severities |
+| `AZURE_CONTENT_SAFETY_FAIL_OPEN` | No | `true` | If Content Safety call fails, allow response and record error metadata |
 | `A2A_BACKEND_BASE_URL` | No | `http://127.0.0.1:8000` | Character Maker backend URL |
 | `A2A_RPC_PATH` | No | `/a2a` | Character backend A2A RPC path |
 | `A2A_USE_PROTOCOL` | No | `true` | Must remain `true` — enforced by startup validator |
@@ -303,7 +334,7 @@ If your subscription supports ACR Tasks, you can use:
 | `GET` | `/health` | Service health + character backend connectivity snapshot |
 | `GET` | `/api/v1/orchestrate/a2a-health` | A2A health probe for character backend |
 | `GET` | `/api/v1/orchestrate/storybook-health` | A2A health probe for storybook backend |
-| `POST` | `/api/v1/orchestrate/chat` | Kid-safe chat — MAF agents + optional Exa MCP |
+| `POST` | `/api/v1/orchestrate/chat` | Kid-safe chat — MAF agents + Azure AI Search retrieval |
 | `POST` | `/api/v1/orchestrate/character` | Character creation/regeneration via MAF router + A2A |
 | `POST` | `/api/v1/orchestrate/storybook` | Storybook creation passthrough via A2A |
 | `POST` | `/api/v1/orchestrate/storybook/stream` | Streaming storybook creation (NDJSON) |
@@ -329,7 +360,7 @@ If your subscription supports ACR Tasks, you can use:
 }
 ```
 
-`mode` options: `normal` (MAF agents only), `search` (MAF agents + Exa MCP web search).
+`mode` options: `normal` (MAF agents only), `search` (MAF agents + Exa MCP web retrieval), `study` (MAF agents + Azure study-session retrieval).
 
 ### Chat Response
 
@@ -342,17 +373,26 @@ If your subscription supports ACR Tasks, you can use:
   "response_style": "explainer",
   "model": "gpt-4o-mini",
   "mcp_used": true,
-  "mcp_server": "https://mcp.exa.ai/mcp",
+  "mcp_server": "https://mcp.exa.ai/mcp?tools=web_search_exa",
   "mcp_output": {
-    "tools": ["web_search_exa"],
-    "tool_used": "web_search_exa",
-    "input": { "query": "why is the sky blue" },
+    "provider": "exa_mcp",
+    "used_fallback": false,
+    "input": { "query": "latest science news for kids" },
     "output": "..."
   }
 }
 ```
 
-`mcp_used` is `true` only when the Exa MCP tool was called during that reply. `mcp_output` is `null` in normal mode.
+`mcp_used` is `true` only when Exa MCP returned evidence in `mode=search`. In `mode=study`, retrieval metadata is reported through `retrieval_provider=azure_search_study` and standard `citations`.
+
+### Study Upload Endpoint
+
+`POST /api/v1/orchestrate/study/upload` accepts multipart form-data:
+
+- `file`: PDF file
+- `session_id` (optional): existing study session id to append more files
+
+Response includes `session_id`, `file_id`, and `chunks_indexed`. Pass `study_session_id` in subsequent `/api/v1/orchestrate/chat` requests with `mode=study`.
 
 ### Character Request
 
@@ -424,7 +464,7 @@ If your subscription supports ACR Tasks, you can use:
 | Code | Meaning |
 |------|---------|
 | `422` | Invalid request schema or missing required field |
-| `502` | Upstream failure — OpenAI, Exa MCP, character backend, or storybook backend |
+| `502` | Upstream failure — OpenAI/Azure OpenAI, Azure Search retrieval, character backend, or storybook backend |
 | `500` | Unhandled server exception |
 
 ## Quick Test Commands
@@ -460,7 +500,7 @@ curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
   }'
 ```
 
-Kid-safe chat (search mode — triggers Exa MCP):
+Kid-safe chat (search mode — Exa MCP web retrieval):
 
 ```bash
 curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
@@ -470,6 +510,20 @@ curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
     "history": [],
     "age_band": "8-10",
     "mode": "search"
+  }'
+```
+
+Kid-safe chat (study mode — Azure Search over uploaded PDFs):
+
+```bash
+curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Summarize chapter 2 from my uploaded notes.",
+    "history": [],
+    "age_band": "8-10",
+    "mode": "study",
+    "study_session_id": "your-session-id"
   }'
 ```
 
@@ -519,8 +573,9 @@ curl -N "http://127.0.0.1:8010/api/v1/jobs/{job_id}/stream"
 |---------|-------|
 | `OPENAI_API_KEY is required` | Set `OPENAI_API_KEY` in `.env` or confirm `AGENT_PROVIDER` matches provided credentials |
 | `A2A-only mode: A2A_USE_PROTOCOL must be true` | Do not set `A2A_USE_PROTOCOL=false` — enforced at startup and cannot be bypassed |
-| `Search mode requires MCP, but EXA_MCP_ENABLED is false` | Set `EXA_MCP_ENABLED=true` and provide a valid `EXA_API_KEY` |
-| Exa MCP timeout | Increase `EXA_MCP_TIMEOUT_SECONDS`; verify `EXA_API_KEY` is valid |
+| Search mode has no citations | Verify `AZURE_SEARCH_SERVICE_ENDPOINT`, `AZURE_SEARCH_KNOWLEDGE_BASE_NAME`, and `AZURE_SEARCH_INDEX_NAME` are set |
+| Azure Search auth error | Use `AZURE_SEARCH_API_KEY` or set `AZURE_SEARCH_USE_MANAGED_IDENTITY=true` and assign search roles to container app identity |
+| Content Safety call failures | Check `AZURE_CONTENT_SAFETY_ENDPOINT` and `AZURE_CONTENT_SAFETY_API_KEY`; set `AZURE_CONTENT_SAFETY_FAIL_OPEN=true` during dev |
 | `Chat responder failed` | Check `OPENAI_API_KEY`, model access, and OpenAI quota |
 | `A2ABackendError` on character requests | Verify character backend is running at `A2A_BACKEND_BASE_URL` |
 | `A2ABackendError` on storybook requests | Verify storybook backend is running at `A2A_STORY_BACKEND_BASE_URL` |
@@ -537,7 +592,7 @@ Pinned in `requirements.txt`:
 |---------|---------|---------|
 | `agent-framework-core` | `1.0.0rc1` | MAF `Agent` class + OpenAI/Azure LLM clients |
 | `agent-framework-a2a` | `1.0.0b260219` | MAF A2A transport layer |
-| `mcp` | `1.24.0` | MCP protocol client (`MCPStreamableHTTPTool` for Exa) |
+| `mcp` | `1.24.0` | MCP protocol client (`MCPStreamableHTTPTool` for Azure Search Knowledge Base MCP) |
 | `a2a-sdk` | `0.3.5` | A2A JSON-RPC protocol (`message/send`, `message/stream`) |
 | `aiosqlite` | `0.21.0` | Async SQLite for job tracking |
 | `fastapi` | `0.133.0` | Web framework |

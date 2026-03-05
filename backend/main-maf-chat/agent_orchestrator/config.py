@@ -25,12 +25,56 @@ class Settings(BaseSettings):
     azure_openai_chat_deployment_name: str | None = None
     azure_openai_api_version: str = "preview"
 
-    exa_mcp_enabled: bool = True
-    exa_mcp_required_in_search: bool = True
-    exa_mcp_base_url: str = "https://mcp.exa.ai/mcp"
+    applicationinsights_connection_string: str | None = None
+
     exa_api_key: str | None = None
+    exa_mcp_enabled: bool = True
+    exa_mcp_base_url: str = "https://mcp.exa.ai/mcp"
     exa_mcp_tools: str | None = "web_search_exa"
-    exa_mcp_timeout_seconds: float = Field(default=45.0, gt=0.0)
+    exa_mcp_required_in_search: bool = True
+    exa_mcp_timeout_seconds: float = Field(default=20.0, gt=0.0)
+    exa_search_top_k: int = Field(default=6, ge=1, le=20)
+
+    azure_search_service_endpoint: str | None = None
+    azure_search_api_key: str | None = None
+    azure_search_index_name: str | None = None
+    azure_search_knowledge_base_name: str | None = None
+    azure_search_mcp_enabled: bool = True
+    azure_search_fallback_enabled: bool = True
+    azure_search_use_managed_identity: bool = False
+    azure_search_api_version: str = "2025-09-01"
+    azure_search_mcp_api_version: str = "2025-11-01-preview"
+    azure_search_semantic_configuration: str | None = None
+    azure_search_top_k: int = Field(default=6, ge=1, le=20)
+    azure_search_vector_k: int = Field(default=20, ge=1, le=100)
+    azure_search_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    azure_search_mcp_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    azure_search_select_fields_raw: str | None = None
+    azure_search_content_fields_raw: str | None = "content,chunk,chunk_text,text"
+    azure_search_title_fields_raw: str | None = "title,document_title,source_title,name"
+    azure_search_url_fields_raw: str | None = "url,source_url,document_url,source,uri"
+    azure_search_vector_fields_raw: str | None = None
+    azure_search_study_enabled: bool = True
+    azure_search_study_index_name: str | None = None
+    azure_search_study_session_field: str = "study_session_id"
+    azure_search_study_id_field: str = "id"
+    azure_search_study_content_field: str = "content"
+    azure_search_study_title_field: str = "title"
+    azure_search_study_url_field: str = "url"
+    azure_search_study_filename_field: str = "study_file_name"
+    azure_search_study_chunk_index_field: str = "chunk_index"
+    azure_search_study_uploaded_at_field: str = "uploaded_at"
+    azure_search_study_chunk_size_chars: int = Field(default=1400, ge=300, le=8000)
+    azure_search_study_chunk_overlap_chars: int = Field(default=200, ge=0, le=2000)
+    azure_search_study_max_file_bytes: int = Field(default=20_000_000, ge=1_000_000, le=200_000_000)
+
+    azure_content_safety_enabled: bool = False
+    azure_content_safety_endpoint: str | None = None
+    azure_content_safety_api_key: str | None = None
+    azure_content_safety_api_version: str = "2024-09-01"
+    azure_content_safety_block_severity: int = Field(default=4, ge=0, le=7)
+    azure_content_safety_timeout_seconds: float = Field(default=10.0, gt=0.0)
+    azure_content_safety_fail_open: bool = True
 
     a2a_backend_base_url: str = "http://127.0.0.1:8000"
     a2a_rpc_path: str = "/a2a"
@@ -67,8 +111,6 @@ class Settings(BaseSettings):
         if self.agent_provider == "openai":
             if not self.openai_api_key:
                 raise ValueError("OPENAI_API_KEY is required when AGENT_PROVIDER=openai.")
-            if self.exa_mcp_enabled and not self.exa_mcp_base_url.strip():
-                raise ValueError("EXA_MCP_BASE_URL is required when EXA_MCP_ENABLED=true.")
             return self
 
         if not self.azure_openai_endpoint:
@@ -79,8 +121,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AZURE_OPENAI_CHAT_DEPLOYMENT_NAME is required when AGENT_PROVIDER=azure."
             )
-        if self.exa_mcp_enabled and not self.exa_mcp_base_url.strip():
-            raise ValueError("EXA_MCP_BASE_URL is required when EXA_MCP_ENABLED=true.")
         return self
 
     @property
@@ -112,28 +152,86 @@ class Settings(BaseSettings):
         return self._join_url(self.a2a_quiz_backend_base_url, self.a2a_quiz_rpc_path)
 
     @property
-    def exa_mcp_tool_names(self) -> list[str]:
-        raw = (self.exa_mcp_tools or "").strip()
-        if not raw:
-            return []
-        return [name.strip() for name in raw.split(",") if name.strip()]
+    def azure_search_select_fields(self) -> list[str]:
+        return self._split_csv(self.azure_search_select_fields_raw)
 
     @property
-    def exa_mcp_url(self) -> str:
-        parsed = urlsplit(self.exa_mcp_base_url.strip())
-        query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=False))
+    def azure_search_content_fields(self) -> list[str]:
+        fields = self._split_csv(self.azure_search_content_fields_raw)
+        return fields or ["content", "chunk", "chunk_text", "text"]
 
-        if self.exa_api_key:
-            query_pairs["exaApiKey"] = self.exa_api_key.strip()
-        if self.exa_mcp_tool_names:
-            query_pairs["tools"] = ",".join(self.exa_mcp_tool_names)
+    @property
+    def azure_search_title_fields(self) -> list[str]:
+        fields = self._split_csv(self.azure_search_title_fields_raw)
+        return fields or ["title", "document_title", "source_title", "name"]
+
+    @property
+    def azure_search_url_fields(self) -> list[str]:
+        fields = self._split_csv(self.azure_search_url_fields_raw)
+        return fields or ["url", "source_url", "document_url", "source", "uri"]
+
+    @property
+    def azure_search_vector_fields(self) -> list[str]:
+        return self._split_csv(self.azure_search_vector_fields_raw)
+
+    @property
+    def azure_search_mcp_url(self) -> str | None:
+        endpoint = (self.azure_search_service_endpoint or "").strip()
+        kb_name = (self.azure_search_knowledge_base_name or "").strip()
+        if not endpoint or not kb_name:
+            return None
+
+        base = f"{endpoint.rstrip('/')}/knowledgebases/{kb_name}/mcp"
+        parsed = urlsplit(base)
+        query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=False))
+        query_pairs["api-version"] = (self.azure_search_mcp_api_version or "").strip() or "2025-11-01-preview"
 
         query = urlencode(query_pairs)
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
+    @property
+    def exa_mcp_url(self) -> str | None:
+        base_url = (self.exa_mcp_base_url or "").strip()
+        if not base_url:
+            return None
+
+        parsed = urlsplit(base_url)
+        query_pairs = dict(parse_qsl(parsed.query, keep_blank_values=False))
+        exa_api_key = (self.exa_api_key or "").strip()
+        if exa_api_key:
+            query_pairs["exaApiKey"] = exa_api_key
+        tools = (self.exa_mcp_tools or "").strip()
+        if tools:
+            query_pairs["tools"] = tools
+
+        query = urlencode(query_pairs)
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+
+    @property
+    def exa_mcp_tool_names(self) -> list[str]:
+        tools = (self.exa_mcp_tools or "").strip()
+        if not tools:
+            return []
+        return [name.strip() for name in tools.split(",") if name.strip()]
+
+    @property
+    def azure_search_study_effective_index_name(self) -> str | None:
+        candidate = (self.azure_search_study_index_name or "").strip()
+        if candidate:
+            return candidate
+        fallback = (self.azure_search_index_name or "").strip()
+        return fallback or None
+
     @staticmethod
     def _join_url(base_url: str, path: str) -> str:
         return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+    @staticmethod
+    def _split_csv(raw: str | None) -> list[str]:
+        value = (raw or "").strip()
+        if not value:
+            return []
+        return [token.strip() for token in value.split(",") if token.strip()]
 
     @staticmethod
     def _normalize_openai_model(model_id: str) -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -12,6 +13,14 @@ from pydantic import BaseModel, Field
 
 from .af_compat import PATCHED_SEMCONV_ATTRS
 from .config import Settings
+from .rag import Citation, RetrievalResult
+from .rag.study_service import AzureStudyRAGService
+from .safety import AzureContentSafetyGuard, ModerationCheck
+
+try:
+    from opentelemetry import trace
+except Exception:  # pragma: no cover - optional dependency
+    trace = None  # type: ignore[assignment]
 
 try:
     from agent_framework import Agent, MCPStreamableHTTPTool
@@ -33,6 +42,7 @@ ReadingLevel = Literal["5-7", "8-10", "11-13", "14+"]
 ResponseStyle = Literal["short", "explainer", "playful"]
 
 logger = logging.getLogger(__name__)
+TRACER = trace.get_tracer(__name__) if trace is not None else None
 
 
 QUESTION_READER_PROMPT = """
@@ -71,6 +81,7 @@ Rules:
 - If the question is unclear, ask one simple follow-up question.
 - If user asks for current date/time ("today", "now", "current date/time"), use server_time context as authoritative.
 - For current date/time questions, include ISO date (YYYY-MM-DD) in the response.
+- If web_search_context or study_context is present, prioritize those sources for factual claims and avoid inventing facts.
 """.strip()
 
 
@@ -97,6 +108,11 @@ class ChatAnswerResult:
     mcp_used: bool = False
     mcp_server: str | None = None
     mcp_output: dict[str, Any] | None = None
+    citations: list[Citation] | None = None
+    retrieval_provider: str | None = None
+    retrieval_used_fallback: bool = False
+    moderation: dict[str, Any] | None = None
+    study_session_id: str | None = None
 
 
 class MAFKidsChatOrchestrator:
@@ -110,6 +126,8 @@ class MAFKidsChatOrchestrator:
             name="dream-kid-response-agent",
             instructions=KID_RESPONDER_PROMPT,
         )
+        self._study_rag = AzureStudyRAGService(settings)
+        self._content_safety = AzureContentSafetyGuard(settings)
 
     def _build_agent(self, *, name: str, instructions: str) -> Any | None:
         if MAF_IMPORT_ERROR is not None or Agent is None:
@@ -141,39 +159,89 @@ class MAFKidsChatOrchestrator:
         history: list[dict[str, str]],
         age_band: str | None = None,
         mode: str = "normal",
+        study_session_id: str | None = None,
     ) -> ChatAnswerResult:
-        clean_message = message.strip()
-        if not clean_message:
-            raise MAFChatError("message cannot be empty")
+        with self._start_span("chat.answer_question") as span:
+            self._set_span_attr(span, "chat.mode", mode)
 
-        clipped_history = self._clip_history(history)
-        search_mode_requested = mode.strip().lower() == "search"
-        question_read = await self._read_question(
-            message=clean_message,
-            history=clipped_history,
-            age_band=age_band,
-        )
-        answer_text, mcp_used, mcp_server, mcp_output = await self._generate_answer(
-            message=clean_message,
-            history=clipped_history,
-            age_band=age_band,
-            question_read=question_read,
-            search_mode_requested=search_mode_requested,
-        )
-        if not answer_text:
-            raise MAFChatError("Responder agent returned an empty answer.")
+            clean_message = message.strip()
+            if not clean_message:
+                raise MAFChatError("message cannot be empty")
 
-        return ChatAnswerResult(
-            answer=answer_text,
-            category=question_read.category,
-            safety=question_read.safety,
-            reading_level=question_read.reading_level,
-            response_style=question_read.response_style,
-            model=self._model_label(),
-            mcp_used=mcp_used,
-            mcp_server=mcp_server,
-            mcp_output=mcp_output,
-        )
+            clipped_history = self._clip_history(history)
+            normalized_mode = (mode or "normal").strip().lower()
+            if normalized_mode == "normal":
+                if (study_session_id or "").strip():
+                    normalized_mode = "study"
+                elif self._is_web_search_query(clean_message):
+                    normalized_mode = "search"
+            search_mode_requested = normalized_mode == "search"
+            study_mode_requested = normalized_mode == "study"
+
+            input_moderation = await self._content_safety.analyze(text=clean_message, stage="input")
+            self._log_moderation(input_moderation)
+            if input_moderation.blocked:
+                self._set_span_attr(span, "chat.blocked_input", True)
+                return ChatAnswerResult(
+                    answer=self._blocked_input_message(),
+                    category="unsafe",
+                    safety="unsafe",
+                    reading_level="8-10",
+                    response_style="short",
+                    model=self._model_label(),
+                    moderation={"input": input_moderation.to_dict(), "output": None},
+                    citations=[],
+                    retrieval_provider=None,
+                    retrieval_used_fallback=False,
+                )
+
+            question_read = await self._read_question(
+                message=clean_message,
+                history=clipped_history,
+                age_band=age_band,
+            )
+            answer_text, mcp_used, mcp_server, mcp_output, citations, retrieval = await self._generate_answer(
+                message=clean_message,
+                history=clipped_history,
+                age_band=age_band,
+                question_read=question_read,
+                mode=normalized_mode,
+                search_mode_requested=search_mode_requested,
+                study_mode_requested=study_mode_requested,
+                study_session_id=study_session_id,
+            )
+            if not answer_text:
+                raise MAFChatError("Responder agent returned an empty answer.")
+
+            output_moderation = await self._content_safety.analyze(text=answer_text, stage="output")
+            self._log_moderation(output_moderation)
+            if output_moderation.blocked:
+                self._set_span_attr(span, "chat.blocked_output", True)
+                answer_text = self._blocked_output_message()
+
+            return ChatAnswerResult(
+                answer=answer_text,
+                category=question_read.category,
+                safety=question_read.safety,
+                reading_level=question_read.reading_level,
+                response_style=question_read.response_style,
+                model=self._model_label(),
+                mcp_used=mcp_used,
+                mcp_server=mcp_server,
+                mcp_output=mcp_output,
+                citations=citations,
+                retrieval_provider=retrieval.provider if retrieval else ("exa_mcp" if search_mode_requested else None),
+                retrieval_used_fallback=(
+                    retrieval.diagnostics.used_fallback
+                    if retrieval
+                    else bool(search_mode_requested and not mcp_used)
+                ),
+                moderation={
+                    "input": input_moderation.to_dict(),
+                    "output": output_moderation.to_dict(),
+                },
+                study_session_id=study_session_id if study_mode_requested else None,
+            )
 
     async def _read_question(
         self,
@@ -182,32 +250,35 @@ class MAFKidsChatOrchestrator:
         history: list[dict[str, str]],
         age_band: str | None,
     ) -> QuestionRead:
-        if self._question_reader is None:
-            raise MAFChatError(
-                "Question-reader agent unavailable. "
-                f"import_error={self.import_error_context()}"
+        with self._start_span("chat.read_question") as span:
+            self._set_span_attr(span, "chat.history_items", len(history))
+
+            if self._question_reader is None:
+                raise MAFChatError(
+                    "Question-reader agent unavailable. "
+                    f"import_error={self.import_error_context()}"
+                )
+
+            prompt_payload = {
+                "age_band": age_band,
+                "latest_question": message,
+                "recent_history": history,
+            }
+            prompt = (
+                "Classify this kid question. Return strict JSON only.\n"
+                f"context={json.dumps(prompt_payload, ensure_ascii=True)}"
             )
 
-        prompt_payload = {
-            "age_band": age_band,
-            "latest_question": message,
-            "recent_history": history,
-        }
-        prompt = (
-            "Classify this kid question. Return strict JSON only.\n"
-            f"context={json.dumps(prompt_payload, ensure_ascii=True)}"
-        )
+            try:
+                response = await self._question_reader.run(prompt)
+            except Exception as exc:
+                raise MAFChatError(f"Question-reader agent failed: {exc}") from exc
 
-        try:
-            response = await self._question_reader.run(prompt)
-        except Exception as exc:
-            raise MAFChatError(f"Question-reader agent failed: {exc}") from exc
-
-        raw_output = (response.text or "").strip()
-        parsed = self._parse_json_model(raw_output, QuestionRead)
-        if parsed is not None:
-            return parsed
-        raise MAFChatError("Question-reader agent returned unparsable JSON.")
+            raw_output = (response.text or "").strip()
+            parsed = self._parse_json_model(raw_output, QuestionRead)
+            if parsed is not None:
+                return parsed
+            raise MAFChatError("Question-reader agent returned unparsable JSON.")
 
     async def _generate_answer(
         self,
@@ -216,92 +287,139 @@ class MAFKidsChatOrchestrator:
         history: list[dict[str, str]],
         age_band: str | None,
         question_read: QuestionRead,
+        mode: str,
         search_mode_requested: bool,
-    ) -> tuple[str, bool, str | None, dict[str, Any] | None]:
-        if self._responder is None:
-            raise MAFChatError(
-                "Response agent unavailable. "
-                f"import_error={self.import_error_context()}"
-            )
+        study_mode_requested: bool,
+        study_session_id: str | None,
+    ) -> tuple[str, bool, str | None, dict[str, Any] | None, list[Citation], RetrievalResult | None]:
+        with self._start_span("chat.generate_answer") as span:
+            self._set_span_attr(span, "chat.search_mode", search_mode_requested)
+            self._set_span_attr(span, "chat.study_mode", study_mode_requested)
 
-        payload = {
-            "age_band": age_band,
-            "mode": "search" if search_mode_requested else "normal",
-            "question_read": question_read.model_dump(mode="json"),
-            "latest_question": message,
-            "recent_history": history,
-            "server_time": self._server_time_context(),
-        }
-        prompt = (
-            "Answer the child using the provided classification and policy.\n"
-            f"context={json.dumps(payload, ensure_ascii=True)}"
-        )
-        if search_mode_requested:
-            prompt += (
-                "\nSearch mode is enabled. "
-                "Use available MCP search tools when fresh facts are needed."
-            )
-        temporal_query = self._is_current_datetime_query(message)
-        if temporal_query:
-            prompt += (
-                "\nCurrent date/time question detected. "
-                "Use only server_time values for current date/time and include ISO date."
-            )
+            if self._responder is None:
+                raise MAFChatError(
+                    "Response agent unavailable. "
+                    f"import_error={self.import_error_context()}"
+                )
 
-        mcp_used = False
-        mcp_server: str | None = None
-        mcp_output: dict[str, Any] | None = None
-        response: Any
+            payload: dict[str, Any] = {
+                "age_band": age_band,
+                "mode": mode if mode in {"normal", "search", "study"} else "normal",
+                "question_read": question_read.model_dump(mode="json"),
+                "latest_question": message,
+                "recent_history": history,
+                "server_time": self._server_time_context(),
+            }
 
-        if search_mode_requested:
-            if not self._settings.exa_mcp_enabled:
-                if self._settings.exa_mcp_required_in_search:
-                    raise MAFChatError(
-                        "Search mode requires MCP, but EXA_MCP_ENABLED is false."
+            retrieval: RetrievalResult | None = None
+            citations: list[Citation] = []
+            mcp_used = False
+            mcp_server: str | None = None
+            mcp_output: dict[str, Any] | None = None
+            if study_mode_requested:
+                with self._start_span("chat.retrieve_study_context") as rag_span:
+                    retrieval = await self._study_rag.retrieve(
+                        query=message,
+                        session_id=study_session_id,
                     )
+                    self._set_span_attr(rag_span, "chat.retrieval_provider", retrieval.provider)
+                    self._set_span_attr(rag_span, "chat.retrieval_citations", len(retrieval.citations))
+                    self._set_span_attr(rag_span, "chat.retrieval_used_fallback", retrieval.diagnostics.used_fallback)
+
+                citations = retrieval.citations
+                payload["study_session_id"] = (study_session_id or "").strip() or None
+                payload["study_context"] = {
+                    "provider": retrieval.provider,
+                    "sources": [
+                        citation.model_dump(mode="json", exclude_none=True)
+                        for citation in citations
+                    ],
+                    "errors": retrieval.diagnostics.errors,
+                }
+                mcp_output = {
+                    "provider": retrieval.provider,
+                    "used_fallback": retrieval.diagnostics.used_fallback,
+                    "errors": retrieval.diagnostics.errors,
+                    "output": retrieval.diagnostics.raw,
+                }
+
+            prompt = (
+                "Answer the child using the provided classification and policy.\n"
+                f"context={json.dumps(payload, ensure_ascii=True)}"
+            )
+            if search_mode_requested:
+                prompt += (
+                    "\nSearch mode is enabled. "
+                    "Use available MCP search tools when fresh facts are needed."
+                )
+            elif study_mode_requested:
+                prompt += (
+                    "\nStudy mode is enabled. Use study_context.sources as the primary evidence base from uploaded files. "
+                    "If evidence is missing, explicitly say which detail was not found in the uploaded documents."
+                )
+            temporal_query = self._is_current_datetime_query(message)
+            if temporal_query:
+                prompt += (
+                    "\nCurrent date/time question detected. "
+                    "Use only server_time values for current date/time and include ISO date."
+                )
+
+            response: Any
+            if search_mode_requested:
+                if not self._settings.exa_mcp_enabled:
+                    if self._settings.exa_mcp_required_in_search:
+                        raise MAFChatError(
+                            "Search mode requires MCP, but EXA_MCP_ENABLED is false."
+                        )
+                    try:
+                        response = await self._responder.run(prompt)
+                    except Exception as exc:
+                        raise MAFChatError(f"Chat responder failed: {exc}") from exc
+                else:
+                    with self._start_span("chat.retrieve_grounding") as rag_span:
+                        try:
+                            response, mcp_output = await self._run_responder_with_exa_mcp(
+                                prompt=prompt,
+                                query=message,
+                            )
+                            mcp_used = True
+                            mcp_server = self._settings.exa_mcp_base_url
+                            self._set_span_attr(rag_span, "chat.mcp_used", True)
+                            self._set_span_attr(rag_span, "chat.mcp_server", mcp_server)
+                        except Exception as exc:
+                            if self._settings.exa_mcp_required_in_search:
+                                raise MAFChatError(
+                                    f"Search mode requires MCP, but Exa MCP failed: {exc}"
+                                ) from exc
+                            logger.warning(
+                                "Exa MCP unavailable in search mode; continuing without MCP: %s",
+                                exc,
+                            )
+                            try:
+                                response = await self._responder.run(prompt)
+                            except Exception as fallback_exc:
+                                raise MAFChatError(f"Chat responder failed: {fallback_exc}") from fallback_exc
+            else:
                 try:
                     response = await self._responder.run(prompt)
                 except Exception as exc:
                     raise MAFChatError(f"Chat responder failed: {exc}") from exc
-            else:
-                try:
-                    response, mcp_output = await self._run_responder_with_exa_mcp(
-                        prompt=prompt,
-                        query=message,
+
+            answer = (response.text or "").strip()
+            if not answer:
+                raise MAFChatError("Response agent returned an empty answer.")
+            if temporal_query:
+                iso_date = payload["server_time"]["date_local_iso"]
+                if iso_date not in answer:
+                    logger.warning(
+                        "Temporal response missing authoritative ISO date; applying deterministic correction."
                     )
-                    mcp_used = True
-                    mcp_server = self._settings.exa_mcp_base_url
-                except Exception as exc:
-                    if self._settings.exa_mcp_required_in_search:
-                        raise MAFChatError(
-                            f"Search mode requires MCP, but Exa MCP failed: {exc}"
-                        ) from exc
-                    logger.warning("Exa MCP unavailable in search mode; continuing without MCP: %s", exc)
-                    try:
-                        response = await self._responder.run(prompt)
-                    except Exception as fallback_exc:
-                        raise MAFChatError(f"Chat responder failed: {fallback_exc}") from fallback_exc
-        else:
-            try:
-                response = await self._responder.run(prompt)
-            except Exception as exc:
-                raise MAFChatError(f"Chat responder failed: {exc}") from exc
+                    answer = self._build_date_time_answer(
+                        message=message,
+                        server_time=payload["server_time"],
+                    )
 
-        answer = (response.text or "").strip()
-        if not answer:
-            raise MAFChatError("Response agent returned an empty answer.")
-        if temporal_query:
-            iso_date = payload["server_time"]["date_local_iso"]
-            if iso_date not in answer:
-                logger.warning(
-                    "Temporal response missing authoritative ISO date; applying deterministic correction."
-                )
-                answer = self._build_date_time_answer(
-                    message=message,
-                    server_time=payload["server_time"],
-                )
-
-        return answer, mcp_used, mcp_server, mcp_output
+            return answer, mcp_used, mcp_server, mcp_output, citations, retrieval
 
     async def _run_responder_with_exa_mcp(
         self,
@@ -315,12 +433,16 @@ class MAFKidsChatOrchestrator:
                 f"import_error={self.import_error_context()}"
             )
 
+        mcp_url = self._settings.exa_mcp_url
+        if not mcp_url:
+            raise MAFChatError("Search mode requires EXA_MCP_BASE_URL.")
+
         request_timeout = max(1, int(round(self._settings.exa_mcp_timeout_seconds)))
         allowed_tools = self._settings.exa_mcp_tool_names or None
         async with httpx.AsyncClient(timeout=self._settings.exa_mcp_timeout_seconds) as http_client:
             exa_tool = MCPStreamableHTTPTool(
                 name="exa-search",
-                url=self._settings.exa_mcp_url,
+                url=mcp_url,
                 description="Exa MCP web search for up-to-date factual grounding.",
                 request_timeout=request_timeout,
                 load_tools=True,
@@ -418,6 +540,21 @@ class MAFKidsChatOrchestrator:
             f"({server_time['date_local_iso']})."
         )
 
+    def _is_web_search_query(self, message: str) -> bool:
+        lowered = (message or "").strip().lower()
+        if not lowered:
+            return False
+        patterns = [
+            r"\blatest\b",
+            r"\bnews\b",
+            r"\bweb\b",
+            r"\binternet\b",
+            r"\brecent\b",
+            r"\bcurrent events?\b",
+            r"\bwhat(?:'s| is)\s+happening\b",
+        ]
+        return any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in patterns)
+
     def _parse_json_model(self, raw_output: str, model_cls: type[QuestionRead]) -> QuestionRead | None:
         if not raw_output:
             return None
@@ -452,6 +589,41 @@ class MAFKidsChatOrchestrator:
         if self._settings.agent_provider == "azure":
             return self._settings.azure_openai_chat_deployment_name or "azure-openai-chat"
         return self._settings.openai_model
+
+    def _blocked_input_message(self) -> str:
+        return (
+            "I can\'t help with that request. Please ask a trusted parent, teacher, or guardian for help, "
+            "and I can help with a safer learning question."
+        )
+
+    def _blocked_output_message(self) -> str:
+        return (
+            "I want to keep this safe for you, so I can\'t share that. "
+            "If you want, I can help with a kid-friendly version of the topic."
+        )
+
+    def _log_moderation(self, check: ModerationCheck) -> None:
+        logger.info(
+            "content_safety_check stage=%s blocked=%s threshold=%s scores=%s error=%s",
+            check.stage,
+            check.blocked,
+            check.threshold,
+            check.scores,
+            check.error,
+        )
+
+    def _start_span(self, name: str):
+        if TRACER is None:
+            return nullcontext()
+        return TRACER.start_as_current_span(name)
+
+    def _set_span_attr(self, span: Any, key: str, value: Any) -> None:
+        if span is None or value is None:
+            return
+        try:
+            span.set_attribute(key, value)
+        except Exception:
+            return
 
     def import_error_context(self) -> str:
         if MAF_IMPORT_ERROR is None:

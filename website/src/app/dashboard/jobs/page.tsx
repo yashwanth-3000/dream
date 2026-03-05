@@ -212,7 +212,6 @@ export default function DashboardJobsPage() {
         {([
           { value: "all", label: "All Modes" },
           { value: "story", label: modeConfig.story.label },
-          { value: "video", label: modeConfig.video.label },
           { value: "character", label: modeConfig.character.label },
           { value: "quiz", label: modeConfig.quiz.label },
         ] as const).map((tab) => (
@@ -464,7 +463,7 @@ export default function DashboardJobsPage() {
           className="rounded-2xl border-dashed p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          No jobs yet. Create your first storybook, character, video, or quiz to get started.
+          No jobs yet. Create your first storybook, character, or quiz to get started.
         </div>
       )}
 

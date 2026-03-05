@@ -989,6 +989,14 @@
   background: rgba(139, 95, 65, 0.08);
 }
 
+.referenceStripPillDisabled {
+  cursor: default;
+}
+
+.referenceStripPillDisabled:hover {
+  background: none;
+}
+
 .referenceStripSep {
   color: #c4a98e;
   font-size: 10px;
@@ -1070,6 +1078,14 @@
 
 .referenceCard:hover {
   background: #fff3e3;
+}
+
+.referenceCardStatic {
+  cursor: default;
+}
+
+.referenceCardStatic:hover {
+  background: transparent;
 }
 
 .referenceInline {

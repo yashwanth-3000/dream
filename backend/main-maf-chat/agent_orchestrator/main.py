@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -29,9 +29,13 @@ from .models import (
     QuizOrchestrationRequest,
     QuizOrchestrationResponse,
     ServiceHealthResponse,
+    StudyUploadResponse,
     StoryBookOrchestrationRequest,
     StoryBookOrchestrationResponse,
 )
+from .rag.service import citations_to_dicts
+from .rag.study_documents import StudyDocumentIndexer
+from .telemetry import configure_telemetry
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -55,6 +59,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup() -> None:
+    configure_telemetry(get_settings())
     await db.init_db()
 
 
@@ -380,6 +385,7 @@ async def orchestrate_chat(
             history=history,
             age_band=payload.age_band,
             mode=payload.mode,
+            study_session_id=payload.study_session_id,
         )
     except MAFChatError as exc:
         logger.exception("chat_request_failed mode=%s reason=%s", payload.mode, exc)
@@ -393,12 +399,17 @@ async def orchestrate_chat(
         raise HTTPException(status_code=502, detail=detail) from exc
 
     logger.info(
-        "chat_request_completed mode=%s category=%s safety=%s mcp_used=%s mcp_server=%s",
+        (
+            "chat_request_completed mode=%s category=%s safety=%s mcp_used=%s mcp_server=%s "
+            "retrieval_provider=%s citations=%d"
+        ),
         payload.mode,
         result.category,
         result.safety,
         result.mcp_used,
         result.mcp_server or "none",
+        result.retrieval_provider or "none",
+        len(result.citations or []),
     )
 
     return ChatOrchestrationResponse(
@@ -411,6 +422,66 @@ async def orchestrate_chat(
         mcp_used=result.mcp_used,
         mcp_server=result.mcp_server,
         mcp_output=result.mcp_output,
+        citations=citations_to_dicts(result.citations or []),
+        retrieval_provider=result.retrieval_provider,
+        retrieval_used_fallback=result.retrieval_used_fallback,
+        moderation=result.moderation,
+        study_session_id=result.study_session_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Study-mode PDF ingestion
+# ---------------------------------------------------------------------------
+
+@app.post("/api/v1/orchestrate/study/upload", response_model=StudyUploadResponse)
+async def upload_study_pdf(
+    file: UploadFile = File(...),
+    session_id: str | None = Form(default=None),
+    settings: Settings = Depends(get_settings),
+) -> StudyUploadResponse:
+    filename = (file.filename or "study-document.pdf").strip() or "study-document.pdf"
+    content_type = (file.content_type or "").strip().lower()
+    if not filename.lower().endswith(".pdf") and content_type not in {"application/pdf", "application/x-pdf"}:
+        raise HTTPException(status_code=400, detail="Only PDF uploads are supported in study mode.")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
+
+    max_size = settings.azure_search_study_max_file_bytes
+    if len(payload) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Uploaded PDF exceeds size limit ({max_size} bytes).",
+        )
+
+    indexer = StudyDocumentIndexer(settings)
+    try:
+        result = await indexer.upload_pdf(
+            file_name=filename,
+            file_bytes=payload,
+            session_id=session_id,
+        )
+    except RuntimeError as exc:
+        logger.exception("study_upload_failed_runtime filename=%s reason=%s", filename, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("study_upload_failed_unhandled filename=%s reason=%s", filename, exc)
+        raise HTTPException(status_code=502, detail=f"Study upload failed: {exc}") from exc
+
+    if result.chunks_indexed <= 0:
+        detail = "; ".join(result.errors) if result.errors else "No chunks were indexed for this PDF."
+        raise HTTPException(status_code=502, detail=detail)
+
+    return StudyUploadResponse(
+        session_id=result.session_id,
+        file_id=result.file_id,
+        filename=result.filename,
+        chunks_indexed=result.chunks_indexed,
+        provider=result.provider,
+        index_name=result.index_name,
+        errors=result.errors,
     )
 
 

@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, Clapperboard, Gamepad2, RotateCw, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, RotateCw, CheckCircle2 } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
 import { type StoryPage } from "@/lib/dashboard-data";
@@ -15,14 +15,6 @@ import {
   getAssetUrl,
   type Job,
 } from "@/lib/jobs";
-import {
-  GAMEPLAY_BACKGROUNDS,
-  GAMEPLAY_CATEGORY_OPTIONS,
-  VIDEO_MODE_OPTIONS,
-  getDefaultGameplayBackgroundId,
-  type GameplayCategory,
-  type VideoGenerationType,
-} from "@/lib/video-generation-options";
 
 import styles from "./chat-page.module.css";
 
@@ -34,18 +26,23 @@ interface ThinkingStep {
   data?: unknown;
 }
 
-interface GameplaySelection {
-  category: GameplayCategory;
-  backgroundId: string;
-  backgroundName: string;
-}
-
 interface SearchReference {
   title: string;
-  url: string;
+  url?: string;
   author?: string;
   publishedDate?: string;
   snippet?: string;
+  source?: string;
+  score?: number;
+}
+
+interface BackendCitation {
+  title?: string;
+  url?: string | null;
+  snippet?: string;
+  published_date?: string | null;
+  source?: string | null;
+  score?: number | null;
 }
 
 interface StoryCharacterDrawingInput {
@@ -114,8 +111,6 @@ interface Message {
   basePrompt?: string;
   mode?: ModeId | "normal";
   characterSelection?: CharacterSelection | null;
-  videoType?: VideoGenerationType | null;
-  gameplaySelection?: GameplaySelection | null;
   thinkingSteps?: ThinkingStep[];
   thinkingDuration?: number;
   storyBook?: StoryBookMessageData | null;
@@ -138,7 +133,34 @@ interface ChatBackendResponse {
   mcp_used?: boolean;
   mcp_server?: string | null;
   mcp_output?: unknown;
+  citations?: BackendCitation[];
+  retrieval_provider?: string | null;
+  retrieval_used_fallback?: boolean;
+  study_session_id?: string | null;
+  moderation?: {
+    input?: {
+      blocked?: boolean;
+      threshold?: number;
+      scores?: Record<string, number>;
+      error?: string | null;
+    } | null;
+    output?: {
+      blocked?: boolean;
+      threshold?: number;
+      scores?: Record<string, number>;
+      error?: string | null;
+    } | null;
+  } | null;
   [key: string]: unknown;
+}
+
+interface StudyUploadResponse {
+  session_id?: string;
+  file_id?: string;
+  filename?: string;
+  chunks_indexed?: number;
+  detail?: string;
+  error?: string;
 }
 
 type StorybookResponse = {
@@ -235,68 +257,6 @@ const STORY_THINKING_STEPS: ThinkingStep[] = [
   ...COMMON_THINKING_STEPS.slice(3),
 ];
 
-const VIDEO_NORMAL_THINKING_STEPS: ThinkingStep[] = [
-  {
-    title: "Reading your concept",
-    detail: "Extracting the core action, mood, and pacing needed for a strong narrative video.",
-  },
-  {
-    title: "Writing shot plan",
-    detail: "Converting your idea into a scene-by-scene timeline for smooth visual continuity.",
-  },
-  {
-    title: "Designing visual style",
-    detail: "Choosing framing, color mood, and transitions that fit your prompt.",
-  },
-  {
-    title: "Generating keyframes",
-    detail: "Building core visual moments that anchor the final motion sequence.",
-  },
-  {
-    title: "Syncing voice and music",
-    detail: "Balancing narration cadence and background track to match scene timing.",
-  },
-  {
-    title: "Rendering the final cut",
-    detail: "Compositing visuals, effects, and audio into a polished vertical video.",
-  },
-  {
-    title: "Quality review",
-    detail: "Checking pacing, transitions, and readability before final delivery.",
-  },
-];
-
-const VIDEO_GAMEPLAY_THINKING_STEPS: ThinkingStep[] = [
-  {
-    title: "Reading your concept",
-    detail: "Detecting hook, tone, and payoff so the gameplay edit stays engaging from start to finish.",
-  },
-  {
-    title: "Picking gameplay rhythm",
-    detail: "Matching your narrative beats to fast gameplay pacing for short-form momentum.",
-  },
-  {
-    title: "Planning hook sequence",
-    detail: "Structuring opening seconds, mid-clip escalation, and ending punchline.",
-  },
-  {
-    title: "Generating vertical scenes",
-    detail: "Producing stylized scene layers optimized for quick, high-retention viewing.",
-  },
-  {
-    title: "Layering captions and voice",
-    detail: "Timing overlays and narration so text remains clear during rapid motion.",
-  },
-  {
-    title: "Mixing gameplay and story",
-    detail: "Blending gameplay footage with narrative visuals into one coherent clip.",
-  },
-  {
-    title: "Final render and check",
-    detail: "Exporting the gameplay video and validating smooth transitions end-to-end.",
-  },
-];
-
 const CHAT_PENDING_THINKING_STEPS: ThinkingStep[] = [
   {
     title: "Receiving your question",
@@ -313,6 +273,25 @@ const CHAT_PENDING_THINKING_STEPS: ThinkingStep[] = [
   {
     title: "Finalizing answer",
     detail: "Validating the final response and returning it to chat.",
+  },
+];
+
+const STUDY_THINKING_STEPS: ThinkingStep[] = [
+  {
+    title: "Reading your study question",
+    detail: "Preparing the question and checking whether a study session was provided.",
+  },
+  {
+    title: "Retrieving from uploaded PDFs",
+    detail: "Querying Azure AI Search with your study session filter and collecting evidence chunks.",
+  },
+  {
+    title: "Grounding the answer",
+    detail: "Drafting a response that stays tied to uploaded study material and citations.",
+  },
+  {
+    title: "Finalizing answer",
+    detail: "Returning the grounded response and normalized references to chat.",
   },
 ];
 
@@ -339,19 +318,16 @@ const QUIZ_THINKING_STEPS: ThinkingStep[] = [
   },
 ];
 
-const DEFAULT_GAMEPLAY_CATEGORY: GameplayCategory = GAMEPLAY_CATEGORY_OPTIONS[0]?.id ?? "minecraft";
-const DEFAULT_GAMEPLAY_BACKGROUND_ID = getDefaultGameplayBackgroundId(DEFAULT_GAMEPLAY_CATEGORY);
-
 const easeOutExpo = [0.22, 1, 0.36, 1] as const;
 const THINKING_TOTAL_MS = 30000;
 const STEP_INITIAL_DELAY_MS = 500;
 const IMAGE_REVEAL_INTERVAL_MS = 260;
 const AUTO_SCROLL_THRESHOLD_PX = 120;
 
-function getThinkingSteps(mode: ModeId | "normal", videoType: VideoGenerationType | null = null): ThinkingStep[] {
+function getThinkingSteps(mode: ModeId | "normal"): ThinkingStep[] {
   if (mode === "story") return STORY_THINKING_STEPS;
-  if (mode === "video") return videoType === "gameplay" ? VIDEO_GAMEPLAY_THINKING_STEPS : VIDEO_NORMAL_THINKING_STEPS;
   if (mode === "quiz") return QUIZ_THINKING_STEPS;
+  if (mode === "study") return STUDY_THINKING_STEPS;
   if (mode === "normal" || mode === "search") return CHAT_PENDING_THINKING_STEPS;
   return COMMON_THINKING_STEPS;
 }
@@ -364,6 +340,28 @@ function toTitleCase(input: string | undefined, fallback: string): string {
     .filter(Boolean)
     .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
+}
+
+function detectWebSearchIntent(input: string): boolean {
+  const normalized = (input || "").trim().toLowerCase();
+  if (!normalized) return false;
+  const patterns = [
+    /\blatest\b/,
+    /\bnews\b/,
+    /\bweb\b/,
+    /\binternet\b/,
+    /\brecent\b/,
+    /\bcurrent events?\b/,
+    /\bwhat(?:'s| is)\s+happening\b/,
+  ];
+  return patterns.some((pattern) => pattern.test(normalized));
+}
+
+function isStudyPdf(file: File | null | undefined): boolean {
+  if (!file) return false;
+  const type = (file.type || "").toLowerCase();
+  const name = (file.name || "").toLowerCase();
+  return type === "application/pdf" || name.endsWith(".pdf");
 }
 
 function formatJsonForDisplay(value: unknown): string {
@@ -396,7 +394,8 @@ function decodeHtmlEntities(input: string): string {
     .replace(/&gt;/g, ">");
 }
 
-function extractHostname(rawUrl: string): string {
+function extractHostname(rawUrl?: string): string {
+  if (!rawUrl) return "source";
   try {
     return new URL(rawUrl).hostname.replace(/^www\./i, "");
   } catch {
@@ -423,7 +422,8 @@ function formatReferenceDate(rawDate?: string): string | null {
   return REFERENCE_DATE_FORMATTER.format(parsed);
 }
 
-function referenceLogoUrl(rawUrl: string): string {
+function referenceLogoUrl(rawUrl?: string): string {
+  if (!rawUrl) return "";
   return `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(rawUrl)}`;
 }
 
@@ -449,10 +449,105 @@ function extractDateToken(value: string): string | null {
   return null;
 }
 
+function extractStructuredSearchReferences(rawOutput: unknown): SearchReference[] {
+  if (!rawOutput) return [];
+
+  const refs: SearchReference[] = [];
+  const seen = new Set<string>();
+  const queue: unknown[] = [rawOutput];
+
+  while (queue.length > 0) {
+    const node = queue.shift();
+    if (!node) continue;
+
+    if (Array.isArray(node)) {
+      for (const item of node) queue.push(item);
+      continue;
+    }
+
+    if (typeof node !== "object") continue;
+    const record = node as Record<string, unknown>;
+    const value = record.value;
+    if (Array.isArray(value)) {
+      for (const maybeDoc of value) {
+        if (!maybeDoc || typeof maybeDoc !== "object") continue;
+        const doc = maybeDoc as Record<string, unknown>;
+        const title = typeof doc.title === "string" && doc.title.trim()
+          ? doc.title.trim()
+          : (typeof doc.name === "string" && doc.name.trim() ? doc.name.trim() : "Untitled source");
+        const url = typeof doc.url === "string" && doc.url.trim()
+          ? doc.url.trim()
+          : (
+            typeof doc.source_url === "string" && doc.source_url.trim()
+              ? doc.source_url.trim()
+              : (typeof doc.document_url === "string" && doc.document_url.trim() ? doc.document_url.trim() : "")
+          );
+        let snippet = "";
+        const captions = doc["@search.captions"];
+        if (Array.isArray(captions)) {
+          for (const cap of captions) {
+            if (!cap || typeof cap !== "object") continue;
+            const text = (cap as Record<string, unknown>).text;
+            if (typeof text === "string" && text.trim()) {
+              snippet = normalizeSnippet(text);
+              break;
+            }
+          }
+        }
+        if (!snippet) {
+          const fallbackText = [doc.snippet, doc.content, doc.chunk, doc.chunk_text, doc.text].find(
+            (candidate) => typeof candidate === "string" && candidate.trim(),
+          ) as string | undefined;
+          snippet = fallbackText ? normalizeSnippet(fallbackText) : "";
+        }
+        const publishedDate = typeof doc.published_date === "string" && doc.published_date.trim()
+          ? doc.published_date.trim()
+          : (typeof doc.date === "string" ? doc.date.trim() : "");
+        const score = typeof doc["@search.rerankerScore"] === "number"
+          ? doc["@search.rerankerScore"]
+          : (typeof doc["@search.score"] === "number" ? doc["@search.score"] : undefined);
+
+        const dedupeKey = `${title.toLowerCase()}|${url.toLowerCase()}|${snippet.toLowerCase()}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        refs.push({
+          title,
+          url: url || undefined,
+          snippet: snippet || undefined,
+          publishedDate: publishedDate || undefined,
+          source: "azure_search",
+          score,
+        });
+        if (refs.length >= 8) return refs;
+      }
+    }
+
+    for (const nested of Object.values(record)) {
+      queue.push(nested);
+    }
+  }
+
+  return refs;
+}
+
 function extractMcpReferences(mcpOutput: unknown): SearchReference[] {
   if (!mcpOutput || typeof mcpOutput !== "object") return [];
   const rawOutput = (mcpOutput as Record<string, unknown>).output;
-  if (typeof rawOutput !== "string" || !rawOutput.trim()) return [];
+  if (!rawOutput) return [];
+
+  if (typeof rawOutput !== "string") {
+    return extractStructuredSearchReferences(rawOutput);
+  }
+  if (!rawOutput.trim()) return [];
+
+  try {
+    const parsedStructured = JSON.parse(rawOutput);
+    const structuredRefs = extractStructuredSearchReferences(parsedStructured);
+    if (structuredRefs.length > 0) return structuredRefs;
+  } catch {
+    // keep Exa-style text parsing fallback below
+  }
 
   const text = rawOutput.replace(/\r\n/g, "\n");
   const refs: SearchReference[] = [];
@@ -492,6 +587,55 @@ function extractMcpReferences(mcpOutput: unknown): SearchReference[] {
       snippet: snippet || undefined,
     });
     if (refs.length >= 8) break;
+  }
+
+  return refs;
+}
+
+function extractBackendCitations(citations: BackendCitation[] | undefined): SearchReference[] {
+  if (!Array.isArray(citations) || citations.length === 0) return [];
+
+  const refs: SearchReference[] = [];
+  const seen = new Set<string>();
+  for (const item of citations) {
+    if (!item || typeof item !== "object") continue;
+    const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : "Untitled source";
+    const url = typeof item.url === "string" ? item.url.trim() : "";
+    const snippet = typeof item.snippet === "string" ? normalizeSnippet(item.snippet) : "";
+    const publishedDate = typeof item.published_date === "string" ? item.published_date.trim() : "";
+    const source = typeof item.source === "string" ? item.source.trim() : "";
+    const score = typeof item.score === "number" ? item.score : undefined;
+    if (!title && !url && !snippet) continue;
+    const dedupeKey = `${title.toLowerCase()}|${url.toLowerCase()}|${snippet.toLowerCase()}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    refs.push({
+      title,
+      url: url || undefined,
+      publishedDate: publishedDate || undefined,
+      snippet: snippet || undefined,
+      source: source || undefined,
+      score,
+    });
+    if (refs.length >= 8) break;
+  }
+  return refs;
+}
+
+function mergeSearchReferences(primary: SearchReference[], secondary: SearchReference[], limit = 8): SearchReference[] {
+  const refs: SearchReference[] = [];
+  const seen = new Set<string>();
+
+  for (const ref of [...primary, ...secondary]) {
+    const title = (ref.title || "").trim();
+    const url = (ref.url || "").trim();
+    const snippet = (ref.snippet || "").trim();
+    if (!title && !url && !snippet) continue;
+    const key = `${title.toLowerCase()}|${url.toLowerCase()}|${snippet.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    refs.push(ref);
+    if (refs.length >= limit) break;
   }
 
   return refs;
@@ -961,6 +1105,9 @@ function buildChatSuccessThinkingSteps(meta: {
   mcpUsed?: boolean;
   mcpServer?: string | null;
   mcpOutput?: unknown;
+  retrievalProvider?: string | null;
+  retrievalUsedFallback?: boolean;
+  moderation?: ChatBackendResponse["moderation"];
   backendPayload: Record<string, unknown>;
   durationMs: number;
 }): ThinkingStep[] {
@@ -970,12 +1117,20 @@ function buildChatSuccessThinkingSteps(meta: {
   const responseStyle = toTitleCase(meta.responseStyle, "Explainer");
   const model = (meta.model || "Unknown model").trim();
   const mcpServer = (meta.mcpServer || "").trim();
+  const retrievalProvider = (meta.retrievalProvider || "").trim();
   const seconds = (meta.durationMs / 1000).toFixed(meta.durationMs < 1000 ? 2 : 1);
   const responsePlanDetail = meta.mode === "search"
     ? meta.mcpUsed
       ? `Search mode active. MCP server used: ${mcpServer || "Exa MCP"}. Style: ${responseStyle}. Model: ${model}.`
       : `Search mode active. MCP unavailable for this run; answered with ${model} using ${responseStyle} style.`
-    : `Selected style: ${responseStyle}. Generated with ${model}.`;
+    : meta.mode === "study"
+      ? `Study mode active. Provider: ${retrievalProvider || "none"}${meta.retrievalUsedFallback ? " (fallback path used)" : ""}. Style: ${responseStyle}. Model: ${model}.`
+      : `Selected style: ${responseStyle}. Generated with ${model}.`;
+  const moderationInputBlocked = Boolean(meta.moderation?.input?.blocked);
+  const moderationOutputBlocked = Boolean(meta.moderation?.output?.blocked);
+  const moderationSummary = moderationInputBlocked || moderationOutputBlocked
+    ? `Moderation active. input_blocked=${moderationInputBlocked} output_blocked=${moderationOutputBlocked}.`
+    : "Moderation checks passed.";
 
   return [
     {
@@ -1001,7 +1156,15 @@ function buildChatSuccessThinkingSteps(meta: {
         mcp_used: Boolean(meta.mcpUsed),
         mcp_server: mcpServer || null,
         mcp_output: meta.mcpOutput ?? null,
+        retrieval_provider: retrievalProvider || null,
+        retrieval_used_fallback: Boolean(meta.retrievalUsedFallback),
+        moderation: meta.moderation ?? null,
       },
+    },
+    {
+      title: "Safety checks",
+      detail: moderationSummary,
+      data: meta.moderation ?? null,
     },
     {
       title: "Delivered to chat",
@@ -1068,19 +1231,6 @@ function groupMessages(messages: Message[]): MessageGroup[] {
 function formatStoryPromptWithCharacter(prompt: string, characterSelection: CharacterSelection | null) {
   if (!characterSelection) return prompt;
   return `${prompt}\n\nCharacter: ${characterSelection.name} (${characterSelection.type === "create" ? "new" : "existing"})`;
-}
-
-function formatVideoPromptWithType(
-  prompt: string,
-  videoType: VideoGenerationType | null,
-  gameplaySelection: GameplaySelection | null = null,
-) {
-  if (!videoType) return prompt;
-  if (videoType === "gameplay" && gameplaySelection) {
-    const categoryLabel = GAMEPLAY_CATEGORY_OPTIONS.find((option) => option.id === gameplaySelection.category)?.label ?? gameplaySelection.category;
-    return `${prompt}\n\nVideo Type: Gameplay\nGameplay Style: ${categoryLabel} • ${gameplaySelection.backgroundName}`;
-  }
-  return `${prompt}\n\nVideo Type: Normal`;
 }
 
 function normalizeAssistantMessageForDisplay(input: string): string {
@@ -1191,20 +1341,6 @@ function getStoryCharacterStep(selection: CharacterSelection | null): ThinkingSt
   };
 }
 
-function getVideoTypeStep(videoType: VideoGenerationType | null, gameplaySelection: GameplaySelection | null): ThinkingStep {
-  if (videoType === "gameplay" && gameplaySelection) {
-    const categoryLabel = GAMEPLAY_CATEGORY_OPTIONS.find((option) => option.id === gameplaySelection.category)?.label ?? gameplaySelection.category;
-    return {
-      title: "Choosing video format",
-      detail: `Selected gameplay video mode with ${categoryLabel} • ${gameplaySelection.backgroundName}.`,
-    };
-  }
-  return {
-    title: "Choosing video format",
-    detail: "Selected normal narrative video mode before generation.",
-  };
-}
-
 export default function ChatPage() {
   const [queryMode, setQueryMode] = useState("");
   const [queryCharacterId, setQueryCharacterId] = useState("");
@@ -1217,21 +1353,15 @@ export default function ChatPage() {
   const [isClosingLogs, setIsClosingLogs] = useState(false);
   const [isThinkingStreamActive, setIsThinkingStreamActive] = useState(false);
   const [hasActiveStoryCharacterChoice, setHasActiveStoryCharacterChoice] = useState(false);
-  const [hasActiveVideoTypeChoice, setHasActiveVideoTypeChoice] = useState(false);
   const [composerMode, setComposerMode] = useState<ModeId | null>(null);
+  const [studySessionId, setStudySessionId] = useState<string>("");
   const [activeRunMode, setActiveRunMode] = useState<ModeId | "normal">("normal");
   const [activeThinkingSteps, setActiveThinkingSteps] = useState<ThinkingStep[]>(COMMON_THINKING_STEPS);
   const [activeStoryMessageId, setActiveStoryMessageId] = useState<string | null>(null);
-  const [activeVideoMessageId, setActiveVideoMessageId] = useState<string | null>(null);
   const [activeStoryCharacterSelection, setActiveStoryCharacterSelection] = useState<CharacterSelection | null>(null);
   const [activeStoryCharacterId, setActiveStoryCharacterId] = useState<string>("");
-  const [activeVideoType, setActiveVideoType] = useState<VideoGenerationType | null>(null);
-  const [activeGameplaySelection, setActiveGameplaySelection] = useState<GameplaySelection | null>(null);
   const [pendingStoryCharacterId, setPendingStoryCharacterId] = useState<string>("");
   const [pendingUseAiStoryCharacter, setPendingUseAiStoryCharacter] = useState(false);
-  const [pendingVideoType, setPendingVideoType] = useState<VideoGenerationType | null>(null);
-  const [pendingGameplayCategory, setPendingGameplayCategory] = useState<GameplayCategory>(DEFAULT_GAMEPLAY_CATEGORY);
-  const [pendingGameplayBackgroundId, setPendingGameplayBackgroundId] = useState(DEFAULT_GAMEPLAY_BACKGROUND_ID);
   const [jobStoryCharacters, setJobStoryCharacters] = useState<StoryCharacterOption[]>([]);
   const [isLoadingStoryCharacters, setIsLoadingStoryCharacters] = useState(false);
   const [queryStoryCharacterOption, setQueryStoryCharacterOption] = useState<StoryCharacterOption | null>(null);
@@ -1262,8 +1392,7 @@ export default function ChatPage() {
   const characterCarouselRef = useRef<HTMLDivElement>(null);
   const thinkingStartRef = useRef<number>(0);
   const activeStoryCharacterSelectionRef = useRef<CharacterSelection | null>(null);
-  const activeVideoTypeRef = useRef<VideoGenerationType | null>(null);
-  const activeGameplaySelectionRef = useRef<GameplaySelection | null>(null);
+  const studySessionIdRef = useRef<string>("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1271,6 +1400,10 @@ export default function ChatPage() {
     setQueryMode((params.get("mode") || "").toLowerCase());
     setQueryCharacterId((params.get("characterId") || "").trim());
   }, []);
+
+  useEffect(() => {
+    studySessionIdRef.current = studySessionId;
+  }, [studySessionId]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth", force = false) => {
     if (!force && !shouldAutoScroll) return;
@@ -1506,7 +1639,7 @@ export default function ChatPage() {
   }, [queryCharacterId]);
 
   useEffect(() => {
-    if (queryMode !== "story" && queryMode !== "quiz") return;
+    if (queryMode !== "story" && queryMode !== "quiz" && queryMode !== "search" && queryMode !== "study") return;
     const requestedMode = queryMode as ModeId;
     setComposerMode((current) => (current === requestedMode ? current : requestedMode));
   }, [queryMode]);
@@ -1534,22 +1667,6 @@ export default function ChatPage() {
     [pendingStoryCharacterId, storyCharacterOptions],
   );
 
-  const pendingVideoTypeOption = React.useMemo(
-    () => VIDEO_MODE_OPTIONS.find((option) => option.value === pendingVideoType) ?? null,
-    [pendingVideoType],
-  );
-
-  const pendingGameplayBackgroundOptions = React.useMemo(
-    () => GAMEPLAY_BACKGROUNDS[pendingGameplayCategory],
-    [pendingGameplayCategory],
-  );
-
-  const pendingGameplayBackground = React.useMemo(() => {
-    return pendingGameplayBackgroundOptions.find((item) => item.id === pendingGameplayBackgroundId)
-      ?? pendingGameplayBackgroundOptions[0]
-      ?? null;
-  }, [pendingGameplayBackgroundOptions, pendingGameplayBackgroundId]);
-
   const hasPendingStoryChoice = pendingUseAiStoryCharacter || Boolean(pendingStoryCharacterId);
 
   const applyActiveStoryCharacterSelection = useCallback((selection: CharacterSelection | null, targetMessageId?: string) => {
@@ -1570,39 +1687,6 @@ export default function ChatPage() {
       }),
     );
   }, [activeStoryMessageId]);
-
-  const applyActiveVideoTypeSelection = useCallback((
-    selection: VideoGenerationType | null,
-    gameplaySelection: GameplaySelection | null,
-    targetMessageId?: string,
-  ) => {
-    const messageId = targetMessageId ?? activeVideoMessageId;
-    activeVideoTypeRef.current = selection;
-    activeGameplaySelectionRef.current = gameplaySelection;
-    setActiveVideoType(selection);
-    setActiveGameplaySelection(gameplaySelection);
-    if (selection) {
-      const videoSteps = getThinkingSteps("video", selection).map((step) => ({
-        ...step,
-        imageUrls: step.imageUrls ? [...step.imageUrls] : undefined,
-      }));
-      setActiveThinkingSteps(videoSteps);
-    }
-    if (!messageId) return;
-    setMessages((prev) =>
-      prev.map((msg) => {
-        if (msg.id !== messageId || msg.role !== "user") return msg;
-        const basePrompt = msg.basePrompt ?? msg.content;
-        return {
-          ...msg,
-          basePrompt,
-          videoType: selection,
-          gameplaySelection,
-          content: formatVideoPromptWithType(basePrompt, selection, gameplaySelection),
-        };
-      }),
-    );
-  }, [activeVideoMessageId]);
 
   const startThinkingStream = useCallback(() => {
     if (!isLoading || isThinkingStreamActive) return;
@@ -1659,57 +1743,6 @@ export default function ChatPage() {
     el.scrollBy({ left: dir * (80 * 3 + 7 * 2), behavior: "smooth" });
   }, []);
 
-  const handlePickPendingVideoType = useCallback((selection: VideoGenerationType) => {
-    if (isThinkingStreamActive || isClosingLogs) return;
-    setPendingVideoType(selection);
-    if (selection === "normal") return;
-    const firstBackgroundId = getDefaultGameplayBackgroundId(pendingGameplayCategory);
-    if (!pendingGameplayBackgroundId || !GAMEPLAY_BACKGROUNDS[pendingGameplayCategory].some((clip) => clip.id === pendingGameplayBackgroundId)) {
-      setPendingGameplayBackgroundId(firstBackgroundId);
-    }
-  }, [isThinkingStreamActive, isClosingLogs, pendingGameplayCategory, pendingGameplayBackgroundId]);
-
-  const handlePickPendingGameplayCategory = useCallback((category: GameplayCategory) => {
-    if (isThinkingStreamActive || isClosingLogs) return;
-    setPendingGameplayCategory(category);
-    setPendingGameplayBackgroundId(getDefaultGameplayBackgroundId(category));
-  }, [isThinkingStreamActive, isClosingLogs]);
-
-  const handlePickPendingGameplayBackground = useCallback((backgroundId: string) => {
-    if (isThinkingStreamActive || isClosingLogs) return;
-    setPendingGameplayBackgroundId(backgroundId);
-  }, [isThinkingStreamActive, isClosingLogs]);
-
-  const handleConfirmVideoTypeChoice = useCallback(() => {
-    if (isThinkingStreamActive || isClosingLogs || !pendingVideoType) return;
-    if (pendingVideoType === "gameplay") {
-      const selectedBackground =
-        GAMEPLAY_BACKGROUNDS[pendingGameplayCategory].find((item) => item.id === pendingGameplayBackgroundId)
-        ?? GAMEPLAY_BACKGROUNDS[pendingGameplayCategory][0];
-      if (!selectedBackground) return;
-      applyActiveVideoTypeSelection(
-        pendingVideoType,
-        {
-          category: pendingGameplayCategory,
-          backgroundId: selectedBackground.id,
-          backgroundName: selectedBackground.name,
-        },
-      );
-    } else {
-      applyActiveVideoTypeSelection(pendingVideoType, null);
-    }
-    setHasActiveVideoTypeChoice(true);
-    startThinkingStream();
-  }, [
-    isThinkingStreamActive,
-    isClosingLogs,
-    pendingVideoType,
-    pendingGameplayCategory,
-    pendingGameplayBackgroundId,
-    applyActiveVideoTypeSelection,
-    startThinkingStream,
-  ]);
-
   // Stream steps + elapsed counter while loading
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
@@ -1750,7 +1783,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!isLoading || !isThinkingStreamActive) return;
-    if ((activeRunMode === "normal" || activeRunMode === "search") && isAwaitingBackendReply) return;
+    if ((activeRunMode === "normal" || activeRunMode === "search" || activeRunMode === "study") && isAwaitingBackendReply) return;
     if (activeRunMode === "story" && isAwaitingStoryReply) return;
     if (activeRunMode === "quiz" && isAwaitingQuizReply) return;
     const imageStageTotal = activeThinkingSteps.find((step) => step.imageUrls?.length)?.imageUrls?.length ?? 0;
@@ -1766,23 +1799,13 @@ export default function ChatPage() {
       closeTimer = setTimeout(() => {
         const finalCharacterSelection =
           activeRunMode === "story" ? activeStoryCharacterSelectionRef.current : null;
-        const finalVideoType =
-          activeRunMode === "video" ? activeVideoTypeRef.current : null;
-        const finalGameplaySelection =
-          activeRunMode === "video" ? activeGameplaySelectionRef.current : null;
         const finalThinkingSteps = activeRunMode === "story"
           ? [getStoryCharacterStep(finalCharacterSelection), ...activeThinkingSteps]
-          : activeRunMode === "video"
-            ? [getVideoTypeStep(finalVideoType, finalGameplaySelection), ...activeThinkingSteps]
-            : activeThinkingSteps;
+          : activeThinkingSteps;
         const assistantContent = activeRunMode === "story"
           ? "What a wonderful idea! Let me weave a magical story around that — filled with wonder, friendship, and adventure that kids will absolutely love. Give me just a moment to craft something special for you..."
-          : activeRunMode === "video"
-            ? finalVideoType === "gameplay"
-              ? "Great concept. I am shaping it into a high-energy gameplay-style video flow with tight pacing and strong visual hooks."
-              : "Great concept. I am shaping it into a polished narrative video with clear scene progression and balanced audio pacing."
-            : activeRunMode === "quiz"
-              ? "Great topic. I am preparing a child-friendly quiz with clear options, hints, and explanations."
+          : activeRunMode === "quiz"
+            ? "Great topic. I am preparing a child-friendly quiz with clear options, hints, and explanations."
             : "Great prompt. I am preparing a focused response with clear structure and polished wording.";
         setMessages(prev => [
           ...prev,
@@ -1793,31 +1816,20 @@ export default function ChatPage() {
             timestamp: new Date(),
             mode: activeRunMode,
             characterSelection: finalCharacterSelection,
-            videoType: finalVideoType,
-            gameplaySelection: finalGameplaySelection,
             thinkingSteps: finalThinkingSteps,
             thinkingDuration: duration,
           },
         ]);
         setActiveStoryMessageId(null);
-        setActiveVideoMessageId(null);
         setActiveStoryCharacterSelection(null);
         setActiveStoryCharacterId("");
-        setActiveVideoType(null);
-        setActiveGameplaySelection(null);
         setPendingStoryCharacterId("");
         setPendingUseAiStoryCharacter(false);
-        setPendingVideoType(null);
-        setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-        setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
         setHasActiveStoryCharacterChoice(false);
-        setHasActiveVideoTypeChoice(false);
         setIsAwaitingBackendReply(false);
         setIsAwaitingStoryReply(false);
         setIsAwaitingQuizReply(false);
         activeStoryCharacterSelectionRef.current = null;
-        activeVideoTypeRef.current = null;
-        activeGameplaySelectionRef.current = null;
         setIsClosingLogs(false);
         setIsThinkingStreamActive(false);
         setIsLoading(false);
@@ -1892,34 +1904,76 @@ export default function ChatPage() {
       },
     ]);
     setActiveStoryMessageId(null);
-    setActiveVideoMessageId(null);
     setActiveStoryCharacterSelection(null);
     setActiveStoryCharacterId("");
-    setActiveVideoType(null);
-    setActiveGameplaySelection(null);
     setPendingStoryCharacterId("");
     setPendingUseAiStoryCharacter(false);
-    setPendingVideoType(null);
-    setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-    setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
     setHasActiveStoryCharacterChoice(false);
-    setHasActiveVideoTypeChoice(false);
     setIsAwaitingBackendReply(false);
     setIsAwaitingStoryReply(false);
     setIsAwaitingQuizReply(false);
     activeStoryCharacterSelectionRef.current = null;
-    activeVideoTypeRef.current = null;
-    activeGameplaySelectionRef.current = null;
     setIsClosingLogs(false);
     setIsThinkingStreamActive(false);
     setIsLoading(false);
     setTimeout(() => scrollToBottom("smooth", true), 60);
   }, [scrollToBottom]);
 
+  const uploadStudyFiles = useCallback(async (
+    files: File[],
+    existingSessionId?: string | null,
+  ): Promise<string> => {
+    const pdfFiles = files.filter((file) => isStudyPdf(file));
+    if (!pdfFiles.length) {
+      const fallbackSession = (existingSessionId || studySessionIdRef.current || "").trim();
+      if (fallbackSession) return fallbackSession;
+      throw new Error("Study mode requires at least one uploaded PDF.");
+    }
+
+    let session = (existingSessionId || studySessionIdRef.current || "").trim();
+    for (const file of pdfFiles) {
+      const formData = new FormData();
+      formData.append("file", file, file.name);
+      if (session) formData.append("session_id", session);
+
+      const response = await fetch("/api/chat/study/upload", {
+        method: "POST",
+        body: formData,
+        cache: "no-store",
+      });
+
+      const rawText = await response.text();
+      let parsed: StudyUploadResponse = {};
+      try {
+        parsed = JSON.parse(rawText) as StudyUploadResponse;
+      } catch {
+        parsed = {};
+      }
+
+      if (!response.ok) {
+        const detail = typeof parsed.detail === "string" && parsed.detail.trim()
+          ? parsed.detail.trim()
+          : `Study upload failed (${response.status})`;
+        throw new Error(detail);
+      }
+
+      const nextSession = (parsed.session_id || "").trim();
+      if (!nextSession) {
+        throw new Error("Study upload succeeded but session_id was missing in the response.");
+      }
+      session = nextSession;
+    }
+
+    setStudySessionId(session);
+    studySessionIdRef.current = session;
+    return session;
+  }, []);
+
   const requestBackendAssistantReply = useCallback(async (
     mode: ModeId | "normal",
     message: string,
     history: Array<{ role: "user" | "assistant"; content: string }>,
+    studySession?: string | null,
   ) => {
     const requestStartedAt = Date.now();
     try {
@@ -1929,7 +1983,8 @@ export default function ChatPage() {
         body: JSON.stringify({
           message,
           history,
-          mode: mode === "search" ? "search" : "normal",
+          mode: mode === "search" ? "search" : mode === "study" ? "study" : "normal",
+          study_session_id: mode === "study" ? ((studySession || "").trim() || null) : undefined,
         }),
         cache: "no-store",
       });
@@ -1971,7 +2026,11 @@ export default function ChatPage() {
       const successPayload = (parsed && typeof parsed === "object")
         ? ({ ...(parsed as Record<string, unknown>) } as Record<string, unknown>)
         : ({ answer } as Record<string, unknown>);
-      const references = extractMcpReferences(parsed.mcp_output);
+      const backendReferences = extractBackendCitations(parsed.citations);
+      const mcpReferences = extractMcpReferences(parsed.mcp_output);
+      const references = mode === "search"
+        ? mcpReferences
+        : mergeSearchReferences(backendReferences, mcpReferences);
 
       const successSteps = buildChatSuccessThinkingSteps({
         category: parsed.category,
@@ -1983,9 +2042,20 @@ export default function ChatPage() {
         mcpUsed: parsed.mcp_used,
         mcpServer: parsed.mcp_server,
         mcpOutput: parsed.mcp_output,
+        retrievalProvider: parsed.retrieval_provider,
+        retrievalUsedFallback: parsed.retrieval_used_fallback,
+        moderation: parsed.moderation,
         backendPayload: successPayload,
         durationMs: Math.max(1, Date.now() - requestStartedAt),
       });
+
+      if (mode === "study") {
+        const responseSession = (parsed.study_session_id || "").trim();
+        if (responseSession) {
+          setStudySessionId(responseSession);
+          studySessionIdRef.current = responseSession;
+        }
+      }
 
       finalizeBackendAssistantReply(answer, mode, successSteps, successPayload, references);
     } catch (error) {
@@ -2738,23 +2808,14 @@ export default function ChatPage() {
     ]);
 
     setActiveStoryMessageId(null);
-    setActiveVideoMessageId(null);
     setActiveStoryCharacterSelection(null);
     setActiveStoryCharacterId("");
-    setActiveVideoType(null);
-    setActiveGameplaySelection(null);
     setPendingStoryCharacterId("");
     setPendingUseAiStoryCharacter(false);
-    setPendingVideoType(null);
-    setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-    setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
     setHasActiveStoryCharacterChoice(false);
-    setHasActiveVideoTypeChoice(false);
     setIsAwaitingStoryReply(false);
     setIsAwaitingQuizReply(false);
     activeStoryCharacterSelectionRef.current = null;
-    activeVideoTypeRef.current = null;
-    activeGameplaySelectionRef.current = null;
 
     setTimeout(() => scrollToBottom("smooth", true), 60);
     addAssistantReply("quiz", true);
@@ -3071,19 +3132,28 @@ export default function ChatPage() {
 
   const handleSend = useCallback((payload: PromptSendPayload) => {
     const trimmed = payload.message.trim();
-    if (!trimmed) return;
+    const uploadedFiles = Array.isArray(payload.files) ? payload.files : [];
+    const hasStudyUpload = uploadedFiles.some((file) => isStudyPdf(file));
+    const rawMode = payload.mode ?? "normal";
 
-    const mode = payload.mode ?? "normal";
-    const shouldUseBackendChat = mode !== "story" && mode !== "video" && mode !== "quiz";
+    let mode: ModeId | "normal" = rawMode;
+    if (rawMode === "normal" && hasStudyUpload) {
+      mode = "study";
+    } else if (rawMode === "normal" && detectWebSearchIntent(trimmed)) {
+      mode = "search";
+    }
+
+    const normalizedMessage = trimmed || (mode === "study" && hasStudyUpload
+      ? "Use the uploaded study PDF as context."
+      : "");
+    if (!normalizedMessage) return;
+
+    const shouldUseBackendChat = mode !== "story" && mode !== "quiz";
     const initialCharacterSelection = mode === "story" ? null : payload.characterSelection ?? null;
-    const initialVideoType: VideoGenerationType | null = null;
-    const initialGameplaySelection: GameplaySelection | null = null;
-    const shouldStartImmediately = mode !== "story" && mode !== "video";
+    const shouldStartImmediately = mode !== "story";
     const userContent = mode === "story"
-      ? formatStoryPromptWithCharacter(trimmed, initialCharacterSelection)
-      : mode === "video"
-        ? formatVideoPromptWithType(trimmed, initialVideoType, initialGameplaySelection)
-        : trimmed;
+      ? formatStoryPromptWithCharacter(normalizedMessage, initialCharacterSelection)
+      : normalizedMessage;
     const userMessageId = Date.now().toString();
 
     const backendHistory = shouldUseBackendChat
@@ -3102,12 +3172,10 @@ export default function ChatPage() {
         id: userMessageId,
         role: "user",
         content: userContent,
-        basePrompt: trimmed,
+        basePrompt: normalizedMessage,
         timestamp: new Date(),
         mode,
         characterSelection: initialCharacterSelection,
-        videoType: initialVideoType,
-        gameplaySelection: initialGameplaySelection,
       },
     ]);
     setIsAwaitingBackendReply(false);
@@ -3116,79 +3184,33 @@ export default function ChatPage() {
 
     if (mode === "story") {
       setActiveStoryMessageId(userMessageId);
-      setActiveVideoMessageId(null);
       setActiveStoryCharacterId("");
       setActiveStoryCharacterSelection(null);
-      setActiveVideoType(null);
-      setActiveGameplaySelection(null);
       setPendingStoryCharacterId("");
       setPendingUseAiStoryCharacter(false);
-      setPendingVideoType(null);
-      setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-      setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
-      setHasActiveVideoTypeChoice(false);
       setIsAwaitingStoryReply(false);
       activeStoryCharacterSelectionRef.current = null;
-      activeVideoTypeRef.current = null;
-      activeGameplaySelectionRef.current = null;
-    } else if (mode === "video") {
-      setActiveStoryMessageId(null);
-      setActiveVideoMessageId(userMessageId);
-      setActiveStoryCharacterSelection(null);
-      setActiveStoryCharacterId("");
-      setActiveVideoType(null);
-      setActiveGameplaySelection(null);
-      setPendingStoryCharacterId("");
-      setPendingUseAiStoryCharacter(false);
-      setPendingVideoType(null);
-      setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-      setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
-      setHasActiveStoryCharacterChoice(false);
-      setHasActiveVideoTypeChoice(false);
-      setIsAwaitingStoryReply(false);
-      setIsAwaitingQuizReply(false);
-      activeStoryCharacterSelectionRef.current = null;
-      activeVideoTypeRef.current = null;
-      activeGameplaySelectionRef.current = null;
     } else if (mode === "quiz") {
       setActiveStoryMessageId(null);
-      setActiveVideoMessageId(null);
       setActiveStoryCharacterSelection(null);
       setActiveStoryCharacterId("");
-      setActiveVideoType(null);
-      setActiveGameplaySelection(null);
       setPendingStoryCharacterId("");
       setPendingUseAiStoryCharacter(false);
-      setPendingVideoType(null);
-      setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-      setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
-      setHasActiveVideoTypeChoice(false);
       setIsAwaitingStoryReply(false);
       setIsAwaitingQuizReply(false);
       activeStoryCharacterSelectionRef.current = null;
-      activeVideoTypeRef.current = null;
-      activeGameplaySelectionRef.current = null;
     } else {
       setActiveStoryMessageId(null);
-      setActiveVideoMessageId(null);
       setActiveStoryCharacterSelection(null);
       setActiveStoryCharacterId("");
-      setActiveVideoType(null);
-      setActiveGameplaySelection(null);
       setPendingStoryCharacterId("");
       setPendingUseAiStoryCharacter(false);
-      setPendingVideoType(null);
-      setPendingGameplayCategory(DEFAULT_GAMEPLAY_CATEGORY);
-      setPendingGameplayBackgroundId(DEFAULT_GAMEPLAY_BACKGROUND_ID);
       setHasActiveStoryCharacterChoice(false);
-      setHasActiveVideoTypeChoice(false);
       setIsAwaitingStoryReply(false);
       setIsAwaitingQuizReply(false);
       activeStoryCharacterSelectionRef.current = null;
-      activeVideoTypeRef.current = null;
-      activeGameplaySelectionRef.current = null;
     }
 
     setTimeout(() => scrollToBottom("smooth", true), 60);
@@ -3196,15 +3218,42 @@ export default function ChatPage() {
     if (shouldUseBackendChat) {
       addAssistantReply(mode, true);
       setIsAwaitingBackendReply(true);
-      void requestBackendAssistantReply(mode, trimmed, backendHistory);
+      if (mode === "study") {
+        void (async () => {
+          try {
+            let activeSession = (studySessionIdRef.current || "").trim();
+            if (hasStudyUpload) {
+              activeSession = await uploadStudyFiles(uploadedFiles, activeSession);
+            }
+            if (!activeSession) {
+              throw new Error("Upload a PDF in Study mode before asking file-based questions.");
+            }
+            await requestBackendAssistantReply(mode, normalizedMessage, backendHistory, activeSession);
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : "Study-mode request failed.";
+            const errorSteps = buildChatErrorThinkingSteps(detail, 1);
+            finalizeBackendAssistantReply(detail, mode, errorSteps, { detail }, []);
+          }
+        })();
+        return;
+      }
+      void requestBackendAssistantReply(mode, normalizedMessage, backendHistory, null);
       return;
     }
 
     addAssistantReply(mode, shouldStartImmediately);
     if (mode === "quiz") {
-      void requestQuizAssistantReply(trimmed);
+      void requestQuizAssistantReply(normalizedMessage);
     }
-  }, [messages, scrollToBottom, addAssistantReply, requestBackendAssistantReply, requestQuizAssistantReply]);
+  }, [
+    messages,
+    scrollToBottom,
+    addAssistantReply,
+    requestBackendAssistantReply,
+    requestQuizAssistantReply,
+    uploadStudyFiles,
+    finalizeBackendAssistantReply,
+  ]);
 
   const isEmpty = messages.length === 0;
   const groups = groupMessages(messages);
@@ -3760,27 +3809,38 @@ export default function ChatPage() {
                                   <div className={styles.referenceStrip}>
                                     {msg.references?.map((ref, index) => (
                                       <React.Fragment key={`${msg.id}-pill-${index}`}>
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <a
-                                          href={ref.url}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className={styles.referenceStripPill}
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          <span className={styles.referenceStripPillLogo}>
-                                            <img
-                                              src={referenceLogoUrl(ref.url)}
-                                              alt=""
-                                              className={styles.referenceStripPillLogoImg}
-                                              onError={(e) => { e.currentTarget.style.display = "none"; }}
-                                            />
-                                            <span className={styles.referenceStripPillFallback}>
-                                              {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                        {ref.url ? (
+                                          <a
+                                            href={ref.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className={styles.referenceStripPill}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <span className={styles.referenceStripPillLogo}>
+                                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                                              <img
+                                                src={referenceLogoUrl(ref.url)}
+                                                alt=""
+                                                className={styles.referenceStripPillLogoImg}
+                                                onError={(e) => { e.currentTarget.style.display = "none"; }}
+                                              />
+                                              <span className={styles.referenceStripPillFallback}>
+                                                {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                              </span>
                                             </span>
+                                            <span className={styles.referenceStripPillText}>{extractHostname(ref.url)}</span>
+                                          </a>
+                                        ) : (
+                                          <span className={`${styles.referenceStripPill} ${styles.referenceStripPillDisabled}`}>
+                                            <span className={styles.referenceStripPillLogo}>
+                                              <span className={styles.referenceStripPillFallback}>
+                                                {(ref.source || ref.title || "source").slice(0, 1).toUpperCase()}
+                                              </span>
+                                            </span>
+                                            <span className={styles.referenceStripPillText}>{ref.source || ref.title}</span>
                                           </span>
-                                          <span className={styles.referenceStripPillText}>{extractHostname(ref.url)}</span>
-                                        </a>
+                                        )}
                                         {index < (msg.references?.length ?? 0) - 1 && (
                                           <span className={styles.referenceStripSep}>·</span>
                                         )}
@@ -3801,34 +3861,53 @@ export default function ChatPage() {
                                       >
                                         <div className={styles.referenceList}>
                                           {msg.references?.map((ref, index) => (
-                                            <a
-                                              key={`${msg.id}-ref-${index}`}
-                                              href={ref.url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className={styles.referenceCard}
-                                            >
-                                              {/* favicon */}
-                                              <span className={styles.referenceLogo}>
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img
-                                                  src={referenceLogoUrl(ref.url)}
-                                                  alt=""
-                                                  className={styles.referenceLogoImg}
-                                                  onError={(event) => { event.currentTarget.style.display = "none"; }}
-                                                />
-                                                <span className={styles.referenceLogoFallback}>
-                                                  {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                            ref.url ? (
+                                              <a
+                                                key={`${msg.id}-ref-${index}`}
+                                                href={ref.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className={styles.referenceCard}
+                                              >
+                                                {/* favicon */}
+                                                <span className={styles.referenceLogo}>
+                                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                  <img
+                                                    src={referenceLogoUrl(ref.url)}
+                                                    alt=""
+                                                    className={styles.referenceLogoImg}
+                                                    onError={(event) => { event.currentTarget.style.display = "none"; }}
+                                                  />
+                                                  <span className={styles.referenceLogoFallback}>
+                                                    {extractHostname(ref.url).slice(0, 1).toUpperCase()}
+                                                  </span>
                                                 </span>
-                                              </span>
-                                              {/* single-line text: title · domain */}
-                                              <span className={styles.referenceInline}>
-                                                <span className={styles.referenceTitle}>{ref.title}</span>
-                                                <span className={styles.referenceMeta}>
-                                                  · {[formatReferenceDate(ref.publishedDate), extractHostname(ref.url)].filter(Boolean).join(" · ")}
+                                                {/* single-line text: title · domain */}
+                                                <span className={styles.referenceInline}>
+                                                  <span className={styles.referenceTitle}>{ref.title}</span>
+                                                  <span className={styles.referenceMeta}>
+                                                    · {[formatReferenceDate(ref.publishedDate), extractHostname(ref.url)].filter(Boolean).join(" · ")}
+                                                  </span>
                                                 </span>
-                                              </span>
-                                            </a>
+                                              </a>
+                                            ) : (
+                                              <div
+                                                key={`${msg.id}-ref-${index}`}
+                                                className={`${styles.referenceCard} ${styles.referenceCardStatic}`}
+                                              >
+                                                <span className={styles.referenceLogo}>
+                                                  <span className={styles.referenceLogoFallback}>
+                                                    {(ref.source || ref.title || "S").slice(0, 1).toUpperCase()}
+                                                  </span>
+                                                </span>
+                                                <span className={styles.referenceInline}>
+                                                  <span className={styles.referenceTitle}>{ref.title}</span>
+                                                  <span className={styles.referenceMeta}>
+                                                    · {[formatReferenceDate(ref.publishedDate), ref.source || "search result"].filter(Boolean).join(" · ")}
+                                                  </span>
+                                                </span>
+                                              </div>
+                                            )
                                           ))}
                                         </div>
                                       </motion.div>
@@ -3872,7 +3951,7 @@ export default function ChatPage() {
                         </motion.div>
                         <span className={styles.dreamingCardTitle}>Processing</span>
                         <span className={styles.dreamingCardTimer}>
-                          {(activeRunMode === "story" || activeRunMode === "video") && !isThinkingStreamActive
+                          {activeRunMode === "story" && !isThinkingStreamActive
                             ? "waiting"
                             : `${elapsedSeconds}s`}
                         </span>
@@ -4117,133 +4196,6 @@ export default function ChatPage() {
                                   : activeStoryCharacterSelection?.type === "existing" && activeStoryCharacter
                                     ? `${activeStoryCharacter.name} locked in.`
                                     : "AI creativity locked in."}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-
-                        {activeRunMode === "video" && (
-                          <div className={styles.dreamingStep}>
-                            <div className={styles.dreamingBulletCol}>
-                              <span className={styles.dreamingBullet} />
-                              <span className={styles.dreamingLine} />
-                            </div>
-                            <div className={styles.dreamingStepContent}>
-                              <p className={styles.dreamingStepTitle}>Choosing video format</p>
-                              <p className={styles.dreamingStepDetail}>
-                                {hasActiveVideoTypeChoice
-                                  ? "Video format locked. Continuing with rendering."
-                                  : "Choose Normal or Gameplay, then continue. Thinking starts after confirmation."}
-                              </p>
-                              <div className={styles.dreamingVideoTypeGrid}>
-                                {VIDEO_MODE_OPTIONS.map((option) => {
-                                  const active = isThinkingStreamActive
-                                    ? activeVideoType === option.value
-                                    : pendingVideoType === option.value;
-                                  return (
-                                    <button
-                                      key={option.value}
-                                      type="button"
-                                      onClick={() => handlePickPendingVideoType(option.value)}
-                                      className={`${styles.dreamingVideoTypeCard} ${
-                                        active ? styles.dreamingVideoTypeCardActive : ""
-                                      }`}
-                                      aria-pressed={active}
-                                      disabled={isThinkingStreamActive || isClosingLogs}
-                                    >
-                                      <span className={styles.dreamingVideoTypeIcon}>
-                                        {option.value === "gameplay" ? <Gamepad2 size={13} /> : <Clapperboard size={13} />}
-                                      </span>
-                                      <span className={styles.dreamingVideoTypeLabel}>{option.label}</span>
-                                      <span className={styles.dreamingVideoTypeDetail}>{option.description}</span>
-                                      <span className={styles.dreamingVideoTypeHelper}>
-                                        {option.value === "gameplay" ? "Gameplay stack" : "Narrative stack"}
-                                      </span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {(isThinkingStreamActive ? activeVideoType === "gameplay" : pendingVideoType === "gameplay") && (
-                                <div className={styles.dreamingGameplayPicker}>
-                                  <p className={styles.dreamingGameplayHeading}>Gameplay style</p>
-                                  <div className={styles.dreamingGameplayCategoryRow}>
-                                    {GAMEPLAY_CATEGORY_OPTIONS.map((category) => {
-                                      const activeCategory = (isThinkingStreamActive
-                                        ? activeGameplaySelection?.category
-                                        : pendingGameplayCategory) === category.id;
-                                      return (
-                                        <button
-                                          key={category.id}
-                                          type="button"
-                                          onClick={() => handlePickPendingGameplayCategory(category.id)}
-                                          className={`${styles.dreamingGameplayCategoryPill} ${
-                                            activeCategory ? styles.dreamingGameplayCategoryPillActive : ""
-                                          }`}
-                                          disabled={isThinkingStreamActive || isClosingLogs}
-                                        >
-                                          {category.label}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                  <div className={styles.dreamingGameplayGrid}>
-                                    {GAMEPLAY_BACKGROUNDS[
-                                      (isThinkingStreamActive ? activeGameplaySelection?.category : pendingGameplayCategory)
-                                      ?? DEFAULT_GAMEPLAY_CATEGORY
-                                    ].map((clip) => {
-                                      const activeBackground = (isThinkingStreamActive
-                                        ? activeGameplaySelection?.backgroundId
-                                        : pendingGameplayBackgroundId) === clip.id;
-                                      return (
-                                        <button
-                                          key={clip.id}
-                                          type="button"
-                                          title={clip.name}
-                                          onClick={() => handlePickPendingGameplayBackground(clip.id)}
-                                          className={`${styles.dreamingGameplayThumb} ${
-                                            activeBackground ? styles.dreamingGameplayThumbActive : ""
-                                          }`}
-                                          disabled={isThinkingStreamActive || isClosingLogs}
-                                        >
-                                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                                          <img src={clip.thumb} alt={clip.name} loading="lazy" />
-                                          <span className={styles.dreamingGameplayThumbLabel}>{clip.name}</span>
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                  <p className={styles.dreamingGameplayHint}>
-                                    Selected gameplay background:{" "}
-                                    {(isThinkingStreamActive
-                                      ? activeGameplaySelection?.backgroundName
-                                      : pendingGameplayBackground?.name) ?? "Choose one"}
-                                  </p>
-                                </div>
-                              )}
-                              <div className={styles.dreamingCharacterActions}>
-                                <button
-                                  type="button"
-                                  onClick={handleConfirmVideoTypeChoice}
-                                  className={styles.dreamingCharacterPrimaryButton}
-                                  disabled={!pendingVideoType || isThinkingStreamActive || isClosingLogs}
-                                >
-                                  {pendingVideoType === "gameplay" && pendingGameplayBackground
-                                    ? `Continue with Gameplay • ${pendingGameplayBackground.name}`
-                                    : pendingVideoTypeOption
-                                      ? `Continue with ${pendingVideoTypeOption.label}`
-                                    : "Select video format to continue"}
-                                </button>
-                              </div>
-                              <p className={styles.dreamingCharacterStatus}>
-                                {!hasActiveVideoTypeChoice
-                                  ? pendingVideoTypeOption
-                                    ? pendingVideoType === "gameplay" && pendingGameplayBackground
-                                      ? `Ready with Gameplay • ${pendingGameplayBackground.name}. Tap continue.`
-                                      : `Ready with ${pendingVideoTypeOption.label}. Tap continue.`
-                                    : "Waiting for your video format selection."
-                                  : activeVideoType === "gameplay"
-                                    ? `Selected gameplay video mode${activeGameplaySelection ? ` (${activeGameplaySelection.backgroundName}).` : "."}`
-                                    : "Selected normal video mode."}
                               </p>
                             </div>
                           </div>
