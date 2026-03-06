@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import DreamNavbar from "@/components/ui/dream-navbar";
@@ -66,9 +67,216 @@ const TEAM = [
   { name: "Elena Martinez", role: "Learning Experience"      },
 ];
 
+const TECH_STACK = [
+  {
+    title: "Frontend shell",
+    body:
+      "Dream ships as a Next.js 16 App Router application. Public pages, chat, and the dashboard all live in the same React 19 codebase, while server route handlers proxy browser requests into the backend.",
+    bullets: [
+      "Next.js 16, React 19, TypeScript",
+      "Public pages plus /dashboard workflows",
+      "Server-side /api/* proxy routes",
+    ],
+  },
+  {
+    title: "Main orchestrator",
+    body:
+      "A FastAPI service on port 8010 acts as the single backend entrypoint. It owns request routing, job creation, progress events, asset download, and the agent layer used for chat and creation decisions.",
+    bullets: [
+      "QuestionReaderAgent and ResponderAgent",
+      "MAFRoutingAgent for character orchestration",
+      "SQLite-backed jobs, events, and assets",
+    ],
+  },
+  {
+    title: "Generation services",
+    body:
+      "Heavy AI work is split into independent A2A services. Character generation uses CrewAI for multi-step narrative building, and storybook generation uses MAF agents plus parallel A2A character calls.",
+    bullets: [
+      "Character Maker on :8000 via A2A",
+      "Story Book Maker on :8020 via A2A",
+      "Parallel branches for writing and visuals",
+    ],
+  },
+  {
+    title: "Retrieval and model providers",
+    body:
+      "Dream combines multiple external systems instead of depending on a single model endpoint. That lets the app separate grounding, text generation, and image rendering by workload.",
+    bullets: [
+      "Exa MCP for fresh web grounding",
+      "Azure AI Search for uploaded study material",
+      "OpenAI/Azure OpenAI plus Replicate rendering",
+    ],
+  },
+];
+
+const PROTOCOLS = [
+  "Browser -> Next.js route navigation",
+  "Website -> orchestrator over REST + NDJSON",
+  "Orchestrator -> backends over A2A JSON-RPC",
+  "Orchestrator -> browser over SSE",
+  "Search grounding through MCP",
+  "Jobs persisted in SQLite and local assets",
+];
+
+const REQUEST_FLOWS = [
+  {
+    n: "01",
+    t: "Chat requests stay synchronous until grounding is needed.",
+    b:
+      "POST /api/chat reaches the main orchestrator, where QuestionReaderAgent classifies the request and ResponderAgent drafts the answer. Search mode can pull evidence from Exa MCP, while study mode retrieves citations from Azure AI Search before the final response is returned to the website.",
+  },
+  {
+    n: "02",
+    t: "Character generation becomes a tracked job with agent routing.",
+    b:
+      "The website first creates a job record, then forwards the user prompt into the orchestrator. MAFRoutingAgent decides whether to run the full character pipeline or an image-only regeneration path, then the Character Maker service executes the CrewAI workflow and hands image rendering off to Replicate.",
+  },
+  {
+    n: "03",
+    t: "Storybook generation fans out into parallel branches.",
+    b:
+      "The Story Book Maker creates a blueprint, writes story pages, and requests character generation in parallel over A2A. Once text and character outputs converge, it builds scene prompts, renders images, and streams progress events back through the orchestrator so the dashboard can update live instead of waiting for a single blocking response.",
+  },
+];
+
 const CTA_WORDS = ["Every", "great", "story", "starts", "with", "one", "idea."];
+const DEFAULT_DIAGRAM_SIZE: { w: number; h: number } = { w: 3223.609375, h: 1348.3609375 };
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.1;
+
+type Point = { x: number; y: number };
 
 export default function AboutPage() {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const [diagramZoom, setDiagramZoom] = useState(1);
+  const [diagramPan, setDiagramPan] = useState<Point>({ x: 0, y: 0 });
+  const [isDraggingDiagram, setIsDraggingDiagram] = useState(false);
+  const [diagramSize, setDiagramSize] = useState(DEFAULT_DIAGRAM_SIZE);
+
+  const clampZoom = (zoom: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+
+  const clampPan = (nextPan: Point, zoomLevel: number, size = diagramSize): Point => {
+    const viewport = viewportRef.current;
+    if (!viewport) return nextPan;
+
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+    const baseWidth = viewportWidth;
+    const baseHeight = (viewportWidth * size.h) / size.w;
+    const scaledWidth = baseWidth * zoomLevel;
+    const scaledHeight = baseHeight * zoomLevel;
+
+    const clampedX =
+      scaledWidth <= viewportWidth
+        ? (viewportWidth - scaledWidth) / 2
+        : Math.min(0, Math.max(viewportWidth - scaledWidth, nextPan.x));
+    const clampedY =
+      scaledHeight <= viewportHeight
+        ? (viewportHeight - scaledHeight) / 2
+        : Math.min(0, Math.max(viewportHeight - scaledHeight, nextPan.y));
+
+    return { x: clampedX, y: clampedY };
+  };
+
+  const zoomAt = (rawZoom: number, anchor?: Point) => {
+    const viewport = viewportRef.current;
+    const nextZoom = clampZoom(rawZoom);
+
+    if (!viewport || nextZoom === diagramZoom) {
+      setDiagramZoom(nextZoom);
+      return;
+    }
+
+    const point = anchor ?? {
+      x: viewport.clientWidth / 2,
+      y: viewport.clientHeight / 2,
+    };
+    const contentX = (point.x - diagramPan.x) / diagramZoom;
+    const contentY = (point.y - diagramPan.y) / diagramZoom;
+    const nextPanRaw = {
+      x: point.x - contentX * nextZoom,
+      y: point.y - contentY * nextZoom,
+    };
+
+    setDiagramZoom(nextZoom);
+    setDiagramPan(clampPan(nextPanRaw, nextZoom));
+  };
+
+  const resetDiagram = () => {
+    const fitZoom = 1;
+    setDiagramZoom(fitZoom);
+    setDiagramPan(clampPan({ x: 0, y: 0 }, fitZoom));
+  };
+
+  const centerDiagram = () => {
+    setDiagramPan(clampPan(diagramPan, diagramZoom));
+  };
+
+  const handleDiagramWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const anchor = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    const delta = event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+    zoomAt(diagramZoom + delta, anchor);
+  };
+
+  const handleDiagramPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch" && event.button !== 0) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    setIsDraggingDiagram(true);
+  };
+
+  const handleDiagramPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const dx = event.clientX - dragState.x;
+    const dy = event.clientY - dragState.y;
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+
+    setDiagramPan((currentPan) => clampPan({ x: currentPan.x + dx, y: currentPan.y + dy }, diagramZoom));
+  };
+
+  const stopDiagramDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    dragStateRef.current = null;
+    setIsDraggingDiagram(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  useEffect(() => {
+    const syncPan = () => {
+      setDiagramPan((currentPan) => clampPan(currentPan, diagramZoom));
+    };
+
+    syncPan();
+    window.addEventListener("resize", syncPan);
+    return () => window.removeEventListener("resize", syncPan);
+  }, [diagramZoom, diagramSize]);
+
   return (
     <div className={styles.page}>
       <DreamNavbar />
@@ -248,6 +456,168 @@ export default function AboutPage() {
             >
               <p className={styles.teamName}>{m.name}</p>
               <p className={styles.teamRole}>{m.role}</p>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* ── Architecture ── */}
+        <motion.hr className={styles.divider} variants={fade(0)} initial="hidden" whileInView="show" viewport={vp} />
+
+        <motion.p className={styles.chapterKicker} variants={fade(0)} initial="hidden" whileInView="show" viewport={vp}>
+          How it works
+        </motion.p>
+
+        <AnimWord>A protocol-first architecture built for long-running AI workflows.</AnimWord>
+
+        <motion.div className={styles.prose} variants={fade(0.06)} initial="hidden" whileInView="show" viewport={vp}>
+          <p>
+            Dream is not a single prompt box wired straight into one model. The app is split
+            into a user-facing Next.js layer, a FastAPI orchestrator, specialized A2A
+            backends, and separate retrieval and rendering providers. That separation keeps
+            the browser simple while the orchestration layer handles routing, safety, job
+            state, and downstream agent execution.
+          </p>
+          <p>
+            Short operations like chat can finish in one request-response cycle. Long-running
+            operations like character and story creation are treated as jobs: the orchestrator
+            persists progress, streams events back to the UI over SSE, and downloads finished
+            assets so the dashboard can display stable local results instead of depending on
+            temporary provider URLs.
+          </p>
+        </motion.div>
+
+        <motion.div
+          className={styles.techGrid}
+          variants={fade(0.08)}
+          initial="hidden"
+          whileInView="show"
+          viewport={vp}
+        >
+          {TECH_STACK.map((section, i) => (
+            <motion.div
+              key={section.title}
+              className={styles.techCard}
+              variants={fade(i * 0.05)}
+              initial="hidden"
+              whileInView="show"
+              viewport={vp}
+            >
+              <p className={styles.techCardTitle}>{section.title}</p>
+              <p className={styles.techCardBody}>{section.body}</p>
+              <ul className={styles.techCardList}>
+                {section.bullets.map((bullet) => (
+                  <li key={bullet}>{bullet}</li>
+                ))}
+              </ul>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        <motion.div
+          className={styles.protocolStrip}
+          variants={fade(0.1)}
+          initial="hidden"
+          whileInView="show"
+          viewport={vp}
+        >
+          {PROTOCOLS.map((protocol, i) => (
+            <motion.span
+              key={protocol}
+              className={styles.protocolPill}
+              variants={fade(i * 0.04)}
+              initial="hidden"
+              whileInView="show"
+              viewport={vp}
+            >
+              {protocol}
+            </motion.span>
+          ))}
+        </motion.div>
+
+        <motion.div
+          className={styles.archSection}
+          variants={fade(0.1)}
+          initial="hidden"
+          whileInView="show"
+          viewport={vp}
+        >
+          <div className={styles.diagramToolbar}>
+            <div className={styles.diagramToolbarMeta}>
+              <p className={styles.diagramToolbarLabel}>Diagram Viewer</p>
+              <p className={styles.diagramHint}>Scroll to zoom. Drag to pan.</p>
+            </div>
+            <div className={styles.diagramToolbarActions}>
+              <button type="button" className={styles.zoomButton} onClick={() => zoomAt(diagramZoom - ZOOM_STEP)}>-</button>
+              <input
+                type="range"
+                min={MIN_ZOOM * 100}
+                max={MAX_ZOOM * 100}
+                step={5}
+                value={Math.round(diagramZoom * 100)}
+                className={styles.zoomSlider}
+                onChange={(event) => zoomAt(Number(event.target.value) / 100)}
+                aria-label="Diagram zoom"
+              />
+              <button type="button" className={styles.zoomButton} onClick={() => zoomAt(diagramZoom + ZOOM_STEP)}>+</button>
+              <button type="button" className={styles.zoomButton} onClick={centerDiagram}>Center</button>
+              <button type="button" className={styles.zoomButton} onClick={resetDiagram}>Fit</button>
+              <span className={styles.zoomReadout}>{Math.round(diagramZoom * 100)}%</span>
+            </div>
+          </div>
+          <div
+            ref={viewportRef}
+            className={`${styles.diagramFrame} ${isDraggingDiagram ? styles.diagramFrameDragging : ""}`}
+            onWheel={handleDiagramWheel}
+            onPointerDown={handleDiagramPointerDown}
+            onPointerMove={handleDiagramPointerMove}
+            onPointerUp={stopDiagramDrag}
+            onPointerCancel={stopDiagramDrag}
+          >
+            <img
+              src="/main-str.svg"
+              alt="Dream architecture diagram"
+              className={styles.diagramImage}
+              draggable={false}
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                  setDiagramSize({ w: image.naturalWidth, h: image.naturalHeight });
+                }
+              }}
+              style={{
+                transform: `translate(${diagramPan.x}px, ${diagramPan.y}px) scale(${diagramZoom})`,
+              }}
+            />
+          </div>
+          <p className={styles.diagramCaption}>
+            The browser only talks to the Next.js application. From there, Dream centralizes
+            orchestration in FastAPI, fans out into A2A services for specialized generation
+            work, and streams job progress back into the dashboard while assets are persisted
+            locally.
+          </p>
+        </motion.div>
+
+        <motion.div
+          className={styles.flowList}
+          variants={fade(0.12)}
+          initial="hidden"
+          whileInView="show"
+          viewport={vp}
+        >
+          {REQUEST_FLOWS.map((flow, i) => (
+            <motion.div
+              key={flow.n}
+              className={styles.flowStep}
+              variants={fade(i * 0.05)}
+              initial="hidden"
+              whileInView="show"
+              viewport={vp}
+            >
+              <p className={styles.flowStepNum}>{flow.n}</p>
+              <div>
+                <p className={styles.flowStepTitle}>{flow.t}</p>
+                <p className={styles.flowStepBody}>{flow.b}</p>
+              </div>
             </motion.div>
           ))}
         </motion.div>

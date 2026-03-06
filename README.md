@@ -9,7 +9,7 @@ The platform is built across four services that talk to each other using open pr
 
 ### Architecture
 
-<img src="root.svg" alt="Dream architecture diagram" width="100%" />
+<img src="final.svg" alt="Dream architecture diagram" width="100%" />
 
 ### Service READMEs
 
