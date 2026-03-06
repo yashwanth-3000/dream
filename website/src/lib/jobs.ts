@@ -42,6 +42,13 @@ export interface JobEvent {
   created_at: string;
 }
 
+const FETCH_JOBS_RETRIES = 3;
+const FETCH_JOBS_RETRY_DELAY_MS = 600;
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export async function fetchJobs(params?: {
   type?: string;
   status?: string;
@@ -56,15 +63,47 @@ export async function fetchJobs(params?: {
   if (params?.offset) qs.set("offset", String(params.offset));
   if (params?.summary) qs.set("summary", "1");
 
-  const res = await fetch(`/api/jobs?${qs.toString()}`, { cache: "no-store" });
-  if (!res.ok) return [];
-  return res.json();
+  const url = `/api/jobs?${qs.toString()}`;
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < FETCH_JOBS_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) await delay(FETCH_JOBS_RETRY_DELAY_MS * attempt);
+      const res = await fetch(url, { cache: "no-store" });
+      // 4xx = permanent failure (bad request, not found) — don't retry
+      if (res.status >= 400 && res.status < 500) return [];
+      if (res.ok) return res.json();
+      // 5xx / network issue — retry
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  console.error("[fetchJobs] All retries exhausted:", lastError);
+  return [];
 }
 
-export async function fetchJob(id: string): Promise<Job | null> {
-  const res = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json();
+export async function fetchJob(
+  id: string,
+  options?: { summary?: boolean }
+): Promise<Job | null> {
+  const qs = options?.summary ? "?summary=1" : "";
+  const url = `/api/jobs/${id}${qs}`;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < FETCH_JOBS_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) await delay(FETCH_JOBS_RETRY_DELAY_MS * attempt);
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.status === 404) return null;
+      if (res.status >= 400 && res.status < 500) return null;
+      if (res.ok) return res.json();
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  console.error("[fetchJob] All retries exhausted:", lastError);
+  return null;
 }
 
 export async function deleteJob(id: string): Promise<boolean> {

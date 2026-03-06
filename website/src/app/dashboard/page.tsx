@@ -62,14 +62,19 @@ const QUICK_LINKS = [
 
 export default function DashboardOverviewPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [loadingJobs, setLoadingJobs] = useState(true);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
-      const data = await fetchJobs({ limit: 20, summary: true });
-      if (!active) return;
-      setJobs(data);
+      try {
+        const data = await fetchJobs({ limit: 5, summary: true });
+        if (!active) return;
+        setJobs(data);
+      } finally {
+        if (active) setLoadingJobs(false);
+      }
     }
 
     load();
@@ -79,10 +84,7 @@ export default function DashboardOverviewPage() {
   }, []);
 
   const recent = useMemo(
-    () =>
-      [...jobs]
-        .sort((a, b) => b.created_at.localeCompare(a.created_at))
-        .slice(0, 5),
+    () => [...jobs].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [jobs]
   );
 
@@ -118,6 +120,23 @@ export default function DashboardOverviewPage() {
         </div>
 
         <div className="space-y-2">
+          {loadingJobs && recent.length === 0 && (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <div className="relative flex h-10 w-10 items-center justify-center">
+                <div className="absolute inset-0 rounded-full border-4 border-[#e9e0d5]" />
+                <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-[#c9924e]" />
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold" style={{ color: "#2b180a" }}>Fetching recent jobs…</p>
+                <p className="text-xs" style={{ color: "#9a7a65" }}>Connecting to the backend — takes a few seconds on first load.</p>
+              </div>
+            </div>
+          )}
+          {!loadingJobs && recent.length === 0 && (
+            <p className="py-6 text-center text-sm" style={{ color: "#9a7a65" }}>
+              No jobs yet — create your first story or character.
+            </p>
+          )}
           {recent.map((job) => {
             const preview = previewItemsForJob(job);
             const icon =

@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Filter, MoreVertical, RefreshCw, Search, BookMarked, BookOpenText, Clock3, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
+const STORIES_PAGE_SIZE = 7;
+
 import { AnimatedTooltip } from "@/components/dashboard/animated-tooltip";
 import { fetchJobs, getAssetUrl, type Job, type JobStatus } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
@@ -93,6 +95,9 @@ function formatRelativeTime(value: string) {
 export default function DashboardStoriesPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"all" | StoryDisplayStatus>("all");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -100,23 +105,46 @@ export default function DashboardStoriesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
 
-  const loadStories = useCallback(async () => {
+  const loadPage = useCallback(async (nextPage: number) => {
     try {
-      const data = await fetchJobs({ type: "story", limit: 60, summary: true });
+      setPageLoading(true);
+      const data = await fetchJobs({
+        type: "story",
+        limit: STORIES_PAGE_SIZE,
+        offset: nextPage * STORIES_PAGE_SIZE,
+        summary: true,
+      });
+      if (nextPage > 0 && data.length === 0) {
+        setHasMore(false);
+        return;
+      }
       setJobs(data);
+      setHasMore(data.length === STORIES_PAGE_SIZE);
+      setPageIndex(nextPage);
     } finally {
       setLoading(false);
+      setPageLoading(false);
     }
   }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { await loadStories(); } finally { setRefreshing(false); }
-  }, [loadStories]);
+    try { await loadPage(pageIndex); } finally { setRefreshing(false); }
+  }, [loadPage, pageIndex]);
+
+  const handlePrev = useCallback(async () => {
+    if (pageLoading || pageIndex === 0) return;
+    await loadPage(pageIndex - 1);
+  }, [loadPage, pageIndex, pageLoading]);
+
+  const handleNext = useCallback(async () => {
+    if (pageLoading || !hasMore) return;
+    await loadPage(pageIndex + 1);
+  }, [hasMore, loadPage, pageIndex, pageLoading]);
 
   useEffect(() => {
-    loadStories();
-  }, [loadStories]);
+    loadPage(0);
+  }, [loadPage]);
 
   useEffect(() => {
     const onWindowClick = (event: MouseEvent) => {
@@ -141,8 +169,21 @@ export default function DashboardStoriesPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#dbc9b7] border-t-[#c9924e]" />
+      <div
+        className="flex min-h-[60vh] flex-col items-center justify-center gap-5 rounded-3xl p-8 text-center"
+        style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
+      >
+        <div className="relative flex h-14 w-14 items-center justify-center">
+          <div className="absolute inset-0 rounded-full border-4 border-[#e9e0d5]" />
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-[#c9924e]" />
+          <BookOpenText className="size-5" style={{ color: "#c9924e" }} />
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-base font-semibold" style={{ color: "#2b180a" }}>Loading your stories…</p>
+          <p className="max-w-xs text-sm leading-relaxed" style={{ color: "#9a7a65" }}>
+            Waking up the backend and fetching your storybook adventures. The first load takes a few seconds.
+          </p>
+        </div>
       </div>
     );
   }
@@ -429,14 +470,51 @@ export default function DashboardStoriesPage() {
         })}
       </div>
 
-      {filtered.length === 0 && (
+      {jobs.length === 0 && (
         <div
           className="rounded-2xl p-12 text-center text-sm"
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
-          {jobs.length === 0
-            ? "No story jobs yet. Generate a story from the Storybook Test page."
-            : "No stories found for the current filters."}
+          No story jobs yet. Generate a story from the Storybook Test page.
+        </div>
+      )}
+
+      {jobs.length > 0 && filtered.length === 0 && (
+        <div
+          className="rounded-2xl p-12 text-center text-sm"
+          style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
+        >
+          No stories found for the current filters.
+        </div>
+      )}
+
+      {jobs.length > 0 && (
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={handlePrev}
+            disabled={pageIndex === 0 || pageLoading}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+            onMouseEnter={(e) => { if (pageIndex !== 0 && !pageLoading) e.currentTarget.style.background = "#ede7dd"; }}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+          >
+            Previous
+          </button>
+          <p className="text-sm font-medium" style={{ color: "#9a7a65" }}>
+            Page {pageIndex + 1}
+          </p>
+          <button
+            type="button"
+            onClick={handleNext}
+            disabled={pageLoading || !hasMore}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+            onMouseEnter={(e) => { if (!pageLoading && hasMore) e.currentTarget.style.background = "#ede7dd"; }}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+          >
+            {pageLoading ? "Loading…" : "Show more"}
+          </button>
         </div>
       )}
     </motion.section>

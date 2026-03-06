@@ -1,19 +1,19 @@
 # Dream MAF Orchestrator
 
-The central orchestration layer for the Dream platform. Built on Microsoft Agent Framework (MAF), it routes kid-safe chat through dual MAF agents, keeps web search on Exa MCP for fresh internet grounding, adds Azure AI Search RAG for uploaded study PDFs, forwards character creation requests through a MAF routing agent to the CrewAI Character Maker, and passes storybook requests to the MAF Story Book Maker — all via the A2A protocol.
+Dream MAF Orchestrator is the coordination layer for the Dream platform. It sits between the frontend and the specialist backends, uses **Microsoft Agent Framework (MAF)** for kid-safe chat and routing decisions, uses **Exa MCP** for fresh web grounding, adds a **retrieval-augmented generation (RAG)** path through **Azure AI Search** for study-mode answers over uploaded PDFs, and sends character and storybook requests to downstream services over the **A2A** protocol.
 
-**Pipeline:** Incoming request → MAF routing/chat agents → A2A protocol → specialist backends → job tracking + asset storage → structured response.
+**Pipeline:** Incoming request -> MAF chat or routing agents -> optional retrieval and grounding -> A2A calls to specialist backends -> job tracking and asset storage -> structured API response.
 
-**Models used:**
+**Core components used:**
 
-- `gpt-4o-mini` (MAF agents) — question classification, kid-safe answering, character action routing
-- Exa MCP (`web_search_exa`) — retrieval path in chat search mode
-- Azure AI Search study index (`mode=study`) — retrieval path for uploaded PDF sessions
+- `gpt-4o-mini` - powers MAF agents for question classification, kid-safe answering, and character routing
+- Exa MCP (`web_search_exa`) - provides fresh web retrieval for chat `mode=search`
+- Azure AI Search study index (`mode=study`) - provides the RAG retrieval layer for uploaded PDF study sessions
 
 
 ### Architecture
 
-<img src="main-maf.svg" alt="Main MAF Orchestrator architecture diagram" width="100%" />
+<img src="main-final.svg" alt="Main MAF Orchestrator architecture diagram" width="100%" />
 
 ## How It Works
 
@@ -21,28 +21,11 @@ This service sits between the Next.js frontend and the two specialist backends. 
 
 ### 1. Kid-Safe Chat (`/api/v1/orchestrate/chat`)
 
-Two MAF agents run in sequence on every chat message:
+Two MAF agents handle every chat message in sequence.
 
-```
-User message
-  └─► QuestionReaderAgent (dream-kid-question-reader)
-        Reads the message + recent history and returns a strict JSON classification:
-        {
-          "category":       "general" | "learning" | "creative" | "sensitive" | "unsafe",
-          "safety":         "safe" | "caution" | "unsafe",
-          "reading_level":  "5-7" | "8-10" | "11-13" | "14+",
-          "response_style": "short" | "explainer" | "playful",
-          "notes":          "short reason"
-        }
+`QuestionReaderAgent` (`dream-kid-question-reader`) reads the latest user message together with recent conversation history and classifies it by category, safety level, reading level, response style, and a short reasoning note. That structured output is then passed to `ResponderAgent` (`dream-kid-response-agent`).
 
-  └─► ResponderAgent (dream-kid-response-agent)
-        Receives the classification result + original message and writes a
-        60–140 word kid-safe answer using warm, concrete language.
-        - unsafe safety   → politely refuses, suggests trusted adult
-        - caution safety  → responds gently with supportive guidance
-        - search mode     → retrieves fresh web evidence from Exa MCP
-        - study mode      → retrieves evidence from uploaded PDFs in Azure AI Search
-```
+`ResponderAgent` uses the classification plus the original message to generate a 60-140 word reply in warm, concrete, kid-safe language. If the message is unsafe, it refuses gently and suggests involving a trusted adult. If the message needs caution, it answers with supportive guidance. In `mode=search`, it grounds the answer with fresh web evidence from Exa MCP. In `mode=study`, it grounds the answer with evidence retrieved from uploaded PDFs through Azure AI Search.
 
 **Normal mode** (`mode=normal`) — both agents run against OpenAI directly, no external calls beyond the LLM.
 
@@ -50,7 +33,9 @@ User message
 
 **Study mode** (`mode=study`) — retrieval uses Azure AI Search filtered by `study_session_id` so answers are grounded to user-uploaded PDFs only.
 
-Retrieved evidence and citations are injected into the responder prompt as mode-specific grounding context.
+In practice, the frontend first uploads PDFs for a study session and receives a `study_session_id`. Later chat requests send that same `study_session_id` with `mode=study`, and the orchestrator searches only the chunks indexed for that session. This keeps the answer scoped to the learner's uploaded material instead of the open web.
+
+Retrieved evidence and citations are injected into the responder prompt as mode-specific grounding context, so the final reply is based on the uploaded study content and can return source-backed references in the API response.
 
 **Temporal queries** (e.g. "what is today's date?") are intercepted before the Responder. The server clock is injected as authoritative context and, if the LLM omits the ISO date in its reply, a deterministic correction is applied so the answer is always accurate.
 
@@ -60,30 +45,13 @@ Retrieved evidence and citations are injected into the responder prompt as mode-
 
 ### 2. Character Orchestration (`/api/v1/orchestrate/character`)
 
-```
-Character request (mode = auto | create | regenerate)
-  └─► MAFRoutingAgent (dream-character-router)
-        If mode is explicit (create / regenerate) → decision is immediate, no LLM call.
-        If mode = auto → MAF agent reads the request fields and returns:
-        {
-          "selected_action": "create" | "regenerate",
-          "rationale":       "short explanation",
-          "confidence":      0.0–1.0
-        }
-        If MAF is unavailable or JSON parsing fails → deterministic rule fallback:
-          - positive_prompt present  → regenerate
-          - positive_prompt absent   → create
+Character requests support three modes: `auto`, `create`, and `regenerate`. When the mode is explicitly set to `create` or `regenerate`, the service routes immediately without calling an LLM. When the mode is `auto`, `MAFRoutingAgent` (`dream-character-router`) reads the request payload and returns a structured decision containing the selected action, a short rationale, and a confidence score.
 
-  └─► A2ABackendClient
-        Sends the request to the Character Maker via A2A JSON-RPC
-        (message/send to http://<A2A_BACKEND_BASE_URL>/a2a).
+If the routing agent is unavailable or its JSON output cannot be parsed, the service falls back to a deterministic rule: requests with `positive_prompt` are treated as `regenerate`, and requests without it are treated as `create`.
 
-  └─► Job tracker
-        If a job_id query param is provided, progress events are written to
-        SQLite at each step: routing → backend_call → generating →
-        downloading_assets → completed / failed.
-        Downloaded character images are stored under data/{job_id}/.
-```
+After the action is resolved, `A2ABackendClient` sends the request to the Character Maker over A2A JSON-RPC at `http://<A2A_BACKEND_BASE_URL>/a2a`.
+
+If a `job_id` query parameter is present, the orchestration layer records progress events in SQLite for each major step, including routing, backend call, generation, asset download, and final completion or failure. Downloaded character images are stored under `data/{job_id}/`.
 
 **Why a routing agent?** The same endpoint accepts both full character creation (Vision → CrewAI → Replicate) and image-only regeneration. Using an MAF agent to make the decision means the routing logic can be adjusted by updating a prompt, not by changing code.
 
@@ -91,25 +59,11 @@ Character request (mode = auto | create | regenerate)
 
 ### 3. Storybook Orchestration (`/api/v1/orchestrate/storybook` and `/stream`)
 
-```
-Storybook request
-  └─► A2ABackendClient.create_storybook()   (blocking endpoint)
-      OR
-      A2ABackendClient.stream_storybook_operation()   (streaming endpoint)
+Storybook requests can run in two ways: a blocking request through `A2ABackendClient.create_storybook()` or a streaming request through `A2ABackendClient.stream_storybook_operation()`. Both paths call the Story Book Maker backend at `A2A_STORY_BACKEND_BASE_URL` over A2A.
 
-        Both routes call the Story Book Maker at A2A_STORY_BACKEND_BASE_URL.
-        The streaming route forwards NDJSON events in real time:
-          - type=status    → forwarded as-is
-          - type=progress  → forwarded + written to job event log
-          - type=update    → inspected; if it contains a nested progress
-                             payload it is promoted to type=progress
-          - type=final     → storybook result extracted, assets downloaded,
-                             job marked completed
+For streaming requests, the orchestrator forwards NDJSON events in real time. `status` events are passed through directly, `progress` events are forwarded and also written to the job log, `update` events are inspected and promoted to `progress` when they contain nested progress data, and `final` events trigger result extraction, asset download, and job completion.
 
-  └─► Job tracker
-        If job_id is provided, the full progress trail is written to SQLite
-        and the frontend can poll /api/v1/jobs/{id}/stream (SSE) for live updates.
-```
+If a `job_id` is provided, the full progress trail is stored in SQLite and can be streamed to the frontend through `/api/v1/jobs/{id}/stream` over SSE.
 
 ---
 
@@ -161,30 +115,6 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 ### A2A Protocol Guarantee
 
 `A2A_USE_PROTOCOL` and `A2A_STORY_USE_PROTOCOL` are validated at startup — the service **refuses to start** if either is `false`. Soft-API fallback is not supported.
-
-## Project Layout
-
-```text
-backend/main-maf-chat/
-├── agent_orchestrator/
-│   ├── main.py                    # FastAPI entrypoint + all route handlers
-│   ├── chat_agents.py             # MAFKidsChatOrchestrator — QuestionReader + Responder + Exa/Azure retrieval + safety
-│   ├── maf_router.py              # MAFRoutingAgent — character create/regenerate routing decision
-│   ├── backend_client.py          # A2ABackendClient — A2A calls to character + storybook backends
-│   ├── config.py                  # Pydantic-settings with provider + A2A validation
-│   ├── models.py                  # All request/response Pydantic models + job models
-│   ├── database.py                # SQLite job persistence (aiosqlite)
-│   ├── job_manager.py             # Job lifecycle + SSE event bus
-│   └── af_compat.py               # Agent Framework OpenTelemetry compatibility shim
-├── azure/
-│   └── containerapp.yaml          # Azure Container Apps manifest
-├── data/                          # SQLite DB + downloaded assets (runtime, gitignored)
-├── scripts/
-│   └── deploy_azure.sh            # Azure Container Apps deploy script
-├── Dockerfile
-├── requirements.txt
-└── README.md
-```
 
 ## Setup
 

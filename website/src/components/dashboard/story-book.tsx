@@ -167,12 +167,15 @@ function sanitizeRightPageText(text: string): string {
   const boilerplate = [
     "Small actions and expressions make the emotions easy for kids to follow.",
     "The characters learn one practical lesson and use it immediately in the next moment.",
+    "Specific actions, expressive reactions, and clear scene continuity make the moment easy to follow.",
   ];
   for (const phrase of boilerplate) {
     normalized = normalized.replace(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
   }
 
   normalized = normalized.replace(/\bIn\s+Chapter\s+\d+\s*,\s*/gi, "");
+  normalized = normalized.replace(/\bThis\s+part\s+of\s+Chapter\s+\d+\s+adds[^.]*\.\s*/gi, "");
+  normalized = normalized.replace(/\bChapter\s+\d+\s*[:,-]?\s*/gi, "");
   normalized = normalized.replace(/\.\s*\./g, ". ");
   normalized = normalized.replace(/\s+/g, " ").trim();
 
@@ -364,16 +367,6 @@ function RightPanel({
       animate={{ opacity: 1 }}
       transition={{ duration: 0.28, delay: 0.06, ease: "easeOut" }}
     >
-      {rightPage.chapter && (
-        <p
-          className={cn(
-            "text-[8px] md:text-[10px] font-bold uppercase tracking-[0.14em] mb-2 md:mb-3",
-            immersive ? "text-amber-600/80" : "text-primary"
-          )}
-        >
-          {rightPage.chapter}
-        </p>
-      )}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-0.5">
         <p className="whitespace-pre-wrap text-[11px] md:text-[14px] leading-[1.8] md:leading-[1.95] text-stone-800 font-medium">
           {cleanedRightPageText}

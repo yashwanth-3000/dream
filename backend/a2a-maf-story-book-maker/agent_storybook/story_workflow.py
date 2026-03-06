@@ -1897,6 +1897,13 @@ class StoryBookWorkflow:
             normalized = re.sub(re.escape(phrase), "", normalized, flags=re.IGNORECASE)
 
         normalized = re.sub(r"\bIn\s+Chapter\s+\d+\s*,\s*", "", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(
+            r"\bThis\s+part\s+of\s+Chapter\s+\d+\s+adds[^.]*\.\s*",
+            "",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"\bChapter\s+\d+\s*[:,-]?\s*", "", normalized, flags=re.IGNORECASE)
         normalized = re.sub(r"\s+", " ", normalized).strip(" .")
         if not normalized:
             return normalized
@@ -1991,13 +1998,10 @@ class StoryBookWorkflow:
         beat_sentence = beat_line if beat_line else ""
         if beat_sentence and not beat_sentence.endswith("."):
             beat_sentence = f"{beat_sentence}."
-
-        chapter_label = re.sub(r"\s+", " ", (chapter or "").strip()) or f"Chapter {page_number}"
         return [
             beat_sentence,
             (
-                f"This part of {chapter_label} adds richer detail through specific actions, expressive reactions, "
-                "and scene-level continuity that is easy for kids to follow."
+                "Specific actions, expressive reactions, and clear scene continuity make the moment easy to follow."
             ),
             (
                 "The emotional stakes stay clear while the pacing remains gentle, so every new moment feels earned "

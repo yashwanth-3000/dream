@@ -53,31 +53,6 @@ A multi-agent storybook engine that generates illustrated storybooks with a fixe
 | References/drawings provided | `reference_enriched` — vision analysis feeds into blueprint |
 | Prompt only, no references | `prompt_only` — blueprint generated directly from prompt |
 
-## Project Layout
-
-```text
-backend/a2a-maf-story-book-maker/
-├── agent_storybook/
-│   ├── main.py                    # FastAPI entrypoint
-│   ├── a2a_server.py              # A2A protocol routes + executor
-│   ├── config.py                  # Environment settings (pydantic-settings)
-│   ├── schemas.py                 # Request/response models
-│   ├── af_compat.py               # Agent Framework compatibility shim
-│   ├── maf_agents.py              # MAF agent definitions (blueprint, writer, scene)
-│   ├── story_workflow.py          # Full workflow orchestrator
-│   └── services/
-│       ├── replicate_service.py   # Replicate image generation
-│       └── tts_service.py         # OpenAI text-to-speech generation
-├── tests/
-│   └── test_story_workflow.py
-├── Dockerfile
-├── requirements.txt
-├── architecture.svg
-├── .env.example
-├── pytest.ini
-└── README.md
-```
-
 ## Setup
 
 ```bash

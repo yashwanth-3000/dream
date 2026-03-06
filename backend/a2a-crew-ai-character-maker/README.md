@@ -34,34 +34,6 @@ A self-contained multi-agent character engine that generates story-ready charact
 
 Decision logic: `CharacterWorkflowDecider.choose_workflow(...)`.
 
-## Project Layout
-
-```text
-backend/a2a-crew-ai-character-maker/
-├── app/
-│   ├── main.py                    # FastAPI entrypoint
-│   ├── a2a_server.py              # A2A protocol routes + executor
-│   ├── config.py                  # Environment settings (pydantic-settings)
-│   ├── schemas.py                 # Request/response models
-│   ├── services/
-│   │   ├── vision_service.py      # OpenAI vision descriptions
-│   │   └── replicate_service.py   # Replicate image generation
-│   └── workflows/
-│       └── character_creation.py  # Workflow decider + CrewAI orchestration
-├── scripts/
-│   ├── deploy_azure.sh            # Container Apps deploy (cloud build via ACR Tasks)
-│   └── deploy_azure_appservice.sh # App Service fallback deploy
-├── tests/
-│   └── test_workflow_decider.py
-├── Dockerfile
-├── .dockerignore
-├── pyproject.toml
-├── requirements.txt
-├── architecture.svg
-├── .env.example
-└── README.md
-```
-
 ## Setup
 
 ```bash

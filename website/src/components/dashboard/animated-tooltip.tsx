@@ -29,6 +29,8 @@ export function AnimatedTooltip({ items }: AnimatedTooltipProps) {
           <img
             src={item.image}
             alt={item.name}
+            loading="lazy"
+            decoding="async"
             className={cn(
               "size-8 rounded-full border-2 border-white object-cover shadow-sm transition-all duration-200",
               hoveredIndex === idx ? "z-20 scale-110" : "z-10"

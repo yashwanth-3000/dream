@@ -540,17 +540,22 @@ async def get_job_events(
     job_id: str,
     after: str | None = Query(None),
 ) -> list[dict[str, Any]]:
-    job = await db.get_job(job_id)
-    if not job:
+    # Lightweight existence check — reuses persistent connection, no full job load
+    conn = await db.get_db()
+    cursor = await conn.execute("SELECT id FROM jobs WHERE id = ?", (job_id,))
+    if await cursor.fetchone() is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return await db.get_job_events(job_id, after=after)
 
 
 @app.get("/api/v1/jobs/{job_id}/stream")
 async def stream_job_events(job_id: str) -> StreamingResponse:
-    job = await db.get_job(job_id)
-    if not job:
+    conn = await db.get_db()
+    cursor = await conn.execute("SELECT id, status FROM jobs WHERE id = ?", (job_id,))
+    row = await cursor.fetchone()
+    if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    job = dict(row)
 
     async def sse_stream() -> AsyncIterator[str]:
         existing = await db.get_job_events(job_id)

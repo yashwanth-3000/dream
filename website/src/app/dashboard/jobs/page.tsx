@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import styles from "../dashboard.module.css";
 
 const easeOutExpo = [0.22, 1, 0.36, 1] as const;
+const JOBS_PAGE_SIZE = 7;
 
 const statusConfig: Record<
   JobStatus,
@@ -96,6 +97,9 @@ function previewItemsForJob(job: Job) {
 export default function DashboardJobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(false);
+  const [hasMoreJobs, setHasMoreJobs] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"all" | JobStatus>("all");
   const [selectedMode, setSelectedMode] = useState<"all" | JobType>("all");
@@ -104,27 +108,53 @@ export default function DashboardJobsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
 
-  const loadJobs = useCallback(async () => {
+  const loadJobsPage = useCallback(async (nextPageIndex: number) => {
+    const type = selectedMode === "all" ? undefined : selectedMode;
+    const status = selectedStatus === "all" ? undefined : selectedStatus;
     try {
-      const data = await fetchJobs({ limit: 100, summary: true });
+      setPageLoading(true);
+      const data = await fetchJobs({
+        type,
+        status,
+        limit: JOBS_PAGE_SIZE,
+        offset: nextPageIndex * JOBS_PAGE_SIZE,
+        summary: true,
+      });
+      if (nextPageIndex > 0 && data.length === 0) {
+        setHasMoreJobs(false);
+        return;
+      }
       setJobs(data);
+      setHasMoreJobs(data.length === JOBS_PAGE_SIZE);
+      setPageIndex(nextPageIndex);
     } finally {
       setLoading(false);
+      setPageLoading(false);
     }
-  }, []);
+  }, [selectedMode, selectedStatus]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await loadJobs();
+      await loadJobsPage(pageIndex);
     } finally {
       setRefreshing(false);
     }
-  }, [loadJobs]);
+  }, [loadJobsPage, pageIndex]);
+
+  const handlePreviousPage = useCallback(async () => {
+    if (pageLoading || pageIndex === 0) return;
+    await loadJobsPage(pageIndex - 1);
+  }, [loadJobsPage, pageIndex, pageLoading]);
+
+  const handleNextPage = useCallback(async () => {
+    if (pageLoading || !hasMoreJobs) return;
+    await loadJobsPage(pageIndex + 1);
+  }, [hasMoreJobs, loadJobsPage, pageIndex, pageLoading]);
 
   useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
+    loadJobsPage(0);
+  }, [loadJobsPage]);
 
   useEffect(() => {
     const onWindowClick = (event: MouseEvent) => {
@@ -154,29 +184,22 @@ export default function DashboardJobsPage() {
 
   if (loading) {
     return (
-      <motion.section
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: easeOutExpo }}
-        className="space-y-4 rounded-3xl p-4 shadow-sm md:p-5"
+      <div
+        className="flex min-h-[60vh] flex-col items-center justify-center gap-5 rounded-3xl p-8 text-center"
         style={{ background: "#fdf8f3", border: "1px solid #dbc9b7" }}
       >
-        <div className="space-y-1">
-          <div className="h-7 w-32 animate-pulse rounded-lg" style={{ background: "#e9e0d5" }} />
-          <div className="h-4 w-64 animate-pulse rounded-lg" style={{ background: "#e9e0d5" }} />
+        <div className="relative flex h-14 w-14 items-center justify-center">
+          <div className="absolute inset-0 rounded-full border-4 border-[#e9e0d5]" />
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-[#c9924e]" />
+          <RefreshCw className="size-5" style={{ color: "#c9924e" }} />
         </div>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-8 w-24 animate-pulse rounded-full" style={{ background: "#e9e0d5" }} />
-          ))}
+        <div className="space-y-1.5">
+          <p className="text-base font-semibold" style={{ color: "#2b180a" }}>Loading all jobs…</p>
+          <p className="max-w-xs text-sm leading-relaxed" style={{ color: "#9a7a65" }}>
+            Connecting to the backend and fetching your complete generation history across stories, characters, and quizzes.
+          </p>
         </div>
-        <div className="h-10 w-full animate-pulse rounded-full" style={{ background: "#e9e0d5" }} />
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-16 w-full animate-pulse rounded-2xl" style={{ background: "#e9e0d5" }} />
-          ))}
-        </div>
-      </motion.section>
+      </div>
     );
   }
 
@@ -473,6 +496,40 @@ export default function DashboardJobsPage() {
           style={{ border: "2px dashed #dbc9b7", color: "#9a7a65" }}
         >
           No jobs found for the current filters.
+        </div>
+      )}
+
+      {jobs.length > 0 && (
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={handlePreviousPage}
+            disabled={pageIndex === 0 || pageLoading}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+            onMouseEnter={(e) => {
+              if (pageIndex !== 0 && !pageLoading) e.currentTarget.style.background = "#ede7dd";
+            }}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+          >
+            Previous
+          </button>
+          <p className="text-sm font-medium" style={{ color: "#9a7a65" }}>
+            Page {pageIndex + 1}
+          </p>
+          <button
+            type="button"
+            onClick={handleNextPage}
+            disabled={pageLoading || !hasMoreJobs}
+            className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "#fcf6ef", border: "1px solid #dbc9b7", color: "#2b180a" }}
+            onMouseEnter={(e) => {
+              if (!pageLoading && hasMoreJobs) e.currentTarget.style.background = "#ede7dd";
+            }}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#fcf6ef")}
+          >
+            {pageLoading ? "Loading…" : "Show more"}
+          </button>
         </div>
       )}
     </motion.section>

@@ -13,76 +13,76 @@ import styles from "./home-landing.module.css";
 
 const serviceSteps = [
   {
-    title: "Prompt",
+    title: "Choose Mode",
     number: "01",
-    body: "Type one idea, one character, or one mood. Dream turns it into a child-safe creative starting point in seconds.",
+    body: "Start in normal chat or switch to search, study, story, or quiz. Dream routes each request to the right workflow automatically.",
     image:
       "https://framerusercontent.com/images/rHNMALBdiDG9WKbZg2x6f1Q9As.png?width=684&height=1374",
-    cta: "Start a prompt",
+    cta: "Open chat modes",
   },
   {
-    title: "Story",
+    title: "Generate Assets",
     number: "02",
-    body: "Generate a full age-appropriate story arc with tone controls, reading level controls, and consistent character memory.",
+    body: "Story and quiz flows call specialized A2A services for character design, story drafting, page imagery, and optional narration.",
     image:
       "https://framerusercontent.com/images/FlUmh6vXM6MYl8Y9u6yVDUKkSAg.png?width=1492&height=1454",
-    cta: "Generate story",
+    cta: "Run generation",
   },
   {
-    title: "Read Aloud",
+    title: "Track Jobs",
     number: "03",
-    body: "Attach text-to-voice narration to read every story out loud for accessibility, early readers, and bedtime routines.",
+    body: "Follow progress in real time through streamed events, then open job details and download output assets in the dashboard.",
     image:
       "https://framerusercontent.com/images/xS3VRUcNazVQ09WqJiWUYi39XeI.jpg?width=1200&height=900",
-    cta: "Play narration",
+    cta: "View job activity",
   },
 ];
 
 const processSteps = [
   {
     number: "01",
-    title: "Describe the Idea",
-    timeline: "1 min",
-    copy: "Kids or parents type a simple prompt like 'a brave fox astronaut' and choose tone, age range, and story length.",
+    title: "Pick a Workflow",
+    timeline: "10-30 sec",
+    copy: "Use chat mode switching to run normal Q&A, web-grounded search, document study, storybook generation, or quiz generation.",
   },
   {
     number: "02",
-    title: "Generate Storybook",
-    timeline: "2-3 mins",
-    copy: "Dream writes a complete kid-safe storybook with matching visuals, clear pacing, and optional lesson-focused structure.",
+    title: "Run the Job",
+    timeline: "1-4 mins",
+    copy: "The orchestrator creates a tracked job, routes work to specialist services, and streams structured progress updates as outputs are generated.",
   },
   {
     number: "03",
-    title: "Read & Reflect",
+    title: "Review Outputs",
     timeline: "Anytime",
-    copy: "Reuse characters across new stories, turn on read-aloud voice for accessibility and bedtime routines, and revisit finished storybooks anytime.",
+    copy: "Open job pages to inspect events, reuse characters, revisit generated stories, and download image or audio assets when available.",
   },
 ];
 
 const faqItems = [
   {
     q: "What is Dream, exactly?",
-    a: "Dream is a kid-safe storybook platform. You write a prompt, Dream creates a personalized storybook with consistent characters and read-aloud voice support.",
+    a: "Dream is a Next.js + FastAPI multi-agent system for chat, storybooks, and quizzes. The website proxies requests to an orchestrator that coordinates specialist A2A services.",
   },
   {
-    q: "Why is Dream storybook-first?",
-    a: "Many kids are stuck in high-speed screen routines that fragment attention. Dream resets the pattern with complete stories, active reading, and persistent character worlds so creativity and confidence grow over time.",
+    q: "Which modes are available in chat?",
+    a: "Five modes are implemented: normal, search, study, story, and quiz. Story and quiz modes create tracked generation jobs with streamed progress.",
   },
   {
-    q: "Do you support read-aloud accessibility?",
-    a: "Yes. Dream includes attached text-to-voice narration so stories can be read out loud for accessibility and emerging readers.",
+    q: "How are long-running tasks tracked?",
+    a: "Jobs are stored in SQLite with status, events, and assets. Progress streams are exposed in chat and through job detail pages for real-time monitoring.",
   },
   {
-    q: "Is Dream safe for children?",
-    a: "Yes. Dream uses kid-focused moderation and age-aware generation rules to keep outputs appropriate for family and classroom use.",
+    q: "Can we reuse existing characters?",
+    a: "Yes. Character generation supports create and regenerate paths, and story workflows can reuse a selected character so visuals stay consistent across runs.",
   },
   {
-    q: "Can we reuse the same characters over time?",
-    a: "Yes. Dream keeps character memory so children can continue their favorite worlds instead of starting from scratch each time.",
+    q: "What does a generated storybook include?",
+    a: "The current storybook contract targets 12 spreads total, with a cover and ten illustrated story scenes, plus optional narration outputs when enabled.",
   },
   {
-    q: "Does Dream work for classrooms too?",
-    a: "Yes. Teachers use Dream for reading practice, creative writing prompts, and collaborative storytelling activities.",
+    q: "Is there grounding and safety support?",
+    a: "Search and study modes support grounded answers using retrieval integrations, and optional content safety checks are available in the orchestrator pipeline.",
   },
 ];
 
@@ -280,11 +280,11 @@ export default function HomeLanding() {
             custom={0.02}
           >
             <p className={styles.sectionKicker}>What Dream is</p>
-            <AnimatedSubheading text="The storytelling studio for kids." />
+            <AnimatedSubheading text="An orchestrated storytelling platform." />
             <p className={styles.sectionCopy}>
-              Dream is built for storybook-first creation in one place. Families
-              and classrooms use it to generate safe narratives, deepen
-              creativity, and continue with read-aloud support and reusable characters.
+              Dream combines a Next.js interface, API proxy routes, and a
+              FastAPI orchestrator that coordinates character, storybook, and
+              quiz services through the A2A protocol.
             </p>
           </motion.div>
 
@@ -298,27 +298,26 @@ export default function HomeLanding() {
           >
             <div className={styles.metricGrid}>
               <article className={styles.metricCard}>
-                <h3>120k+</h3>
-                <p>Stories generated with Dream</p>
+                <h3>5 Modes</h3>
+                <p>Normal, Search, Study, Story, and Quiz in one chat UX</p>
               </article>
               <article className={styles.metricCard}>
-                <h3>48k+</h3>
-                <p>Characters created and reused across stories</p>
+                <h3>3 Services</h3>
+                <p>Character, Storybook, and Quiz backends connected via A2A</p>
               </article>
               <article className={styles.metricCard}>
-                <h3>4.9/5</h3>
-                <p>Average family satisfaction rating</p>
+                <h3>Live Jobs</h3>
+                <p>Streaming updates through NDJSON and SSE event channels</p>
               </article>
             </div>
 
             <article className={styles.hiringCard}>
               <div>
                 <p className={styles.hiringTitle}>Built for real imagination loops</p>
-                <p className={styles.hiringOpen}>Families + classrooms + creators</p>
+                <p className={styles.hiringOpen}>Chat + Dashboard + Orchestrator</p>
                 <p className={styles.hiringCopy}>
-                  Dream combines safe generation, consistent character memory,
-                  story progression, and read-aloud accessibility
-                  in one workflow.
+                  One request path handles routing, safety, retrieval, job
+                  tracking, and asset delivery without manual glue code.
                 </p>
               </div>
               <a href="/chat" className={styles.ctaDarkSmall}>
@@ -341,8 +340,8 @@ export default function HomeLanding() {
             <p className={styles.sectionKicker}>Two ways to create</p>
             <AnimatedSubheading text="Chat freely, or build step by step." />
             <p className={styles.sectionCopy}>
-              Dream works however you prefer — a single conversation that does
-              everything, or dedicated dashboards for granular control.
+              Use chat for fast generation and mode switching, then move to
+              dashboard pages for job history, assets, and deeper inspection.
             </p>
           </motion.div>
 
@@ -365,14 +364,14 @@ export default function HomeLanding() {
               </div>
               <h3 className={styles.modeTitle}>Chat with Dream</h3>
               <p className={styles.modeDesc}>
-                Just describe what you want in plain language. Dream handles
-                storybooks, characters, and read-aloud narration in one
-                conversation. No setup, no steps.
+                Describe intent in plain language and change modes inline.
+                Dream manages routing, streaming, and final payload assembly
+                while you stay in one conversation.
               </p>
               <ul className={styles.modeFeatures}>
-                <li>All-in-one conversational AI</li>
-                <li>Storybook + read-aloud in chat</li>
-                <li>Best for families &amp; first sessions</li>
+                <li>Mode-aware routing in one interface</li>
+                <li>Live progress during story and quiz jobs</li>
+                <li>Best for quick iteration and first runs</li>
               </ul>
               <a href="/chat" className={styles.modeCta}>
                 Start chatting <ArrowUpRight size={14} />
@@ -397,14 +396,13 @@ export default function HomeLanding() {
               </div>
               <h3 className={styles.modeTitleWarm}>Dream Studio</h3>
               <p className={styles.modeDescWarm}>
-                Take full control with dedicated dashboards. Manage your
-                character vault, browse the story library, and tune read-aloud
-                accessibility settings.
+                Use dedicated pages to inspect generated artifacts, replay jobs,
+                test endpoints, and manage reusable characters and stories.
               </p>
               <ul className={styles.modeFeaturesWarm}>
-                <li>Character vault &amp; memory</li>
-                <li>Storybook library</li>
-                <li>Best for classrooms &amp; creators</li>
+                <li>Jobs dashboard with event timelines</li>
+                <li>Character and story libraries</li>
+                <li>Best for operators and repeat workflows</li>
               </ul>
               <a href="/dashboard" className={styles.modeCtaWarm}>
                 Open Studio <ArrowUpRight size={14} />
@@ -423,10 +421,10 @@ export default function HomeLanding() {
             custom={0.02}
           >
             <p className={styles.sectionKicker}>Dream Studio</p>
-            <AnimatedSubheading text="We handle prompt to finished storybook for you." />
+            <AnimatedSubheading text="Orchestration from prompt to assets." />
             <p className={styles.sectionCopy}>
-              Move from idea to finished content quickly with controls for age,
-              tone, pacing, character consistency, and read-aloud voice.
+              Requests are routed to specialized agents, then merged into
+              structured outputs with job metadata, assets, and stream logs.
             </p>
           </motion.div>
 
@@ -509,17 +507,17 @@ export default function HomeLanding() {
             custom={0.02}
           >
             <p className={styles.sectionKicker}>How Dream works</p>
-            <AnimatedSubheading text="From prompt to playable story world." />
+            <AnimatedSubheading text="From prompt to streamed results." />
             <p className={styles.sectionCopy}>
-              Three smooth steps designed for children and parents with no
-              complicated setup.
+              The same path powers chat, dashboard views, and long-running
+              generation with observability built in.
             </p>
             <div className={styles.heroActions}>
               <a href="/chat" className={styles.ctaDark}>
-                Start free
+                Open chat
               </a>
               <button className={styles.ctaSoft} type="button">
-                Watch walkthrough
+                Explore workflow
                 <Play size={16} />
               </button>
             </div>
@@ -559,10 +557,10 @@ export default function HomeLanding() {
             custom={0.02}
           >
             <p className={styles.sectionKicker}>Why Dream</p>
-            <AnimatedSubheading text="Not just another generic AI tool." />
+            <AnimatedSubheading text="Built as a connected system." />
             <p className={styles.sectionCopy}>
-              Dream is tuned for child-safe storytelling and repeatable character
-              worlds, not random one-off outputs.
+              Dream focuses on durable workflows: routed requests, streamed job
+              state, reusable assets, and clear failure visibility.
             </p>
           </motion.div>
 
@@ -578,18 +576,19 @@ export default function HomeLanding() {
             >
               <div className={styles.compareTop}>
                 <span className={styles.compareBadgeDark}>Generic tools</span>
-                <h3 className={styles.compareTitle}>Fragmented, inconsistent, and frustrating.</h3>
+                <h3 className={styles.compareTitle}>One-off outputs with weak traceability.</h3>
                 <p className={styles.compareDesc}>
-                  Separate tools, no safety layer, and no memory — every session starts from scratch.
+                  Prompt-only tools usually miss durable state, routing rules,
+                  and reliable progress tracking.
                 </p>
               </div>
               <div className={styles.compareDivider} />
               <ul className={styles.compareList}>
                 {[
-                  "Unstable story continuity",
-                  "No kid-focused safety layer",
-                  "Fast-feed content over deep reading",
-                  "Hard to reuse characters",
+                  "No durable job history",
+                  "No service-level orchestration",
+                  "Hard to inspect failures or retries",
+                  "Limited character continuity controls",
                 ].map((item) => (
                   <li key={item} className={styles.compareItem}>
                     <span className={styles.iconBad}><X size={10} strokeWidth={3} /></span>
@@ -610,19 +609,19 @@ export default function HomeLanding() {
             >
               <div className={styles.compareTop}>
                 <span className={styles.compareBadgeWarm}>Dream</span>
-                <h3 className={styles.compareTitle}>One studio, safe by default.</h3>
+                <h3 className={styles.compareTitle}>Orchestrated, observable, and reusable.</h3>
                 <p className={styles.compareDesc}>
-                  Storybooks, character memory, and read-aloud in a single flow
-                  built for kids and families.
+                  A single system joins chat UX, orchestrator logic, and
+                  specialist services with persistent run data.
                 </p>
               </div>
               <div className={styles.compareDivider} />
               <ul className={styles.compareList}>
                 {[
-                  "Child-safe generation defaults",
-                  "Read-aloud voice for every story",
-                  "Persistent character memory",
-                  "Read-aloud voice accessibility",
+                  "Mode-aware routing with fallback logic",
+                  "Character create + regenerate paths",
+                  "Persistent jobs, events, and asset files",
+                  "Live status in chat and dashboard",
                 ].map((item) => (
                   <li key={item} className={styles.compareItem}>
                     <span className={styles.iconGood}><Check size={10} strokeWidth={3} /></span>
@@ -644,21 +643,21 @@ export default function HomeLanding() {
               viewport={{ once: true, amount: 0.35 }}
               custom={0.03}
             >
-              <p className={styles.sectionKicker}>Dream in practice</p>
-              <AnimatedSubheading text="A class turned prompts into literacy wins." />
+              <p className={styles.sectionKicker}>Dream in production</p>
+              <AnimatedSubheading text="One orchestrator coordinating specialists." />
               <p className={styles.sectionCopy}>
-                A second-grade teacher used Dream weekly for reading circles.
-                Students created characters, generated chapters, then used
-                read-aloud narration for engagement and active comprehension.
+                A story request can trigger blueprint generation, character
+                creation or reuse, scene prompt writing, image rendering, and
+                optional narration while emitting structured progress events.
               </p>
               <div className={styles.caseStats}>
                 <div>
-                  <h3>40%</h3>
-                  <p>Higher voluntary reading time</p>
+                  <h3>12</h3>
+                  <p>Storybook spreads per run (cover + scenes)</p>
                 </div>
                 <div>
-                  <h3>3x</h3>
-                  <p>More student story submissions</p>
+                  <h3>2 Streams</h3>
+                  <p>NDJSON in chat and SSE in job detail pages</p>
                 </div>
               </div>
             </motion.article>
@@ -689,7 +688,7 @@ export default function HomeLanding() {
             <p className={styles.sectionKicker}>FAQ</p>
             <AnimatedSubheading text="Your questions answered." />
             <p className={styles.sectionCopy}>
-              Everything parents and educators ask before launching with Dream.
+              Common questions about modes, job flow, safety, and system design.
             </p>
           </motion.div>
 
@@ -753,7 +752,7 @@ export default function HomeLanding() {
           <div className={styles.footerBrandBlock}>
             <h2 className={`${styles.footerBrand} ${styles.displayFont}`}>Dream</h2>
             <p className={styles.footerTagline}>
-              Storybook-first AI<br />for kids.
+              Agent-orchestrated<br />story generation.
             </p>
             <a
               href="https://github.com/yashwanth-3000/Dream"

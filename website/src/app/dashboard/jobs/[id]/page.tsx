@@ -163,6 +163,7 @@ export default function DashboardJobDetailPage() {
   const { id } = useParams<{ id: string }>();
 
   const [job, setJob] = useState<Job | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
   const [events, setEvents] = useState<JobEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -207,8 +208,23 @@ export default function DashboardJobDetailPage() {
       setError("Failed to load job data");
     } finally {
       setLoading(false);
+      setLoadingFull(false);
     }
   }, [id]);
+
+  // Two-phase load: show basic info fast, then full data in background
+  const initialLoad = useCallback(async () => {
+    if (!id) return;
+    // Phase 1: summary fetch (fast — no heavy result_payload)
+    const summaryJob = await fetchJob(id, { summary: true });
+    if (summaryJob) {
+      setJob(summaryJob);
+      setLoading(false);
+      setLoadingFull(true);
+    }
+    // Phase 2: full fetch (all assets + result_payload) runs in background
+    await loadData();
+  }, [id, loadData]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -216,8 +232,8 @@ export default function DashboardJobDetailPage() {
   }, [loadData]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    initialLoad();
+  }, [initialLoad]);
 
   // SSE stream for real-time updates (only for active jobs)
   useEffect(() => {
@@ -709,17 +725,18 @@ export default function DashboardJobDetailPage() {
   // ── Loading state ──────────────────────────────────────────
   if (loading) {
     return (
-      <section className="flex min-h-[60vh] items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center gap-4"
-        >
-          <Loader2 className="h-8 w-8 animate-spin" style={{ color: "#9a7a65" }} />
-          <p className="text-sm font-semibold" style={{ color: "#9a7a65" }}>
-            Loading job details…
+      <section className="flex min-h-[60vh] flex-col items-center justify-center gap-5 text-center">
+        <div className="relative flex h-14 w-14 items-center justify-center">
+          <div className="absolute inset-0 rounded-full border-4 border-[#e9e0d5]" />
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-[#c9924e]" />
+          <Sparkles className="size-5" style={{ color: "#c9924e" }} />
+        </div>
+        <div className="space-y-1.5">
+          <p className="text-base font-semibold" style={{ color: "#2b180a" }}>Loading job details…</p>
+          <p className="max-w-xs text-sm leading-relaxed" style={{ color: "#9a7a65" }}>
+            Fetching job metadata, generation assets, and activity logs from the backend.
           </p>
-        </motion.div>
+        </div>
       </section>
     );
   }
@@ -752,6 +769,13 @@ export default function DashboardJobDetailPage() {
 
   return (
     <section className="space-y-4">
+      {/* ── Full-data loading indicator (phase 2) ── */}
+      {loadingFull && (
+        <div className="flex items-center gap-2 text-xs font-medium" style={{ color: "#9a7a65" }}>
+          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#e9e0d5] border-t-[#c9924e]" />
+          Loading full assets and generation data…
+        </div>
+      )}
       {/* ── Title row ── */}
       <motion.div
         variants={fadeUp}

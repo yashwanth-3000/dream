@@ -22,6 +22,7 @@
 # next.js
 /.next/
 /website/.next/
+/website/.next.stale-*/
 /website/out/
 
 # production

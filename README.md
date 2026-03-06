@@ -1,431 +1,192 @@
 # Dream
 
-An AI-powered storytelling platform for kids. Children and parents describe a story idea and Dream turns it into a fully illustrated storybook complete with named characters, hand-crafted backstories, scene illustrations, and a fixed 7-spread page layout ready to read.
+Dream is an AI storytelling and learning platform for kids. It combines a **Next.js** website with four backend services: a **MAF** orchestrator, a **CrewAI** character generator, a **MAF** storybook generator, and a **MAF** quiz generator. Together they support kid-safe chat, study-mode answers grounded on uploaded PDFs, story-ready character creation, illustrated 12-spread storybooks with narration, and structured quiz generation.
 
-The platform is built across four services that talk to each other using open protocols: a Next.js frontend, a MAF orchestration layer, a CrewAI character engine, and a MAF storybook engine. Every AI call goes through a proper agent, every backend call goes through A2A, web search grounding is handled through Exa MCP, and uploaded-study grounding is handled through Azure AI Search.
-
-**Built with [Microsoft Agent Framework (MAF)](https://learn.microsoft.com/en-us/agent-framework/) a structured agent SDK that wraps OpenAI and Azure OpenAI behind typed `Agent` objects with named identities, system instructions, and tool-use support. No raw `openai.chat.completions` calls exist anywhere in this codebase. Every LLM interaction is an agent.**
-
+The backend stack uses **Microsoft Agent Framework (MAF)** for orchestration-time agent workflows, **A2A** for service-to-service calls, **Exa MCP** for fresh web retrieval in chat search mode, and **Azure AI Search** as the **RAG** layer for study-mode uploads. Supporting tasks such as vision analysis and narration use direct SDK integrations where appropriate.
 
 ### Architecture
 
 <img src="final.svg" alt="Dream architecture diagram" width="100%" />
 
-### Service READMEs
+## Service READMEs
 
-Each service has a detailed README covering agents, endpoints, environment variables, request/response examples, and troubleshooting. Start here if you're working on a specific service.
+The root README is the system overview. Service-specific request shapes, env vars, endpoints, and troubleshooting live in the README for each app.
 
-| Service | Port | README |
-|---------|------|--------|
-| Main Orchestrator (MAF + MCP + A2A) | `8010` | [`backend/main-maf-chat/README.md`](backend/main-maf-chat/README.md) |
-| Character Maker (CrewAI + A2A) | `8000` | [`backend/a2a-crew-ai-character-maker/README.md`](backend/a2a-crew-ai-character-maker/README.md) |
-| Story Book Maker (MAF + A2A) | `8020` | [`backend/a2a-maf-story-book-maker/README.md`](backend/a2a-maf-story-book-maker/README.md) |
-| Azure Search RAG Integration | — | [`backend/main-maf-chat/README.md`](backend/main-maf-chat/README.md) |
+| Service | README |
+|---|---|
+| Main Orchestrator | [`backend/main-maf-chat/README.md`](backend/main-maf-chat/README.md) |
+| Character Maker | [`backend/a2a-crew-ai-character-maker/README.md`](backend/a2a-crew-ai-character-maker/README.md) |
+| Story Book Maker | [`backend/a2a-maf-story-book-maker/README.md`](backend/a2a-maf-story-book-maker/README.md) |
+| Quiz Maker | [`backend/a2a-maf-quiz-maker/README.md`](backend/a2a-maf-quiz-maker/README.md) |
+| Exa MCP Notes | [`backend/mcp-exa/README.md`](backend/mcp-exa/README.md) |
+| Website | [`website/README.md`](website/README.md) |
 
----
+## What The Platform Does
 
-## What It Does
-
-| Feature | What Happens |
-|---------|-------------|
-| **Kid-safe chat** | Kids ask questions, two MAF agents classify and answer. Search mode uses Exa MCP for fresh web results, and Study mode uses Azure AI Search over uploaded PDFs with citations. |
-| **Character creation** | A prompt + optional drawings → Vision analysis → 4 CrewAI agents build a full character backstory and image prompt → Replicate renders the character illustration. |
-| **Storybook generation** | A prompt → MAF agents write a story plan, chapter text, and scene prompts → character generation runs in parallel via A2A → Replicate renders cover + 5 scene images → fixed 7-spread output. |
-| **Job tracking** | Every creation run is a tracked job. Progress events stream to the frontend over SSE in real time. Downloaded assets are stored locally so images don't depend on external URLs. |
-| **Dashboard** | Browse past stories, characters, and jobs. View full storybooks page by page. Regenerate character images. |
-
----
-
-
-
----
+| Capability | What Happens |
+|---|---|
+| **Kid-safe chat** | Two MAF agents classify and answer each message. `mode=search` grounds answers with **Exa MCP** and `mode=study` grounds answers with uploaded PDF content from **Azure AI Search**. |
+| **Study mode** | Users upload a PDF, receive a `study_session_id`, and later chat requests use that session to retrieve only the indexed chunks for that study set. |
+| **Character creation** | A prompt and optional drawings go through CrewAI-based character development, optional vision enrichment, and final image rendering for a story-ready character packet. |
+| **Storybook generation** | The storybook backend creates a structured blueprint, writes story pages, generates character art in parallel through A2A, creates scene prompts, renders images, and normalizes the result into a fixed 12-spread storybook. |
+| **Audio narration** | The storybook backend can generate per-page MP3 narration for right-side story pages when `STORY_AUDIO_ENABLED=true`. |
+| **Quiz generation** | The quiz backend turns a prompt or story context into a normalized quiz with a fixed question count, exactly four options, exactly two hints, answer explanations, and learning-goal metadata. |
+| **Job tracking** | Story, character, and quiz runs can be tracked as jobs. The orchestrator stores progress events in SQLite, streams updates over SSE, and downloads produced assets locally. |
+| **Dashboard** | The website includes story, character, job, and API test workspaces. Legacy video jobs are still viewable in the dashboard, but video generation is not an active backend pipeline in this repo. |
 
 ## Protocol Stack
 
 | Protocol | Where Used | Why |
-|----------|-----------|-----|
-| **A2A** (Agent-to-Agent JSON-RPC) | Orchestrator ↔ Character Maker, Orchestrator ↔ Story Maker, Story Maker ↔ Character Maker | Standard agent-to-agent call protocol. Every backend is independently deployable and replaceable — the orchestrator never knows the internal implementation, only the A2A contract. |
-| **MCP** (Model Context Protocol) | Orchestrator ↔ Exa MCP | Standard protocol for tool access at runtime. Search mode uses Exa MCP for fresh internet retrieval. |
-| **SSE** (Server-Sent Events) | Orchestrator → Website | Real-time job progress pushed to the browser. Each storybook stream event (Vision, Blueprint, Story, ScenePrompts, Images) is forwarded as it happens. |
-| **REST + NDJSON** | Website ↔ Orchestrator | Standard HTTP for all non-streaming calls. Streaming storybook uses NDJSON (newline-delimited JSON chunks). |
-
----
+|---|---|---|
+| **A2A** | Orchestrator <-> Character Maker, Orchestrator <-> Story Book Maker, Orchestrator <-> Quiz Maker, Story Book Maker <-> Character Maker | Standard agent-to-agent protocol for backend calls and streaming task results. |
+| **MCP** | Orchestrator <-> Exa MCP | Tool protocol for fresh web retrieval in chat search mode. |
+| **REST** | Website <-> Orchestrator and direct service health checks | Standard request-response API layer for non-streaming calls. |
+| **NDJSON** | Orchestrator storybook and quiz streaming endpoints | Streaming transport for incremental progress and final payload events. |
+| **SSE** | Orchestrator -> Website job stream | Real-time browser updates for tracked jobs. |
 
 ## Services
 
 ### Website — `website/`
 
-Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 frontend. Runs on port 3000.
+The frontend is a Next.js 16 app with React 19, TypeScript, and Tailwind CSS v4. It contains the public marketing and chat pages, the dashboard workspaces, and thin server-side API routes that proxy browser requests to the orchestrator.
 
-The website has two distinct layers:
+Key areas in the UI:
 
-- **Public pages** (`/`, `/about`, `/chat`) — landing, about, and the AI chat interface.
-- **Dashboard** (`/dashboard/**`) — the creation hub where users browse stories, characters, and jobs, and launch new creation workflows.
-
-All backend communication goes through Next.js API routes that act as a thin proxy layer, forwarding requests to the main orchestrator. This keeps secrets server-side and decouples the frontend from backend port changes.
-
-[→ Detailed website docs are inline with the code]
-
----
+- Public pages: `/`, `/about`, `/chat`
+- Dashboard workspaces: `/dashboard/stories`, `/dashboard/characters`, `/dashboard/jobs`
+- Backend test workspaces: `/dashboard/api-test`, `/dashboard/storybook-test`, `/dashboard/quiz-test`
+- Legacy archive view: `/dashboard/videos`
 
 ### Main Orchestrator — `backend/main-maf-chat/`
 
-FastAPI service on port 8010. The single entrypoint for all backend operations.
+The orchestrator is the entrypoint for chat, study uploads, character generation, storybook generation, quiz generation, and job tracking.
 
-Everything that enters this service goes through at least one MAF agent before any downstream call is made. Three agents live here:
+It owns:
 
-- **QuestionReaderAgent** — classifies kid questions by safety level, reading level, response style
-- **ResponderAgent** — writes kid-safe answers using Exa grounding in search mode and Azure Search grounding in study mode
-- **MAFRoutingAgent** — decides whether a character request needs full creation (Vision + CrewAI) or image-only regeneration (Replicate)
+- Kid-safe chat through `QuestionReaderAgent` and `ResponderAgent`
+- Character routing through `MAFRoutingAgent`
+- Study-mode PDF upload and Azure AI Search indexing
+- A2A calls to the character, storybook, and quiz backends
+- SQLite-backed job lifecycle and asset download/storage
 
-Beyond the agents, this service owns the job lifecycle: creating job records, streaming progress events over SSE, downloading completed assets, and serving them to the frontend.
+Core orchestrator routes:
 
-[→ Full docs: `backend/main-maf-chat/README.md`]
-
----
+- `POST /api/v1/orchestrate/chat`
+- `POST /api/v1/orchestrate/study/upload`
+- `POST /api/v1/orchestrate/character`
+- `POST /api/v1/orchestrate/storybook`
+- `POST /api/v1/orchestrate/storybook/stream`
+- `POST /api/v1/orchestrate/quiz`
+- `POST /api/v1/orchestrate/quiz/stream`
 
 ### Character Maker — `backend/a2a-crew-ai-character-maker/`
 
-FastAPI service on port 8000. Generates story-ready characters from a prompt + optional reference images.
+The character backend is a FastAPI service that produces story-ready characters from text plus optional user drawings or references. It uses CrewAI for narrative design tasks, direct vision analysis for reference enrichment, and Replicate for final portrait rendering.
 
-Four CrewAI agents run in sequence (or a subset, depending on whether references are provided):
+Typical workflow:
 
-1. **Lore Research Analyst** — extracts worldbuilding facts, style cues, era hints from reference images
-2. **Concept Worldbuilder** — expands a raw prompt into a concept scaffold (used when no references are provided)
-3. **Narrative Character Designer** — produces a full backstory: name, archetype, goals, flaws, turning points, visual signifiers
-4. **Generative Image Prompt Engineer** — converts the narrative + visual cues into a production-grade Replicate image prompt
-
-Replicate renders the final character illustration using `openai/gpt-image-1.5` at `2:3` aspect ratio (portrait).
-
-The service exposes both a REST endpoint (`/api/v1/characters/create`) and an A2A JSON-RPC endpoint (`/a2a`). The orchestrator always uses the A2A path.
-
-[→ Full docs: `backend/a2a-crew-ai-character-maker/README.md`]
-
----
+1. Optional vision analysis extracts cues from uploaded drawings
+2. CrewAI agents build concept, narrative, and image prompt structure
+3. Replicate renders the final character illustration
+4. The service returns backstory, image prompt, and generated images
 
 ### Story Book Maker — `backend/a2a-maf-story-book-maker/`
 
-FastAPI service on port 8020. Generates complete illustrated storybooks in a fixed 7-spread contract.
+The storybook backend generates complete illustrated storybooks in a fixed 12-spread contract. It uses MAF agents for blueprinting, story writing, and scene prompt generation, calls the character backend over A2A, renders scene images, and can generate narration audio for each story page.
 
-Three MAF agents handle the text pipeline:
+The current story pipeline includes:
 
-1. **StoryBlueprintAgent** — turns the user prompt into a structured story plan: title, 5 chapters, character briefs
-2. **StoryWriterAgent** — writes the 5 right-page chapter entries from the blueprint
-3. **ScenePromptAgent** — generates the cover illustration prompt + 5 scene illustration prompts
+- Optional vision enrichment from user-provided references
+- Story blueprint generation
+- Parallel character generation and story writing
+- Per-page MP3 narration
+- Scene prompt generation
+- Image rendering
+- Output normalization into a cover/title spread, 10 story page spreads, and an end spread
 
-Character generation and story writing run in **parallel**: while the StoryWriterAgent writes chapters, A2A calls go to the Character Maker for each character brief in the blueprint. Both branches merge before scene prompts are generated.
+### Quiz Maker — `backend/a2a-maf-quiz-maker/`
 
-Replicate renders 6 images (1 cover + 5 scenes) in parallel. The output is normalized into a fixed 7-spread layout:
+The quiz backend generates children-friendly quizzes from either a standalone prompt or story context. It exposes both REST and A2A, but both paths run the same `QuizWorkflow`.
 
-| Spread | Left Side | Right Side |
-|--------|-----------|------------|
-| 0 | Cover illustration | Title + title page text |
-| 1–5 | Scene illustration | Chapter text (Page N of 5) |
-| 6 | End page | — |
+The workflow:
 
-The service exposes both a REST endpoint and an A2A JSON-RPC endpoint. It also exposes a streaming variant (`/api/v1/stories/create` over SSE) that the orchestrator uses to forward real-time progress events to the frontend.
+1. Chooses `story_based` or `prompt_only`
+2. Uses `QuizBlueprintAgent` to plan the quiz
+3. Uses `QuizWriterAgent` to write the full quiz
+4. Normalizes the result to enforce the frontend contract
+5. Falls back deterministically if either agent step fails
 
-[→ Full docs: `backend/a2a-maf-story-book-maker/README.md`]
-
----
-
-### Search + Study Retrieval
+### Retrieval Layer
 
 Chat retrieval uses split routing:
 
-1. `mode=search` uses Exa MCP for fresh internet retrieval.
-2. `mode=study` uses Azure AI Search over uploaded PDF chunks filtered by `study_session_id`.
-3. Both modes return normalized citations to the frontend.
+- `mode=search` -> **Exa MCP** for fresh web grounding
+- `mode=study` -> **Azure AI Search** over uploaded PDF chunks filtered by `study_session_id`
 
-[→ Full wiring guide: `backend/main-maf-chat/README.md`]
+Both modes return normalized citations and retrieval metadata back through the orchestrator.
 
----
+## Data Flows
 
-## Project Layout
+### Kid-Safe Chat And Study Mode
 
-```text
-dream/
-├── website/                              # Next.js 16 frontend
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx                  # Landing page (hero + gallery)
-│   │   │   ├── chat/page.tsx             # AI chat interface
-│   │   │   ├── dashboard/
-│   │   │   │   ├── page.tsx              # Dashboard overview
-│   │   │   │   ├── stories/              # Story library + detail view
-│   │   │   │   ├── characters/           # Character vault + new character
-│   │   │   │   ├── jobs/                 # All jobs + job detail with live progress
-│   │   │   │   └── videos/               # Video generation
-│   │   │   └── api/
-│   │   │       ├── chat/route.ts         # Proxy → POST /api/v1/orchestrate/chat
-│   │   │       ├── jobs/                 # Proxy → /api/v1/jobs
-│   │   │       └── assets/               # Proxy → /api/v1/assets
-│   │   ├── components/ui/
-│   │   │   ├── dream-navbar.tsx          # Main navigation bar
-│   │   │   ├── ai-prompt-box.tsx         # Multi-mode prompt input (chat/story/character)
-│   │   │   ├── hero-3.tsx                # Landing hero with animated marquee
-│   │   │   └── gallery-demo.tsx          # 3D gallery section
-│   │   └── lib/
-│   │       ├── jobs.ts                   # Job types + API client functions
-│   │       └── utils.ts                  # cn() and shared utilities
-│   ├── Dockerfile
-│   ├── next.config.ts
-│   └── package.json
-│
-└── backend/
-    ├── main-maf-chat/                    # Main orchestrator  (port 8010)
-    │   ├── agent_orchestrator/
-    │   │   ├── main.py                   # FastAPI app + all route handlers
-    │   │   ├── chat_agents.py            # QuestionReader + Responder MAF agents + Azure Search RAG
-    │   │   ├── maf_router.py             # MAFRoutingAgent for character routing
-    │   │   ├── backend_client.py         # A2A calls to character + story backends
-    │   │   ├── job_manager.py            # Job lifecycle + SSE event bus
-    │   │   ├── database.py               # SQLite (aiosqlite)
-    │   │   ├── config.py                 # Settings (openai / azure / azure-search / a2a)
-    │   │   └── models.py                 # All Pydantic request/response models
-    │   ├── scripts/deploy_azure.sh
-    │   ├── Dockerfile
-    │   ├── requirements.txt
-    │   └── README.md                     ← full service docs
-    │
-    ├── a2a-crew-ai-character-maker/      # Character engine  (port 8000)
-    │   ├── app/
-    │   │   ├── main.py                   # FastAPI + A2A server
-    │   │   ├── workflows/
-    │   │   │   └── character_creation.py # CrewAI workflow + 4 agents
-    │   │   └── services/
-    │   │       ├── vision_service.py     # OpenAI vision analysis
-    │   │       └── replicate_service.py  # Replicate image generation
-    │   ├── scripts/deploy_azure.sh
-    │   ├── Dockerfile
-    │   ├── requirements.txt
-    │   └── README.md                     ← full service docs
-    │
-    ├── a2a-maf-story-book-maker/         # Storybook engine  (port 8020)
-    │   ├── agent_storybook/
-    │   │   ├── main.py                   # FastAPI + A2A server
-    │   │   ├── maf_agents.py             # Blueprint + Writer + ScenePrompt MAF agents
-    │   │   ├── story_workflow.py         # Full workflow orchestrator
-    │   │   ├── a2a_server.py             # A2A protocol routes + executor
-    │   │   └── services/
-    │   │       └── replicate_service.py  # Replicate image generation
-    │   ├── Dockerfile
-    │   ├── requirements.txt
-    │   └── README.md                     ← full service docs
-    │
-    └── mcp-exa/                          # Exa MCP integration notes
-        ├── README.md                     ← active Exa MCP notes
-        └── SOURCES.md                    ← reference docs used
-```
+1. The website sends chat requests to `POST /api/v1/orchestrate/chat`.
+2. `QuestionReaderAgent` classifies the message by safety, category, reading level, and style.
+3. `ResponderAgent` writes the answer using the classification and original message.
+4. In `mode=search`, the orchestrator retrieves fresh evidence through Exa MCP.
+5. In `mode=study`, the frontend first uploads a PDF to `POST /api/v1/orchestrate/study/upload`, receives a `study_session_id`, and later chat requests use that ID to retrieve only the indexed study chunks from Azure AI Search.
+6. The final response returns the answer plus classification and retrieval metadata.
 
----
+### Character Creation
 
-## Data Flow
+1. The website creates a job record if the run should be tracked.
+2. The orchestrator receives `POST /api/v1/orchestrate/character`.
+3. `MAFRoutingAgent` decides whether the request is `create` or `regenerate` when mode is `auto`.
+4. The orchestrator calls the character backend over A2A.
+5. The character backend runs vision enrichment when references are present, builds the narrative packet, and renders final images.
+6. The orchestrator stores generated assets under the job folder and finalizes the job state.
 
-### Creating a Storybook
+### Storybook Generation
 
-```
-1. User types a story prompt in /dashboard/create
-   ↓
-2. POST /api/jobs  →  job record created in SQLite
-   ←  job_id returned
-   ↓
-3. POST /api/orchestrate/storybook/stream?job_id={id}
-   ↓
-4. Main orchestrator starts stream to Story Maker (A2A)
-   ├─ [if references] Vision analysis  →  event: "analyzing references"
-   ├─ StoryBlueprintAgent (MAF)        →  event: "creating blueprint"
-   ├─ Parallel:
-   │   ├─ Character Maker (A2A, :8000) →  event: "generating characters"
-   │   └─ StoryWriterAgent (MAF)       →  event: "writing story"
-   ├─ ScenePromptAgent (MAF)           →  event: "building scene prompts"
-   └─ Replicate (6 images, parallel)   →  event: "rendering images"
-   ↓
-5. Each event is forwarded to SQLite job event log
-   ↓
-6. Browser is watching /api/jobs/{id}/stream (SSE)
-   ← receives live progress events, updates UI in real time
-   ↓
-7. On completion:
-   ├─ Images downloaded → data/{job_id}/
-   ├─ Job marked completed with full result_payload
-   └─ Frontend shows the finished storybook
-```
+1. The website creates a story job and calls `POST /api/v1/orchestrate/storybook/stream`.
+2. The orchestrator forwards the request to the storybook backend over A2A and relays NDJSON progress events.
+3. The storybook backend builds a story blueprint.
+4. Character generation and story writing run in parallel.
+5. Narration audio and illustration prompts are generated for story pages.
+6. Scene images are rendered and normalized into the 12-spread storybook contract.
+7. The orchestrator stores images and job metadata, then streams completion back to the frontend.
 
-### Kid-Safe Chat
+### Quiz Generation
 
-```
-1. Kid types a question in /chat
-2. User selects mode: normal, search, or study
-   ↓
-3. POST /api/chat  →  Next.js proxy  →  POST /api/v1/orchestrate/chat
-   ↓
-4. QuestionReaderAgent (MAF)
-   reads: message + history
-   returns: { category, safety, reading_level, response_style }
-   ↓
-5. ResponderAgent (MAF)
-   normal mode: agent.run(prompt)  →  OpenAI  →  answer
-   search mode: Exa MCP web retrieval + grounded answer
-   study mode:  Azure Search retrieval from uploaded PDF chunks (session-filtered)
-   ↓
-6. Response returned:
-   { answer, category, safety, reading_level, mcp_used, mcp_server, mcp_output }
-```
-
-### Creating a Character
-
-```
-1. User fills character form in /dashboard/characters/new-character
-   ↓
-2. POST /api/jobs  →  job created
-3. POST /api/orchestrate/character?job_id={id}
-   ↓
-4. MAFRoutingAgent (MAF) reads the request
-   mode=create     → decision: create  (skip LLM, explicit)
-   mode=regenerate → decision: regenerate  (skip LLM, explicit)
-   mode=auto       → MAF agent decides based on which prompts are present
-   ↓
-5. A2A call → Character Maker (:8000)
-   reference_enriched workflow (if images provided):
-     Vision analysis → Lore Analyst → Narrative Designer → Prompt Engineer → Replicate
-   prompt_only workflow (no images):
-     Concept Worldbuilder → Narrative Designer → Prompt Engineer → Replicate
-   ↓
-6. Response with backstory + image_prompt + generated_images
-7. Images downloaded → data/{job_id}/
-8. Job completed, character appears in /dashboard/characters
-```
-
----
-
-## Run Locally
-
-Start all four services. The order matters — character maker must be running before story maker, and both before the orchestrator.
-
-### 1) Character Maker (port 8000)
-
-```bash
-cd backend/a2a-crew-ai-character-maker
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-cp .env.example .env   # fill in OPENAI_API_KEY + REPLICATE_API_TOKEN
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-### 2) Story Book Maker (port 8020)
-
-```bash
-cd backend/a2a-maf-story-book-maker
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in OPENAI_API_KEY + REPLICATE_API_TOKEN
-uvicorn agent_storybook.main:app --reload --host 127.0.0.1 --port 8020
-```
-
-### 3) Main Orchestrator (port 8010)
-
-```bash
-cd backend/main-maf-chat
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in OPENAI_API_KEY (and Azure Search vars if testing search mode)
-uvicorn agent_orchestrator.main:app --reload --host 127.0.0.1 --port 8010
-```
-
-### 4) Website (port 3000)
-
-```bash
-cd website
-npm install
-# create .env.local:
-echo "MAIN_API_BASE_URL=http://127.0.0.1:8010" > .env.local
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-### Verify Everything Is Connected
-
-```bash
-# Orchestrator health (checks character backend connectivity)
-curl http://127.0.0.1:8010/health
-
-# Story backend health via orchestrator
-curl http://127.0.0.1:8010/api/v1/orchestrate/storybook-health
-
-# Character backend health via orchestrator
-curl http://127.0.0.1:8010/api/v1/orchestrate/a2a-health
-```
-
----
-
-## Environment Variables Summary
-
-### Website — `website/.env.local`
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MAIN_API_BASE_URL` | `http://127.0.0.1:8010` | Main orchestrator URL |
-
-### Main Orchestrator — `backend/main-maf-chat/.env`
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI key for MAF agents |
-| `OPENAI_MODEL` | No (`gpt-4o-mini`) | Model for all MAF agents |
-| `A2A_BACKEND_BASE_URL` | No (`http://127.0.0.1:8000`) | Character Maker URL |
-| `A2A_STORY_BACKEND_BASE_URL` | No (`http://127.0.0.1:8020`) | Story Maker URL |
-| `AZURE_SEARCH_SERVICE_ENDPOINT` | Search mode | Azure AI Search endpoint |
-| `AZURE_SEARCH_INDEX_NAME` | Search mode | Azure AI Search index for hybrid fallback |
-| `AZURE_SEARCH_KNOWLEDGE_BASE_NAME` | Search mode | Azure AI Search knowledge base name for MCP |
-| `AZURE_SEARCH_API_KEY` | Search mode (if not MI) | Search data-plane key |
-
-### Character Maker — `backend/a2a-crew-ai-character-maker/.env`
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI key for CrewAI + vision |
-| `REPLICATE_API_TOKEN` | Yes | Replicate API token |
-| `OPENAI_MODEL` | No (`openai/gpt-4o-mini`) | CrewAI text model |
-| `REPLICATE_MODEL` | No (`openai/gpt-image-1.5`) | Image generation model |
-
-### Story Book Maker — `backend/a2a-maf-story-book-maker/.env`
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_API_KEY` | Yes | OpenAI key for MAF agents + vision |
-| `REPLICATE_API_TOKEN` | Yes | Replicate API token |
-| `CHARACTER_BACKEND_BASE_URL` | No (`http://127.0.0.1:8000`) | Character Maker URL |
-
----
+1. The website can call the orchestrator through `POST /api/v1/orchestrate/quiz` or `POST /api/v1/orchestrate/quiz/stream`.
+2. The orchestrator forwards the request to the quiz backend over A2A.
+3. The quiz backend chooses `story_based` or `prompt_only`.
+4. `QuizBlueprintAgent` creates the question plan.
+5. `QuizWriterAgent` writes the final quiz.
+6. The workflow normalizes the quiz so the output always matches the expected contract.
+7. When a `job_id` is present, the orchestrator records progress and stores the final quiz payload in the job record.
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 16 · React 19 · TypeScript · Tailwind CSS v4 · Framer Motion · Three.js |
-| Orchestration | FastAPI · Microsoft Agent Framework (MAF) · `agent-framework-core` · `agent-framework-a2a` |
-| Character Engine | FastAPI · CrewAI · OpenAI Vision (`gpt-4.1-mini`) |
-| Story Engine | FastAPI · Microsoft Agent Framework (MAF) |
-| Image Generation | Replicate (`openai/gpt-image-1.5`) |
-| Search Grounding | Exa MCP (`mode=search`) + Azure AI Search study RAG (`mode=study`) |
-| Agent-to-Agent | A2A SDK · JSON-RPC (`message/send`, `message/stream`) |
-| Job Persistence | SQLite via `aiosqlite` |
-| Real-time | Server-Sent Events (SSE) |
-| Deployment | Azure Container Apps (ACR) |
+|---|---|
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4 |
+| Orchestration | FastAPI, Microsoft Agent Framework, A2A SDK |
+| Character Engine | FastAPI, CrewAI, OpenAI vision, Replicate |
+| Storybook Engine | FastAPI, Microsoft Agent Framework, OpenAI TTS, Replicate |
+| Quiz Engine | FastAPI, Microsoft Agent Framework, A2A |
+| Retrieval | Exa MCP, Azure AI Search |
+| Persistence | SQLite via `aiosqlite` |
+| Realtime | NDJSON streams and SSE |
+| Deployment | Azure Container Apps and ACR |
 
----
+## Deployment Notes
 
-## Deployment
+Each backend service includes a `scripts/deploy_azure.sh` script for Azure Container Apps deployment.
 
-Each backend service has a `scripts/deploy_azure.sh` script that builds and deploys to Azure Container Apps. The character maker is the only service currently deployed to production.
+Documented deployment URLs currently referenced in this repo include:
 
-| Service | Status | URL |
-|---------|--------|-----|
-| Character Maker | Deployed | `https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io` |
-| Story Book Maker | Local | `http://127.0.0.1:8020` |
-| Main Orchestrator | Local | `http://127.0.0.1:8010` |
-| Website | Local | `http://localhost:3000` |
+- Main orchestrator default used by the website: `https://dream-orchestrator.greenplant-2d9bb135.eastus.azurecontainerapps.io`
+- Character Maker: `https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io`
+- Quiz Maker: `https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io`
 
-For services not yet deployed, point `A2A_BACKEND_BASE_URL` / `A2A_STORY_BACKEND_BASE_URL` to the local ports when running locally, or to the production Container Apps URL once deployed.
+For local development, always override the website base URLs in `website/.env.local` so the frontend points to your local orchestrator and, when needed, the local character backend.

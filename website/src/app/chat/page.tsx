@@ -660,6 +660,20 @@ function toAbsoluteClientUrl(value: string | undefined): string {
   return `${window.location.origin}/${normalized}`;
 }
 
+function isDreamStoredAssetUrl(value: string | undefined): boolean {
+  const absolute = toAbsoluteClientUrl(value);
+  if (!absolute || !isHttpUrl(absolute)) return false;
+  try {
+    const parsed = new URL(absolute);
+    if (typeof window !== "undefined" && parsed.origin !== window.location.origin) {
+      return false;
+    }
+    return parsed.pathname.startsWith("/api/assets/");
+  } catch {
+    return false;
+  }
+}
+
 function compactText(value: string | undefined, maxChars = 240): string {
   const cleaned = (value || "").replace(/\s+/g, " ").trim();
   if (!cleaned) return "";
@@ -682,32 +696,6 @@ function collectJobCharacterReferenceDrawings(job: Job): StoryCharacterDrawingIn
         notes: "Use this as canonical identity lock for face, hairstyle, body proportions, and outfit silhouette.",
       });
     }
-
-    const originalUrl = typeof asset.original_url === "string" ? asset.original_url.trim() : "";
-    if (!isHttpUrl(originalUrl) || seen.has(originalUrl)) continue;
-    seen.add(originalUrl);
-    drawings.push({
-      url: originalUrl,
-      description: "Canonical character reference image from character vault.",
-      notes: "Use this as identity lock for face, hairstyle, body proportions, and outfit silhouette.",
-    });
-  }
-
-  const generatedImagesRaw =
-    job.result_payload && typeof job.result_payload === "object"
-      ? (job.result_payload as { generated_images?: unknown }).generated_images
-      : [];
-  const generatedImages = Array.isArray(generatedImagesRaw) ? generatedImagesRaw : [];
-  for (const value of generatedImages) {
-    if (typeof value !== "string") continue;
-    const normalized = value.trim();
-    if (!isHttpUrl(normalized) || seen.has(normalized)) continue;
-    seen.add(normalized);
-    drawings.push({
-      url: normalized,
-      description: "Generated character reference image from previous job.",
-      notes: "Reuse this exact identity for the storybook scenes.",
-    });
   }
 
   return drawings;
@@ -906,6 +894,14 @@ function stageToReadableTitle(stage: string): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+function storyStageToReadableTitle(stage: string): string {
+  const normalized = (stage || "").trim().toLowerCase();
+  if (!normalized) return "Progress";
+  if (normalized.startsWith("scene_image_")) return "Scene image generation";
+  if (normalized.startsWith("story_audio_")) return "Story audio generation";
+  return stageToReadableTitle(stage);
+}
+
 function buildProgressStepKey(stage: string, data: unknown): string {
   const normalizedStage = (stage || "progress").trim() || "progress";
   let key = `progress:${normalizedStage}`;
@@ -959,6 +955,17 @@ function buildProgressStepKey(stage: string, data: unknown): string {
     key += `:attempt:${attempt}`;
   }
   return key;
+}
+
+function buildStoryProgressStepKey(stage: string, data: unknown): string {
+  const normalizedStage = (stage || "progress").trim().toLowerCase() || "progress";
+  if (normalizedStage.startsWith("scene_image_")) {
+    return "progress:scene_image_generation";
+  }
+  if (normalizedStage.startsWith("story_audio_")) {
+    return "progress:story_audio_generation";
+  }
+  return buildProgressStepKey(stage, data);
 }
 
 function parseEmbeddedProgressData(message: string): { cleanMessage: string; data?: unknown } {
@@ -1710,8 +1717,8 @@ export default function ChatPage() {
       avatar: selected.avatar,
       description: selected.description,
       referenceImageUrls: selected.referenceDrawings
-        .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
-        .filter((value) => Boolean(value)),
+        .map((drawing) => drawing.imageData?.trim() || toAbsoluteClientUrl(drawing.url?.trim()))
+        .filter((value) => Boolean(value) && (isDataUrl(value) || isDreamStoredAssetUrl(value))),
     });
     setHasActiveStoryCharacterChoice(true);
     startThinkingStream();
@@ -2176,10 +2183,14 @@ export default function ChatPage() {
           continue;
         }
         if (drawing.url && drawing.url.trim()) {
+          const sanitizedUrl = toAbsoluteClientUrl(drawing.url.trim());
+          if (!isDreamStoredAssetUrl(sanitizedUrl)) {
+            continue;
+          }
           canonicalDrawings.push({
             description,
             notes,
-            url: drawing.url.trim(),
+            url: sanitizedUrl,
           });
         }
       }
@@ -2191,7 +2202,7 @@ export default function ChatPage() {
             notes: "Preserve this exact identity in all storybook pages.",
             image_data: avatarFallback,
           });
-        } else {
+        } else if (isDreamStoredAssetUrl(avatarFallback)) {
           canonicalDrawings.push({
             description: `Canonical fallback reference for ${selectedOption.name}.`,
             notes: "Preserve this exact identity in all storybook pages.",
@@ -2320,10 +2331,10 @@ export default function ChatPage() {
             data && typeof data === "object" && data !== null && "image_url" in data
               ? String((data as { image_url?: unknown }).image_url || "")
               : "";
-          const timelineKey = buildProgressStepKey(stage, data);
+          const timelineKey = buildStoryProgressStepKey(stage, data);
           upsertTimelineStep(
             timelineKey,
-            stageToReadableTitle(stage),
+            storyStageToReadableTitle(stage),
             message,
             data,
             imageUrl || undefined,
@@ -3010,8 +3021,8 @@ export default function ChatPage() {
         avatar: selectedOption.avatar,
         description: selectedOption.description,
         referenceImageUrls: selectedOption.referenceDrawings
-          .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
-          .filter((value) => Boolean(value)),
+          .map((drawing) => drawing.imageData?.trim() || toAbsoluteClientUrl(drawing.url?.trim()))
+          .filter((value) => Boolean(value) && (isDataUrl(value) || isDreamStoredAssetUrl(value))),
       };
 
       setPendingUseAiStoryCharacter(false);
@@ -3111,8 +3122,8 @@ export default function ChatPage() {
             avatar: selectedOption.avatar,
             description: selectedOption.description,
             referenceImageUrls: selectedOption.referenceDrawings
-              .map((drawing) => drawing.url?.trim() || drawing.imageData?.trim() || "")
-              .filter((value) => Boolean(value)),
+              .map((drawing) => drawing.imageData?.trim() || toAbsoluteClientUrl(drawing.url?.trim()))
+              .filter((value) => Boolean(value) && (isDataUrl(value) || isDreamStoredAssetUrl(value))),
           }
         : null;
       void requestStorybookAssistantReply(storyPrompt, selectedSelection, selectedOption);
