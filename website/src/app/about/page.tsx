@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import DreamNavbar from "@/components/ui/dream-navbar";
@@ -252,6 +253,8 @@ type DiagramDragState = {
 };
 
 export default function AboutPage() {
+  const searchParams = useSearchParams();
+  const isEmbedded = searchParams.get("embedded") === "1";
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DiagramDragState | null>(null);
   const zoomRef = useRef(1);
@@ -393,9 +396,9 @@ export default function AboutPage() {
 
   return (
     <div className={styles.page}>
-      <DreamNavbar />
+      {!isEmbedded && <DreamNavbar />}
 
-      <article className={styles.article}>
+      <article className={styles.article} style={isEmbedded ? { paddingTop: 28 } : undefined}>
 
         {/* ── Opening ── */}
         <motion.span

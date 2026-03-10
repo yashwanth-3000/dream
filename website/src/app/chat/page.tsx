@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, RotateCw, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, RotateCw, CheckCircle2, Wand2 } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
 import DreamNavbar from "@/components/ui/dream-navbar";
 import { type StoryPage } from "@/lib/dashboard-data";
@@ -1375,6 +1375,7 @@ export default function ChatPage() {
   const [isLoadingQueryStoryCharacter, setIsLoadingQueryStoryCharacter] = useState(false);
   const [isInlineCharacterCreatorOpen, setIsInlineCharacterCreatorOpen] = useState(false);
   const [isCreatingInlineCharacter, setIsCreatingInlineCharacter] = useState(false);
+  const [showAboutPanel, setShowAboutPanel] = useState(false);
   const [inlineCharacterName, setInlineCharacterName] = useState("");
   const [inlineCharacterRole, setInlineCharacterRole] = useState("");
   const [inlineCharacterDescription, setInlineCharacterDescription] = useState("");
@@ -3295,7 +3296,32 @@ export default function ChatPage() {
           Back
         </Link>
       )}
+      {!isEmpty && !showAboutPanel && (
+        <div className={`${styles.dreamPanelBtnOuter} ${isLoading ? styles.dreamPanelBtnSpinning : ""}`}>
+          <button
+            type="button"
+            onClick={() => setShowAboutPanel(true)}
+            className={styles.dreamPanelBtn}
+            aria-label="See the magic"
+          >
+            <Wand2 size={13} />
+            See the magic
+          </button>
+        </div>
+      )}
+      {!isEmpty && showAboutPanel && (
+        <button
+          type="button"
+          onClick={() => setShowAboutPanel(false)}
+          className={styles.dreamPanelClose}
+          aria-label="Close about panel"
+        >
+          ×
+        </button>
+      )}
 
+      <div className={showAboutPanel && !isEmpty ? styles.splitRoot : undefined} style={showAboutPanel && !isEmpty ? { flex: 1, display: "flex", overflow: "hidden" } : { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={showAboutPanel && !isEmpty ? { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 } : { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <AnimatePresence mode="wait">
         {isEmpty ? (
           <motion.div
@@ -4303,6 +4329,28 @@ export default function ChatPage() {
           </motion.div>
         )}
       </AnimatePresence>
+        </div>
+
+        {/* About panel — shown when split view is active */}
+        <AnimatePresence>
+          {showAboutPanel && !isEmpty && (
+            <motion.div
+              key="about-panel"
+              initial={{ opacity: 0, x: 32 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 32 }}
+              transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+              className={styles.aboutPanel}
+            >
+              <iframe
+                src="/about?embedded=1"
+                className={styles.aboutPanelFrame}
+                title="About Dream"
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

@@ -126,6 +126,121 @@
   border-color: #d5c4b3;
 }
 
+/* ── Dream panel button outer wrapper (handles fixed positioning) ── */
+.dreamPanelBtnOuter {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 50;
+  border-radius: 999px;
+  padding: 2px;
+  background: transparent;
+}
+
+/* spinning arc — animates only the gradient angle, never the element */
+@property --btn-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes spinArc {
+  to { --btn-angle: 360deg; }
+}
+
+.dreamPanelBtnSpinning {
+  --btn-angle: 0deg;
+  background: conic-gradient(
+    from var(--btn-angle),
+    transparent 0deg,
+    #e07843 80deg,
+    #f4b66a 140deg,
+    transparent 200deg
+  );
+  animation: spinArc 1.4s linear infinite;
+}
+
+/* ── Dream panel button (navbar style) ──────────────────────────── */
+.dreamPanelBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgb(103 99 97 / 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 12px 28px -16px rgba(22, 18, 14, 0.65);
+  color: #f6efe8;
+  font-family: var(--font-halant), serif;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+
+.dreamPanelBtn:hover {
+  background: rgb(103 99 97 / 0.98);
+  opacity: 0.9;
+}
+
+
+/* ── Panel close × (replaces Dream button when panel is open) ────── */
+.dreamPanelClose {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgb(255 252 248 / 80%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--ink-soft);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s var(--ease), color 0.2s var(--ease), border-color 0.2s var(--ease);
+}
+
+.dreamPanelClose:hover {
+  background: #fff;
+  color: var(--ink);
+  border-color: #d5c4b3;
+}
+
+/* ── Split layout ────────────────────────────────────────────────── */
+.splitRoot {
+  /* flex row — handled inline; this class is a hook for future overrides */
+}
+
+/* ── About panel ─────────────────────────────────────────────────── */
+.aboutPanel {
+  width: 42%;
+  min-width: 320px;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  background: var(--cream-0);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.aboutPanelFrame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--cream-0);
+}
+
 /* ── Empty state ─────────────────────────────────────────────────── */
 .emptyRoot {
   flex: 1;
