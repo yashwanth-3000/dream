@@ -13,49 +13,79 @@ import styles from "./home-landing.module.css";
 
 const serviceSteps = [
   {
-    title: "Choose Mode",
+    title: "Chat",
     number: "01",
-    body: "Start in normal chat or switch to search, study, story, or quiz. Dream routes each request to the right workflow automatically.",
+    body: "Start in one conversation and switch between normal, search, study, story, and quiz modes without leaving chat.",
     image:
-      "https://framerusercontent.com/images/rHNMALBdiDG9WKbZg2x6f1Q9As.png?width=684&height=1374",
-    cta: "Open chat modes",
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/chat_mode.png",
+    cta: "Open Chat",
+    href: "/chat",
   },
   {
-    title: "Generate Assets",
+    title: "Storybook Creation",
     number: "02",
-    body: "Story and quiz flows call specialized A2A services for character design, story drafting, page imagery, and optional narration.",
+    body: "Turn a single prompt into a full illustrated storybook with reusable character context and page-by-page output.",
     image:
-      "https://framerusercontent.com/images/FlUmh6vXM6MYl8Y9u6yVDUKkSAg.png?width=1492&height=1454",
-    cta: "Run generation",
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/storybook_mode.png",
+    cta: "Create Storybook",
+    href: "/chat?mode=story",
   },
   {
-    title: "Track Jobs",
+    title: "Parent Quiz Chat",
     number: "03",
-    body: "Follow progress in real time through streamed events, then open job details and download output assets in the dashboard.",
+    body: "Generate child-friendly quizzes from topics or completed stories with clear options, hints, and explanations.",
     image:
-      "https://framerusercontent.com/images/xS3VRUcNazVQ09WqJiWUYi39XeI.jpg?width=1200&height=900",
-    cta: "View job activity",
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/quiz_mode.png",
+    cta: "Open Quiz Chat",
+    href: "/chat?mode=quiz",
+  },
+  {
+    title: "Character Creation",
+    number: "04",
+    body: "Create new characters or regenerate looks, then reuse them across story workflows to keep visual identity consistent.",
+    image:
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/character_mode.png",
+    cta: "Create Character",
+    href: "/dashboard/characters/new-character",
+  },
+  {
+    title: "Creator Dashboard",
+    number: "05",
+    body: "Manage your generated stories, characters, and outputs from one workspace designed for repeat creation flows.",
+    image:
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/dashboard_mode.png",
+    cta: "Open Dashboard",
+    href: "/dashboard",
+  },
+  {
+    title: "Track Job",
+    number: "06",
+    body: "Monitor live job progress, inspect event timelines, and open detailed run data for completed or active generations.",
+    image:
+      "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/dream/jobs_mode.png",
+    cta: "Track Jobs",
+    href: "/dashboard/jobs",
   },
 ];
 
 const processSteps = [
   {
     number: "01",
-    title: "Pick a Workflow",
+    title: "Start with Your Idea",
     timeline: "10-30 sec",
-    copy: "Use chat mode switching to run normal Q&A, web-grounded search, document study, storybook generation, or quiz generation.",
+    copy: "Type what you want to create or learn. Dream picks the right mode for your request, or you can choose one yourself: Chat, Search, Study, Storybook, or Quiz.",
   },
   {
     number: "02",
-    title: "Run the Job",
+    title: "Dream Builds in the Background",
     timeline: "1-4 mins",
-    copy: "The orchestrator creates a tracked job, routes work to specialist services, and streams structured progress updates as outputs are generated.",
+    copy: "Dream routes your request to the right services, creates a tracked job, and shows live progress while content is being generated.",
   },
   {
     number: "03",
-    title: "Review Outputs",
+    title: "Review and Reuse Results",
     timeline: "Anytime",
-    copy: "Open job pages to inspect events, reuse characters, revisit generated stories, and download image or audio assets when available.",
+    copy: "Open the job page to view full logs, revisit stories, reuse characters, and download available images or audio files.",
   },
 ];
 
@@ -462,7 +492,7 @@ export default function HomeLanding() {
                             style={{ overflow: "hidden" }}
                           >
                             <p className={styles.studioBody}>{item.body}</p>
-                            <a href="/chat" className={styles.studioLink}>
+                            <a href={item.href} className={styles.studioLink}>
                               {item.cta} <ArrowUpRight size={12} />
                             </a>
                           </motion.div>
@@ -509,8 +539,8 @@ export default function HomeLanding() {
             <p className={styles.sectionKicker}>How Dream works</p>
             <AnimatedSubheading text="From prompt to streamed results." />
             <p className={styles.sectionCopy}>
-              The same path powers chat, dashboard views, and long-running
-              generation with observability built in.
+              From one prompt, Dream routes the request, runs generation, and
+              streams progress live so you can follow every step.
             </p>
             <div className={styles.heroActions}>
               <a href="/chat" className={styles.ctaDark}>
@@ -644,20 +674,21 @@ export default function HomeLanding() {
               custom={0.03}
             >
               <p className={styles.sectionKicker}>Dream in production</p>
-              <AnimatedSubheading text="One orchestrator coordinating specialists." />
+              <AnimatedSubheading text="One orchestrator coordinating the full creation loop." />
               <p className={styles.sectionCopy}>
-                A story request can trigger blueprint generation, character
-                creation or reuse, scene prompt writing, image rendering, and
-                optional narration while emitting structured progress events.
+                Dream handles more than one output type in a single system.
+                A request can trigger character creation, storybook generation,
+                or quiz generation, then store results as tracked jobs with
+                timelines, assets, and reusable outputs for future runs.
               </p>
               <div className={styles.caseStats}>
                 <div>
                   <h3>12</h3>
-                  <p>Storybook spreads per run (cover + scenes)</p>
+                  <p>Storybook spreads generated per run (cover + scene pages)</p>
                 </div>
                 <div>
                   <h3>2 Streams</h3>
-                  <p>NDJSON in chat and SSE in job detail pages</p>
+                  <p>Live run updates in chat (NDJSON) and job details (SSE)</p>
                 </div>
               </div>
             </motion.article>

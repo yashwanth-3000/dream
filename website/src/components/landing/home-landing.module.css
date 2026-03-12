@@ -842,34 +842,13 @@
 .studioPoster {
   position: absolute;
   inset: 0;
-  background:
-    linear-gradient(
-      155deg,
-      rgb(120 70 155 / 62%) 0%,
-      rgb(80 110 185 / 54%) 42%,
-      rgb(60 140 190 / 50%) 72%,
-      rgb(90 170 210 / 46%) 100%
-    ),
-    var(--service-poster, #d4c0ae);
+  background: var(--service-poster, #d4c0ae);
   background-size: cover;
   background-position: center;
 }
 
 .posterGlow {
-  position: absolute;
-  width: 260px;
-  aspect-ratio: 1;
-  top: 46%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 30% 34%, #ffd673 0 16%, transparent 18%),
-    radial-gradient(circle at 50% 54%, #ff5f64 0 20%, transparent 22%),
-    radial-gradient(circle at 64% 48%, #fd7ec4 0 14%, transparent 16%),
-    radial-gradient(circle at 55% 67%, #ff9364 0 18%, transparent 20%);
-  mix-blend-mode: screen;
-  animation: float-soft 7.6s ease-in-out infinite;
+  display: none;
 }
 
 .studioChip {
