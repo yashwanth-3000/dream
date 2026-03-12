@@ -87,14 +87,14 @@ const faqItems = [
 ];
 
 const heroMarqueeImages = [
-  "https://images.unsplash.com/photo-1756312148347-611b60723c7a?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1757865579201-693dd2080c73?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1756786605218-28f7dd95a493?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1757519740947-eef07a74c4ab?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1757263005786-43d955f07fb1?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1757207445614-d1e12b8f753e?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1757269746970-dc477517268f?w=900&auto=format&fit=crop&q=60",
-  "https://images.unsplash.com/photo-1755119902709-a53513bcbedc?w=900&auto=format&fit=crop&q=60",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_1.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_2.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_3.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_4.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_5.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_6.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_7.png",
+  "https://raw.githubusercontent.com/yashwanth-3000/svg/refs/heads/main/intro_pic_8.webp",
 ];
 
 const easeOutExpo = [0.22, 1, 0.36, 1] as const;
