@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { ArrowLeft, Sparkles, User, ChevronLeft, ChevronRight, ChevronDown, RotateCw, CheckCircle2, Wand2 } from "lucide-react";
 import { PromptInputBox, type PromptSendPayload, type ModeId, type CharacterSelection } from "@/components/ui/ai-prompt-box";
+import { STUDY_FILE_HELPER_TEXT, isSupportedStudyFile } from "@/lib/study-files";
 import DreamNavbar from "@/components/ui/dream-navbar";
 import { type StoryPage } from "@/lib/dashboard-data";
 import { StoryBook } from "@/components/dashboard/story-book";
@@ -282,7 +283,7 @@ const STUDY_THINKING_STEPS: ThinkingStep[] = [
     detail: "Preparing the question and checking whether a study session was provided.",
   },
   {
-    title: "Retrieving from uploaded PDFs",
+    title: "Retrieving from uploaded study files",
     detail: "Querying Azure AI Search with your study session filter and collecting evidence chunks.",
   },
   {
@@ -355,13 +356,6 @@ function detectWebSearchIntent(input: string): boolean {
     /\bwhat(?:'s| is)\s+happening\b/,
   ];
   return patterns.some((pattern) => pattern.test(normalized));
-}
-
-function isStudyPdf(file: File | null | undefined): boolean {
-  if (!file) return false;
-  const type = (file.type || "").toLowerCase();
-  const name = (file.name || "").toLowerCase();
-  return type === "application/pdf" || name.endsWith(".pdf");
 }
 
 function formatJsonForDisplay(value: unknown): string {
@@ -1931,15 +1925,18 @@ export default function ChatPage() {
     files: File[],
     existingSessionId?: string | null,
   ): Promise<string> => {
-    const pdfFiles = files.filter((file) => isStudyPdf(file));
-    if (!pdfFiles.length) {
+    const studyFiles = files.filter((file) => isSupportedStudyFile(file));
+    if (!studyFiles.length) {
+      if (files.length > 0) {
+        throw new Error(STUDY_FILE_HELPER_TEXT);
+      }
       const fallbackSession = (existingSessionId || studySessionIdRef.current || "").trim();
       if (fallbackSession) return fallbackSession;
-      throw new Error("Study mode requires at least one uploaded PDF.");
+      throw new Error(STUDY_FILE_HELPER_TEXT);
     }
 
     let session = (existingSessionId || studySessionIdRef.current || "").trim();
-    for (const file of pdfFiles) {
+    for (const file of studyFiles) {
       const formData = new FormData();
       formData.append("file", file, file.name);
       if (session) formData.append("session_id", session);
@@ -3145,7 +3142,7 @@ export default function ChatPage() {
   const handleSend = useCallback((payload: PromptSendPayload) => {
     const trimmed = payload.message.trim();
     const uploadedFiles = Array.isArray(payload.files) ? payload.files : [];
-    const hasStudyUpload = uploadedFiles.some((file) => isStudyPdf(file));
+    const hasStudyUpload = uploadedFiles.some((file) => isSupportedStudyFile(file));
     const rawMode = payload.mode ?? "normal";
 
     let mode: ModeId | "normal" = rawMode;
@@ -3156,7 +3153,7 @@ export default function ChatPage() {
     }
 
     const normalizedMessage = trimmed || (mode === "study" && hasStudyUpload
-      ? "Use the uploaded study PDF as context."
+      ? "Use the uploaded study files as context."
       : "");
     if (!normalizedMessage) return;
 
@@ -3235,10 +3232,10 @@ export default function ChatPage() {
           try {
             let activeSession = (studySessionIdRef.current || "").trim();
             if (hasStudyUpload) {
-              activeSession = await uploadStudyFiles(uploadedFiles, activeSession);
+              activeSession = await uploadStudyFiles(uploadedFiles, null);
             }
             if (!activeSession) {
-              throw new Error("Upload a PDF in Study mode before asking file-based questions.");
+              throw new Error(STUDY_FILE_HELPER_TEXT);
             }
             await requestBackendAssistantReply(mode, normalizedMessage, backendHistory, activeSession);
           } catch (error) {

@@ -1,6 +1,6 @@
 # Dream MAF Orchestrator
 
-Dream MAF Orchestrator is the coordination layer for the Dream platform. It sits between the frontend and the specialist backends, uses **Microsoft Agent Framework (MAF)** for kid-safe chat and routing decisions, uses **Exa MCP** for fresh web grounding, adds a **retrieval-augmented generation (RAG)** path through **Azure AI Search** for study-mode answers over uploaded PDFs, and sends character and storybook requests to downstream services over the **A2A** protocol.
+Dream MAF Orchestrator is the coordination layer for the Dream platform. It sits between the frontend and the specialist backends, uses **Microsoft Agent Framework (MAF)** for kid-safe chat and routing decisions, uses **Exa MCP** for fresh web grounding, adds a **retrieval-augmented generation (RAG)** path through **Azure AI Search** for study-mode answers over uploaded study files, and sends character and storybook requests to downstream services over the **A2A** protocol.
 
 **Pipeline:** Incoming request -> MAF chat or routing agents -> optional retrieval and grounding -> A2A calls to specialist backends -> job tracking and asset storage -> structured API response.
 
@@ -8,7 +8,21 @@ Dream MAF Orchestrator is the coordination layer for the Dream platform. It sits
 
 - `gpt-4o-mini` - powers MAF agents for question classification, kid-safe answering, and character routing
 - Exa MCP (`web_search_exa`) - provides fresh web retrieval for chat `mode=search`
-- Azure AI Search study index (`mode=study`) - provides the RAG retrieval layer for uploaded PDF study sessions
+- Azure AI Search study index (`mode=study`) - provides the RAG retrieval layer for uploaded study-file sessions
+
+## Why This Microsoft Setup Matters
+
+The orchestrator is the service where Microsoft tooling matters most in Dream. This is where the multi-agent control plane lives, where study-mode grounding happens, and where the Responsible AI and observability story becomes concrete.
+
+| Microsoft product | Why Dream uses it here | How Dream uses it here |
+|---|---|---|
+| Microsoft Agent Framework | The orchestrator is not a single prompt wrapper. It needs explicit agent roles, routing logic, and consistent structured outputs across chat and orchestration tasks. MAF gives Dream a clear multi-agent architecture that is easy to explain to judges and easier to maintain than ad hoc prompt chaining. | The orchestrator runs MAF agents such as `QuestionReaderAgent`, `ResponderAgent`, and `MAFRoutingAgent`. These agents classify user messages, select safe response behavior, and route character requests without hard-coding all decisions into one function. |
+| Azure Container Apps | The orchestrator must deploy independently from the website and from the specialist services because it is the system control plane. Container Apps provides HTTPS ingress, revision-based deploys, warm replicas, and simple service isolation without needing VM-heavy infrastructure. | `dream-orchestrator` runs as its own Container App in `dream-env` with `minReplicas=1` and `maxReplicas=3`. The website, character service, storybook service, and quiz service all integrate through this app as the primary backend entry point. |
+| Azure AI Search | Study mode requires grounded answers over uploaded learner files, not generic LLM recall. Azure AI Search gives Dream a managed retrieval layer with filtering, indexing, and vector-capable search so uploaded-file answers stay scoped and citeable. | The orchestrator uploads study chunks into `dream-study-index`, stores `study_session_id` on every chunk, and retrieves only the chunks that belong to the active study session. It also keeps `dream-rag-index` available as the general Azure Search index in the environment. |
+| Azure OpenAI | Study-mode retrieval quality improves when paraphrased follow-up questions can still match the right chunk. Azure OpenAI embeddings provide that semantic matching layer on top of the session-filtered study index. | The orchestrator calls the `dream-embed-3-small` deployment inside `dream-openai-hack` to generate vectors for `content_vector` in `dream-study-index`, then uses those vectors during study retrieval. |
+| Azure Content Safety | A kid-facing app and a hackathon demo both need a clear Responsible AI story. Content Safety adds a concrete moderation layer before and after generation instead of relying only on prompt instructions. | The orchestrator connects to `dream-contentsafety` and uses those checks in the chat pipeline so moderation outcomes can influence response behavior and metadata. |
+| Application Insights | Multi-agent systems are difficult to debug if all you have is console output. Centralized telemetry matters for tracing, failure diagnosis, and explaining agent behavior during demos. | The orchestrator sends runtime telemetry to `dream-appinsights`, which is connected to the `workspace-dreamrgGzL4` Log Analytics workspace. |
+| Azure Container Registry | The orchestrator deploy path is container-based, so it needs a standard image source for revisions and rollouts. | The orchestrator image is stored in `dreamacr64808802c.azurecr.io` and `dream-orchestrator` is updated to those image tags during deploys. |
 
 
 ### Architecture
@@ -25,17 +39,26 @@ Two MAF agents handle every chat message in sequence.
 
 `QuestionReaderAgent` (`dream-kid-question-reader`) reads the latest user message together with recent conversation history and classifies it by category, safety level, reading level, response style, and a short reasoning note. That structured output is then passed to `ResponderAgent` (`dream-kid-response-agent`).
 
-`ResponderAgent` uses the classification plus the original message to generate a 60-140 word reply in warm, concrete, kid-safe language. If the message is unsafe, it refuses gently and suggests involving a trusted adult. If the message needs caution, it answers with supportive guidance. In `mode=search`, it grounds the answer with fresh web evidence from Exa MCP. In `mode=study`, it grounds the answer with evidence retrieved from uploaded PDFs through Azure AI Search.
+`ResponderAgent` uses the classification plus the original message to generate a 60-140 word reply in warm, concrete, kid-safe language. If the message is unsafe, it refuses gently and suggests involving a trusted adult. If the message needs caution, it answers with supportive guidance. In `mode=search`, it grounds the answer with fresh web evidence from Exa MCP. In `mode=study`, it grounds the answer with evidence retrieved from uploaded study files through Azure AI Search.
 
 **Normal mode** (`mode=normal`) — both agents run against OpenAI directly, no external calls beyond the LLM.
 
 **Search mode** (`mode=search`) — retrieval uses Exa MCP (`web_search_exa`) for fresh internet results.
 
-**Study mode** (`mode=study`) — retrieval uses Azure AI Search filtered by `study_session_id` so answers are grounded to user-uploaded PDFs only.
+**Study mode** (`mode=study`) — retrieval uses Azure AI Search filtered by `study_session_id` so answers are grounded to the current user-uploaded study session only.
 
-In practice, the frontend first uploads PDFs for a study session and receives a `study_session_id`. Later chat requests send that same `study_session_id` with `mode=study`, and the orchestrator searches only the chunks indexed for that session. This keeps the answer scoped to the learner's uploaded material instead of the open web.
+In practice, the frontend first uploads supported study files for a study session and receives a `study_session_id`. Later chat requests send that same `study_session_id` with `mode=study`, and the orchestrator searches only the chunks indexed for that session. This keeps the answer scoped to the learner's uploaded material instead of the open web.
 
-Retrieved evidence and citations are injected into the responder prompt as mode-specific grounding context, so the final reply is based on the uploaded study content and can return source-backed references in the API response.
+Retrieved evidence and citations are injected into the responder prompt as mode-specific grounding context, so the final reply is based on the uploaded study content and can return source-backed references in the API response. If the current study session does not contain relevant evidence, the orchestrator returns a deterministic "not found in the uploaded file" answer instead of answering from general knowledge.
+
+Study retrieval implementation details:
+
+- dedicated index: `dream-study-index`
+- isolation field: `study_session_id`
+- vector field: `content_vector`
+- embedding deployment: Azure OpenAI `dream-embed-3-small`
+- upload path: chunk text + metadata + embeddings are indexed at upload time
+- query path: filtered hybrid + vector retrieval runs inside the current study session only
 
 **Temporal queries** (e.g. "what is today's date?") are intercepted before the Responder. The server clock is injected as authoritative context and, if the LLM omits the ISO date in its reply, a deterministic correction is applied so the answer is always accurate.
 
@@ -86,7 +109,7 @@ Jobs are created separately via `POST /api/v1/jobs` before the orchestration cal
 | Layer | What It Provides |
 |-------|-----------------|
 | **MAF** (`agent-framework-core`) | Structured `Agent` abstraction over OpenAI/Azure. Agents have names, system instructions, and run against a typed LLM client. No raw `openai.chat.completions` calls anywhere in this service. |
-| **MCP** (`mcp==1.24.0`) | Standard protocol for giving agents access to external tools at runtime. Search mode uses Exa MCP for web retrieval; study mode uses Azure Search REST retrieval over indexed PDF chunks. |
+| **MCP** (`mcp==1.24.0`) | Standard protocol for giving agents access to external tools at runtime. Search mode uses Exa MCP for web retrieval; study mode uses Azure Search REST retrieval over indexed study-file chunks. |
 | **A2A** (`a2a-sdk==0.3.5`) | Standard agent-to-agent call protocol. All calls to character and storybook backends use `message/send` JSON-RPC, not direct HTTP. This keeps backends independently deployable and replaceable without changing this service. |
 
 ---
@@ -160,11 +183,17 @@ cp .env.example .env
 | `AZURE_SEARCH_TOP_K` | No | `6` | Number of citations/snippets retained from retrieval |
 | `AZURE_SEARCH_VECTOR_K` | No | `20` | Number of vector neighbors used in hybrid query |
 | `AZURE_SEARCH_STUDY_ENABLED` | No | `true` | Enable Azure study-mode retrieval/indexing |
-| `AZURE_SEARCH_STUDY_INDEX_NAME` | No | — | Dedicated index for uploaded-study chunks (falls back to `AZURE_SEARCH_INDEX_NAME`) |
+| `AZURE_SEARCH_STUDY_INDEX_NAME` | No | `dream-study-index` | Dedicated index for uploaded-study chunks |
 | `AZURE_SEARCH_STUDY_SESSION_FIELD` | No | `study_session_id` | Field used to isolate one study session |
 | `AZURE_SEARCH_STUDY_CONTENT_FIELD` | No | `content` | Field where chunk text is stored |
 | `AZURE_SEARCH_STUDY_TITLE_FIELD` | No | `title` | Field for original filename/title |
-| `AZURE_SEARCH_STUDY_MAX_FILE_BYTES` | No | `20000000` | Max upload size for one PDF |
+| `AZURE_SEARCH_STUDY_VECTOR_FIELD` | No | `content_vector` | Vector field used for study-mode hybrid retrieval |
+| `AZURE_SEARCH_STUDY_VECTOR_DIMENSIONS` | No | `1536` | Embedding dimensionality stored in `content_vector` |
+| `AZURE_SEARCH_STUDY_MAX_FILE_BYTES` | No | `20000000` | Max upload size for one study file |
+| `AZURE_OPENAI_EMBEDDING_ENDPOINT` | No | falls back to `AZURE_OPENAI_ENDPOINT` | Azure endpoint used for study embeddings |
+| `AZURE_OPENAI_EMBEDDING_API_KEY` | No | falls back to `AZURE_OPENAI_API_KEY` | Azure API key used for study embeddings |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME` | Yes (vector study mode) | — | Azure OpenAI embedding deployment for study uploads and vector queries |
+| `AZURE_OPENAI_EMBEDDING_API_VERSION` | No | `2024-10-21` | Azure OpenAI embeddings API version |
 | `AZURE_CONTENT_SAFETY_ENABLED` | No | `false` | Enable Azure AI Content Safety checks for chat I/O |
 | `AZURE_CONTENT_SAFETY_ENDPOINT` | No | — | Azure AI Content Safety endpoint |
 | `AZURE_CONTENT_SAFETY_API_KEY` | No | — | Azure AI Content Safety API key |
@@ -216,24 +245,97 @@ Verify:
 curl http://127.0.0.1:8010/health
 ```
 
+## Current Live Deployment
+
+| Resource | Value |
+|---|---|
+| Resource Group | `dream-rg` |
+| Region | `East US` |
+| Container Apps Env | `dream-env` |
+| ACR | `dreamacr64808802c.azurecr.io` |
+| App Name | `dream-orchestrator` |
+| App URL | `https://dream-orchestrator.greenplant-2d9bb135.eastus.azurecontainerapps.io` |
+| Health | `https://dream-orchestrator.greenplant-2d9bb135.eastus.azurecontainerapps.io/health` |
+| Latest Revision | `dream-orchestrator--0000036` |
+| Current Image | `dreamacr64808802c.azurecr.io/maf-orchestrator:20260314030630-amd64` |
+| Scale | `minReplicas=1`, `maxReplicas=3` |
+| Current Live Provider Mix | `AGENT_PROVIDER=openai` for chat agents, Azure OpenAI embeddings for study vectors |
+| Search Mode Wiring | Exa MCP via `https://mcp.exa.ai/mcp` |
+| Study Mode Wiring | Azure AI Search `dream-study-index` + Azure OpenAI embedding deployment `dream-embed-3-small` |
+
 ## Deploy to Azure
 
-Build and deploy to Azure Container Apps using ACR:
+Build and deploy to Azure Container Apps with the Azure-first deploy script:
 
 ```bash
 export AZURE_SUBSCRIPTION_ID=...
 export AZURE_RESOURCE_GROUP=dream-rg
 export AZURE_LOCATION=eastus
 export AZURE_CONTAINERAPP_ENV=dream-env
-export AZURE_ACR_NAME=dreamacr...
-export AZURE_CONTAINERAPP_NAME=dream-main-orchestrator
-export OPENAI_API_KEY=...
-export REPLICATE_API_TOKEN=...
-export A2A_BACKEND_BASE_URL=https://dream-character-a2a....azurecontainerapps.io
-export A2A_STORY_BACKEND_BASE_URL=https://dream-storybook-a2a....azurecontainerapps.io
+export AZURE_ACR_NAME=dreamacr64808802c
+export AZURE_CONTAINERAPP_NAME=dream-orchestrator
+export A2A_BACKEND_BASE_URL=https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io
+export A2A_STORY_BACKEND_BASE_URL=https://dream-storybook-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io
+export A2A_QUIZ_BACKEND_BASE_URL=https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io
+export AZURE_OPENAI_ENDPOINT=https://eastus.api.cognitive.microsoft.com/
+export AZURE_OPENAI_CHAT_DEPLOYMENT_NAME=...
+export AZURE_OPENAI_API_KEY=...
+export EXA_API_KEY=...
+export AZURE_SEARCH_SERVICE_ENDPOINT=https://dreamsearch03052211.search.windows.net
+export AZURE_SEARCH_INDEX_NAME=dream-rag-index
+export AZURE_SEARCH_STUDY_INDEX_NAME=dream-study-index
+export AZURE_SEARCH_USE_MANAGED_IDENTITY=false
+export AZURE_SEARCH_API_KEY=...
+export AZURE_OPENAI_EMBEDDING_ENDPOINT=https://eastus.api.cognitive.microsoft.com/
+export AZURE_OPENAI_EMBEDDING_API_KEY=...
+export AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=dream-embed-3-small
+export AZURE_CONTENT_SAFETY_ENABLED=true
+export AZURE_CONTENT_SAFETY_ENDPOINT=https://eastus.api.cognitive.microsoft.com/
+export AZURE_CONTENT_SAFETY_API_KEY=...
+export APPLICATIONINSIGHTS_CONNECTION_STRING=...
 
+./scripts/ensure_study_search_index.sh
 ./scripts/deploy_azure.sh
 ```
+
+Required by `scripts/deploy_azure.sh`:
+
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_LOCATION`
+- `AZURE_CONTAINERAPP_ENV`
+- `AZURE_ACR_NAME`
+- `AZURE_CONTAINERAPP_NAME`
+- `A2A_BACKEND_BASE_URL`
+- `A2A_STORY_BACKEND_BASE_URL`
+- `A2A_QUIZ_BACKEND_BASE_URL`
+- `AZURE_OPENAI_ENDPOINT`
+- `AZURE_OPENAI_CHAT_DEPLOYMENT_NAME`
+- `AZURE_OPENAI_API_KEY`
+- `EXA_API_KEY`
+- `AZURE_SEARCH_SERVICE_ENDPOINT`
+- `AZURE_SEARCH_INDEX_NAME`
+
+Also required in common production setups:
+
+- `AZURE_OPENAI_EMBEDDING_ENDPOINT`
+- `AZURE_OPENAI_EMBEDDING_API_KEY`
+- `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME`
+- `AZURE_SEARCH_API_KEY` when `AZURE_SEARCH_USE_MANAGED_IDENTITY=false`
+- `AZURE_CONTENT_SAFETY_ENDPOINT` and `AZURE_CONTENT_SAFETY_API_KEY` when `AZURE_CONTENT_SAFETY_ENABLED=true`
+
+What the deploy script does:
+
+1. Builds the orchestrator image in ACR.
+2. Creates or updates the `dream-orchestrator` Container App.
+3. Sets an Azure-first runtime configuration with `AGENT_PROVIDER=azure`.
+4. Injects Exa, Azure Search, Azure OpenAI, embedding, telemetry, and optional Content Safety secrets.
+5. Keeps the app warm with `minReplicas=1`.
+
+Important deployment note:
+
+- The current live production revision uses `AGENT_PROVIDER=openai` for chat generation and Azure OpenAI only for study embeddings.
+- `scripts/deploy_azure.sh` is Azure-first and sets `AGENT_PROVIDER=azure`, so a fresh deploy from that script will not exactly match the current live provider mix unless you adjust the env vars afterward.
 
 | Resource | Value |
 |---|---|
@@ -319,10 +421,23 @@ If your subscription supports ACR Tasks, you can use:
 
 `POST /api/v1/orchestrate/study/upload` accepts multipart form-data:
 
-- `file`: PDF file
+- `file`: supported study file
 - `session_id` (optional): existing study session id to append more files
 
 Response includes `session_id`, `file_id`, and `chunks_indexed`. Pass `study_session_id` in subsequent `/api/v1/orchestrate/chat` requests with `mode=study`.
+
+Supported upload types:
+
+- `pdf`
+- `txt`
+- `md`
+- `csv`
+- `json`
+- `xml`
+- `html`
+- `yaml`
+- `yml`
+- `log`
 
 ### Character Request
 
@@ -443,7 +558,7 @@ curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
   }'
 ```
 
-Kid-safe chat (study mode — Azure Search over uploaded PDFs):
+Kid-safe chat (study mode — Azure Search over uploaded study files):
 
 ```bash
 curl -X POST http://127.0.0.1:8010/api/v1/orchestrate/chat \
@@ -503,8 +618,10 @@ curl -N "http://127.0.0.1:8010/api/v1/jobs/{job_id}/stream"
 |---------|-------|
 | `OPENAI_API_KEY is required` | Set `OPENAI_API_KEY` in `.env` or confirm `AGENT_PROVIDER` matches provided credentials |
 | `A2A-only mode: A2A_USE_PROTOCOL must be true` | Do not set `A2A_USE_PROTOCOL=false` — enforced at startup and cannot be bypassed |
-| Search mode has no citations | Verify `AZURE_SEARCH_SERVICE_ENDPOINT`, `AZURE_SEARCH_KNOWLEDGE_BASE_NAME`, and `AZURE_SEARCH_INDEX_NAME` are set |
+| Search mode has no citations | Verify `EXA_API_KEY`, `EXA_MCP_ENABLED=true`, and `EXA_MCP_TOOLS=web_search_exa` |
 | Azure Search auth error | Use `AZURE_SEARCH_API_KEY` or set `AZURE_SEARCH_USE_MANAGED_IDENTITY=true` and assign search roles to container app identity |
+| Study uploads index but first-turn retrieval is weak | Verify `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME`, `AZURE_SEARCH_STUDY_VECTOR_FIELD`, and the vector schema on `dream-study-index` |
+| Study answer says "not found in the uploaded file" | Confirm the answer exists in the current `study_session_id`; uploads from previous study chats are intentionally isolated |
 | Content Safety call failures | Check `AZURE_CONTENT_SAFETY_ENDPOINT` and `AZURE_CONTENT_SAFETY_API_KEY`; set `AZURE_CONTENT_SAFETY_FAIL_OPEN=true` during dev |
 | `Chat responder failed` | Check `OPENAI_API_KEY`, model access, and OpenAI quota |
 | `A2ABackendError` on character requests | Verify character backend is running at `A2A_BACKEND_BASE_URL` |

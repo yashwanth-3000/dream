@@ -2,9 +2,9 @@
 
 import React from "react";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowUp, BookOpenText, Brain, FileText, Globe, Mic, Paperclip, Square, StopCircle, X } from "lucide-react";
+import { ArrowUp, BookOpenText, Brain, FileText, Globe, Paperclip, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { STUDY_FILE_ACCEPT, STUDY_FILE_HELPER_TEXT, isSupportedStudyFile } from "@/lib/study-files";
 
 // Utility function for className merging
 const cn = (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ");
@@ -59,60 +59,6 @@ const TooltipContent = React.forwardRef<
 ));
 TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 
-// ── Dialog ────────────────────────────────────────────────────────────────────
-const Dialog = DialogPrimitive.Root;
-const DialogPortal = DialogPrimitive.Portal;
-const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/30 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
-    {...props}
-  />
-));
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
-
-const DialogContent = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[90vw] md:max-w-[800px] translate-x-[-50%] translate-y-[-50%] gap-4 border border-black/10 bg-white p-0 shadow-xl duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-2xl",
-        className
-      )}
-      {...props}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-full bg-black/8 p-2 hover:bg-black/12 transition-all">
-        <X className="h-5 w-5 text-foreground/70 hover:text-foreground" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-));
-DialogContent.displayName = DialogPrimitive.Content.displayName;
-
-const DialogTitle = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Title>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title
-    ref={ref}
-    className={cn("text-lg font-semibold leading-none tracking-tight text-foreground", className)}
-    {...props}
-  />
-));
-DialogTitle.displayName = DialogPrimitive.Title.displayName;
-
 // ── Button ────────────────────────────────────────────────────────────────────
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "default" | "outline" | "ghost";
@@ -146,85 +92,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   }
 );
 Button.displayName = "Button";
-
-// ── VoiceRecorder ─────────────────────────────────────────────────────────────
-interface VoiceRecorderProps {
-  isRecording: boolean;
-  onStartRecording: () => void;
-  onStopRecording: (duration: number) => void;
-  visualizerBars?: number;
-}
-const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
-  isRecording,
-  onStartRecording,
-  onStopRecording,
-  visualizerBars = 32,
-}) => {
-  const [time, setTime] = React.useState(0);
-  const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-
-  React.useEffect(() => {
-    if (isRecording) {
-      onStartRecording();
-      timerRef.current = setInterval(() => setTime((t) => t + 1), 1000);
-    } else {
-      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-      onStopRecording(time);
-      setTime(0);
-    }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [isRecording, time, onStartRecording, onStopRecording]);
-
-  const formatTime = (s: number) =>
-    `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
-
-  return (
-    <div className={cn("flex flex-col items-center justify-center w-full transition-all duration-300 py-3", isRecording ? "opacity-100" : "opacity-0 h-0")}>
-      <div className="flex items-center gap-2 mb-3">
-        <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-        <span className="font-mono text-sm text-foreground/70">{formatTime(time)}</span>
-      </div>
-      <div className="w-full h-10 flex items-center justify-center gap-0.5 px-4">
-        {[...Array(visualizerBars)].map((_, i) => (
-          (() => {
-            const height = 20 + ((i * 17) % 80);
-            const duration = 0.55 + (((i * 13) % 45) / 100);
-            return (
-          <div
-            key={i}
-            className="w-0.5 rounded-full bg-primary/50 animate-pulse"
-            style={{ height: `${height}%`, animationDelay: `${i * 0.05}s`, animationDuration: `${duration}s` }}
-          />
-            );
-          })()
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// ── ImageViewDialog ───────────────────────────────────────────────────────────
-interface ImageViewDialogProps { imageUrl: string | null; onClose: () => void; }
-const ImageViewDialog: React.FC<ImageViewDialogProps> = ({ imageUrl, onClose }) => {
-  if (!imageUrl) return null;
-  return (
-    <Dialog open={!!imageUrl} onOpenChange={onClose}>
-      <DialogContent className="p-0 border-none bg-transparent shadow-none max-w-[90vw] md:max-w-[800px]">
-        <DialogTitle className="sr-only">Image Preview</DialogTitle>
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.2, ease: "easeOut" }}
-          className="relative bg-white rounded-2xl overflow-hidden shadow-2xl"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl} alt="Full preview" className="w-full max-h-[80vh] object-contain rounded-2xl" />
-        </motion.div>
-      </DialogContent>
-    </Dialog>
-  );
-};
 
 // ── PromptInput context ───────────────────────────────────────────────────────
 interface PromptInputContextType {
@@ -345,7 +212,7 @@ const MODE_CONFIG: Record<
   },
   study: {
     label: "Study",
-    description: "Ask questions from your uploaded PDF notes",
+    description: "Ask questions from your uploaded study files",
     activeClass: "bg-emerald-50 border-emerald-300 text-emerald-700",
     icon: FileText,
   },
@@ -401,12 +268,9 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   } = props;
   const [input, setInput] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
-  const [filePreviews, setFilePreviews] = React.useState<Record<string, string>>({});
-  const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
-  const [isRecording, setIsRecording] = React.useState(false);
+  const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [internalActiveMode, setInternalActiveMode] = React.useState<ModeId | null>(null);
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
-  const promptBoxRef = React.useRef<HTMLDivElement>(null);
   const activeMode = mode !== undefined ? mode : internalActiveMode;
   const isStudyMode = activeMode === "study";
 
@@ -419,64 +283,55 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   };
 
   const processFile = React.useCallback((file: File) => {
-    if (isStudyMode) {
-      const lowerName = file.name.toLowerCase();
-      const isPdf = file.type === "application/pdf" || lowerName.endsWith(".pdf");
-      if (!isPdf || file.size > 20 * 1024 * 1024) return;
-      setFiles([file]);
-      setFilePreviews({});
+    if (!isStudyMode) {
+      setAttachmentError("Attachments are only available in Study mode.");
+      setFiles([]);
       return;
     }
-
-    if (!file.type.startsWith("image/") || file.size > 10 * 1024 * 1024) return;
+    if (!isSupportedStudyFile(file)) {
+      setAttachmentError(STUDY_FILE_HELPER_TEXT);
+      setFiles([]);
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      setAttachmentError("Study files must be 20 MB or smaller.");
+      setFiles([]);
+      return;
+    }
     setFiles([file]);
-    const reader = new FileReader();
-    reader.onload = (e) => setFilePreviews({ [file.name]: e.target?.result as string });
-    reader.readAsDataURL(file);
+    setAttachmentError(null);
   }, [isStudyMode]);
 
   const handleDragOver = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDragLeave = React.useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
   const handleDrop = React.useCallback((e: React.DragEvent) => {
     e.preventDefault(); e.stopPropagation();
+    if (!isStudyMode) return;
     const droppedFiles = Array.from(e.dataTransfer.files);
-    if (isStudyMode) {
-      const pdf = droppedFiles.find((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
-      if (pdf) processFile(pdf);
+    const supported = droppedFiles.find((file) => isSupportedStudyFile(file));
+    if (supported) {
+      processFile(supported);
       return;
     }
-    const img = droppedFiles.find((file) => file.type.startsWith("image/"));
-    if (img) processFile(img);
+    setAttachmentError(STUDY_FILE_HELPER_TEXT);
   }, [isStudyMode, processFile]);
 
-  const handleRemoveFile = (index: number) => {
-    const f = files[index];
-    if (f && filePreviews[f.name]) setFilePreviews({});
+  const handleRemoveFile = () => {
     setFiles([]);
+    setAttachmentError(null);
   };
-
-  const handlePaste = React.useCallback((e: ClipboardEvent) => {
-    if (isStudyMode) return;
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf("image") !== -1) {
-        const file = items[i].getAsFile();
-        if (file) { e.preventDefault(); processFile(file); break; }
-      }
-    }
-  }, [isStudyMode, processFile]);
-
-  React.useEffect(() => {
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [handlePaste]);
 
   const resetComposer = () => {
     setInput("");
     setFiles([]);
-    setFilePreviews({});
+    setAttachmentError(null);
   };
+
+  React.useEffect(() => {
+    if (isStudyMode) return;
+    if (files.length > 0) setFiles([]);
+    if (attachmentError) setAttachmentError(null);
+  }, [attachmentError, files.length, isStudyMode]);
 
   const sendPayload = () => {
     onSend({
@@ -489,18 +344,8 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
   };
 
   const handleSubmit = () => {
-    if (!input.trim() && files.length === 0) return;
+    if (isLoading || (!input.trim() && files.length === 0)) return;
     sendPayload();
-  };
-
-  const handleStopRecording = (duration: number) => {
-    setIsRecording(false);
-    onSend({
-      message: `[Voice message - ${duration} seconds]`,
-      files: [],
-      mode: activeMode ?? "normal",
-      characterSelection: null,
-    });
   };
 
   const hasContent = input.trim() !== "" || files.length > 0;
@@ -509,72 +354,62 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
     <div>
       <PromptInput
         value={input} onValueChange={setInput} isLoading={isLoading} onSubmit={handleSubmit}
-        className={cn("w-full transition-all duration-300 ease-in-out", isRecording && "border-red-400/60", className)}
-        disabled={isLoading || isRecording}
-        ref={(promptBoxRef as React.Ref<HTMLDivElement>) ?? ref}
+        className={cn("w-full transition-all duration-300 ease-in-out", className)}
+        disabled={isLoading}
+        ref={ref}
         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
       >
 
         {/* File previews */}
-        {files.length > 0 && !isRecording && (
+        {files.length > 0 && (
           <div className="flex flex-wrap gap-2 p-0 pb-1">
             {files.map((file, index) => (
               <div key={index} className="relative group">
-                {file.type.startsWith("image/") && filePreviews[file.name] ? (
-                  <div className="w-16 h-16 rounded-xl overflow-hidden cursor-pointer border border-black/10" onClick={() => setSelectedImage(filePreviews[file.name])}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={filePreviews[file.name]} alt={file.name} className="h-full w-full object-cover" />
-                    <button onClick={(e) => { e.stopPropagation(); handleRemoveFile(index); }} className="absolute top-1 right-1 rounded-full bg-white/90 p-0.5 shadow-sm">
-                      <X className="h-3 w-3 text-foreground/70" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/80 px-2.5 py-2 text-xs text-foreground/80">
-                    <FileText className="h-3.5 w-3.5 shrink-0 text-foreground/60" />
-                    <span className="max-w-[170px] truncate">{file.name}</span>
-                    <button onClick={() => handleRemoveFile(index)} className="rounded-full bg-black/5 p-1 transition-colors hover:bg-black/10">
-                      <X className="h-3 w-3 text-foreground/70" />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/80 px-2.5 py-2 text-xs text-foreground/80">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-foreground/60" />
+                  <span className="max-w-[170px] truncate">{file.name}</span>
+                  <button onClick={() => handleRemoveFile()} className="rounded-full bg-black/5 p-1 transition-colors hover:bg-black/10">
+                    <X className="h-3 w-3 text-foreground/70" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
 
+        {attachmentError ? (
+          <p className="px-1 pb-1 text-xs font-medium text-red-600">{attachmentError}</p>
+        ) : null}
+
         {/* Textarea */}
-        <div className={cn("transition-all duration-300", isRecording ? "h-0 overflow-hidden opacity-0" : "opacity-100")}>
+        <div className="transition-all duration-300 opacity-100">
           <PromptInputTextarea
             placeholder={activeModeConfig ? activeModeConfig.description + "…" : placeholder}
             className="text-base"
           />
         </div>
 
-        {/* Voice recorder */}
-        {isRecording && (
-          <VoiceRecorder isRecording={isRecording} onStartRecording={() => {}} onStopRecording={handleStopRecording} />
-        )}
-
         {/* Action bar */}
         <PromptInputActions className="flex items-center justify-between gap-2 p-0 pt-2">
           {/* Left actions */}
-          <div className={cn("flex items-center gap-1 transition-opacity duration-300", isRecording ? "opacity-0 invisible h-0" : "opacity-100 visible")}>
-            {/* Attach */}
-            <PromptInputAction tooltip={isStudyMode ? "Upload study PDF" : "Upload image"}>
-              <button
-                onClick={() => uploadInputRef.current?.click()}
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/6 hover:text-foreground"
-                disabled={isRecording}
-              >
-                <Paperclip className="h-4 w-4" />
-                <input
-                  ref={uploadInputRef}
-                  type="file"
-                  className="hidden"
-                  accept={isStudyMode ? ".pdf,application/pdf" : "image/*"}
-                  onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); if (e.target) e.target.value = ""; }} />
-              </button>
-            </PromptInputAction>
+          <div className="flex items-center gap-1 transition-opacity duration-300 opacity-100 visible">
+            {isStudyMode ? (
+              <PromptInputAction tooltip={STUDY_FILE_HELPER_TEXT}>
+                <button
+                  onClick={() => uploadInputRef.current?.click()}
+                  className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/6 hover:text-foreground"
+                  disabled={isLoading}
+                >
+                  <Paperclip className="h-4 w-4" />
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    className="hidden"
+                    accept={STUDY_FILE_ACCEPT}
+                    onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); if (e.target) e.target.value = ""; }} />
+                </button>
+              </PromptInputAction>
+            ) : null}
 
             {/* Mode buttons */}
             <div className="flex items-center">
@@ -622,41 +457,25 @@ export const PromptInputBox = React.forwardRef((props: PromptInputBoxProps, ref:
             </div>
           </div>
 
-          {/* Send / voice button */}
-          <PromptInputAction tooltip={isLoading ? "Stop" : isRecording ? "Stop recording" : hasContent ? "Send" : "Voice"}>
+          {/* Send button */}
+          <PromptInputAction tooltip={isLoading ? "Sending" : "Send"}>
             <Button
               variant="default"
               size="icon"
               className={cn(
                 "h-8 w-8 rounded-full transition-all duration-200",
-                isRecording
-                  ? "bg-red-50 hover:bg-red-100 text-red-500 border border-red-200"
-                  : hasContent || isLoading
+                hasContent
                   ? "bg-primary hover:bg-primary/90 text-primary-foreground shadow-[0_4px_14px_rgba(161,73,41,0.35)]"
                   : "bg-muted hover:bg-muted/80 text-muted-foreground"
               )}
-              onClick={() => {
-                if (isRecording) setIsRecording(false);
-                else if (hasContent) handleSubmit();
-                else setIsRecording(true);
-              }}
-              disabled={isLoading && !hasContent}
+              onClick={handleSubmit}
+              disabled={isLoading || !hasContent}
             >
-              {isLoading ? (
-                <Square className="h-3.5 w-3.5 fill-primary-foreground animate-pulse" />
-              ) : isRecording ? (
-                <StopCircle className="h-4 w-4" />
-              ) : hasContent ? (
-                <ArrowUp className="h-4 w-4" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
+              <ArrowUp className={cn("h-4 w-4", isLoading && "animate-pulse")} />
             </Button>
           </PromptInputAction>
         </PromptInputActions>
       </PromptInput>
-
-      <ImageViewDialog imageUrl={selectedImage} onClose={() => setSelectedImage(null)} />
     </div>
   );
 });

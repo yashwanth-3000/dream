@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     azure_openai_api_key: str | None = None
     azure_openai_chat_deployment_name: str | None = None
     azure_openai_api_version: str = "preview"
+    azure_openai_embedding_endpoint: str | None = None
+    azure_openai_embedding_api_key: str | None = None
+    azure_openai_embedding_deployment_name: str | None = None
+    azure_openai_embedding_api_version: str = "2024-10-21"
 
     applicationinsights_connection_string: str | None = None
 
@@ -64,6 +68,8 @@ class Settings(BaseSettings):
     azure_search_study_filename_field: str = "study_file_name"
     azure_search_study_chunk_index_field: str = "chunk_index"
     azure_search_study_uploaded_at_field: str = "uploaded_at"
+    azure_search_study_vector_field: str = "content_vector"
+    azure_search_study_vector_dimensions: int = Field(default=1536, ge=128, le=4096)
     azure_search_study_chunk_size_chars: int = Field(default=1400, ge=300, le=8000)
     azure_search_study_chunk_overlap_chars: int = Field(default=200, ge=0, le=2000)
     azure_search_study_max_file_bytes: int = Field(default=20_000_000, ge=1_000_000, le=200_000_000)

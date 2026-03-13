@@ -10,14 +10,32 @@ Dream MAF Quiz Maker is the quiz-generation backend for the Dream platform. It u
 - `agent-framework-core` - provides the agent abstraction for structured JSON generation
 - `a2a-sdk` and `agent-framework-a2a` - expose the quiz workflow over A2A with task-based streaming progress
 
+## Why This Microsoft Setup Matters
+
+The quiz service is another place where Dream benefits from an explicit multi-agent pattern. Quiz generation needs structure, consistency, and contract-safe outputs, so MAF is a better fit than a single unstructured completion.
+
+| Microsoft product | Why Dream uses it here | How Dream uses it here |
+|---|---|---|
+| Microsoft Agent Framework | Quiz generation has a planning step and a writing step, and both need structured outputs that can be normalized into a fixed frontend contract. MAF makes that two-stage design explicit and easier to maintain. | The quiz service uses `QuizBlueprintAgent` to plan the quiz and `QuizWriterAgent` to produce the final questions, hints, answers, and explanations before normalization. |
+| Azure Container Apps | The quiz backend should deploy and scale separately from chat, storybook, and character generation. That separation keeps the overall system cleaner and avoids one workload blocking another. | `dream-quiz-a2a` runs as its own Container App in `dream-env` and exposes both REST and A2A endpoints for orchestrated quiz generation. |
+| Azure Container Registry | The quiz service ships as a container and needs a consistent image distribution path across revisions. | Quiz builds are pushed to `dreamacr64808802c.azurecr.io`, and the Container App is updated to that image tag during deploys. |
+
 ## Current Deployment
 
 | Resource | Value |
 |---|---|
+| Resource Group | `dream-rg` |
+| Region | `East US` |
+| Container Apps Env | `dream-env` |
+| ACR | `dreamacr64808802c.azurecr.io` |
+| App Name | `dream-quiz-a2a` |
 | App URL | `https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io` |
 | Health | `https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/health` |
 | A2A RPC | `https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/a2a` |
 | Agent Card | `https://dream-quiz-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/.well-known/agent.json` |
+| Latest Revision | `dream-quiz-a2a--57fum6f` |
+| Current Image | `dreamacr64808802c.azurecr.io/dream-quiz-a2a:20260304-v1` |
+| Scale | `minReplicas=1`, `maxReplicas=3` |
 
 ## How It Works
 
@@ -275,20 +293,58 @@ curl http://127.0.0.1:8030/health
 
 ## Deploy to Azure
 
-Build and deploy to Azure Container Apps with ACR:
+Build and deploy to Azure Container Apps with:
 
 ```bash
 export AZURE_SUBSCRIPTION_ID=...
-export AZURE_RESOURCE_GROUP=...
-export AZURE_LOCATION=...
-export AZURE_CONTAINERAPP_ENV=...
-export AZURE_ACR_NAME=...
-export AZURE_CONTAINERAPP_NAME=...
+export AZURE_RESOURCE_GROUP=dream-rg
+export AZURE_LOCATION=eastus
+export AZURE_CONTAINERAPP_ENV=dream-env
+export AZURE_ACR_NAME=dreamacr64808802c
+export AZURE_CONTAINERAPP_NAME=dream-quiz-a2a
 export OPENAI_API_KEY=...
 
 cd backend/a2a-maf-quiz-maker
 ./scripts/deploy_azure.sh
 ```
+
+Required deployment environment variables:
+
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_LOCATION`
+- `AZURE_CONTAINERAPP_ENV`
+- `AZURE_ACR_NAME`
+- `AZURE_CONTAINERAPP_NAME`
+- `OPENAI_API_KEY`
+
+Typical live Azure values:
+
+- `AZURE_RESOURCE_GROUP=dream-rg`
+- `AZURE_LOCATION=eastus`
+- `AZURE_CONTAINERAPP_ENV=dream-env`
+- `AZURE_ACR_NAME=dreamacr64808802c`
+- `AZURE_CONTAINERAPP_NAME=dream-quiz-a2a`
+
+Important optional deployment settings:
+
+- `AZURE_CONTAINER_CPU` defaults to `1.0`
+- `AZURE_CONTAINER_MEMORY` defaults to `2Gi`
+- `AZURE_MIN_REPLICAS` defaults to `1`
+- `AZURE_MAX_REPLICAS` defaults to `3`
+
+What the deploy script does:
+
+1. Builds the quiz image in ACR.
+2. Creates or updates the `dream-quiz-a2a` Container App.
+3. Injects `OPENAI_API_KEY` as a secret.
+4. Sets the default quiz runtime to `OPENAI_MODEL=gpt-4o-mini` and `OPENAI_TEMPERATURE=0.4`.
+5. Keeps the app warm with `minReplicas=1`.
+
+Important deployment note:
+
+- The current deploy script uses the default OpenAI-backed runtime and does not inject `AZURE_OPENAI_*` variables automatically.
+- If you want to run the Azure provider path for quiz generation, update the Container App environment variables after deploy or extend `scripts/deploy_azure.sh`.
 
 ## Run Tests
 

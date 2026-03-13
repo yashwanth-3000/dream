@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 
 from ..config import Settings
+from .azure_openai_embeddings import AzureOpenAIEmbeddingClient
 
 try:
     from pypdf import PdfReader
@@ -33,14 +34,42 @@ class StudyUploadResult:
 
 
 class StudyDocumentIndexer:
+    _TEXT_EXTENSIONS = {
+        ".txt",
+        ".md",
+        ".markdown",
+        ".csv",
+        ".json",
+        ".xml",
+        ".html",
+        ".htm",
+        ".yaml",
+        ".yml",
+        ".log",
+    }
+    _TEXT_CONTENT_TYPES = {
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "text/html",
+        "text/xml",
+        "application/json",
+        "application/xml",
+        "application/yaml",
+        "text/yaml",
+        "text/x-log",
+    }
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._embeddings = AzureOpenAIEmbeddingClient(settings)
 
-    async def upload_pdf(
+    async def upload_document(
         self,
         *,
         file_name: str,
         file_bytes: bytes,
+        content_type: str | None = None,
         session_id: str | None = None,
     ) -> StudyUploadResult:
         normalized_name = (file_name or "study-document.pdf").strip() or "study-document.pdf"
@@ -75,9 +104,15 @@ class StudyDocumentIndexer:
             )
             return result
 
-        extracted_text = self._extract_pdf_text(file_bytes)
+        extracted_text = self._extract_document_text(
+            file_name=normalized_name,
+            file_bytes=file_bytes,
+            content_type=content_type,
+        )
         if not extracted_text.strip():
-            result.errors.append("No extractable text was found in the uploaded PDF.")
+            result.errors.append(
+                "No extractable text was found in the uploaded study document."
+            )
             return result
 
         chunks = self._chunk_text(extracted_text)
@@ -93,6 +128,15 @@ class StudyDocumentIndexer:
             result.errors.extend(schema_errors)
             return result
 
+        vector_field = self._choose_vector_field(schema)
+        chunk_embeddings: list[list[float]] | None = None
+        if vector_field:
+            try:
+                chunk_embeddings = await self._embeddings.embed_texts(chunks)
+            except RuntimeError as exc:
+                result.errors.append(str(exc))
+                chunk_embeddings = None
+
         try:
             documents = self._build_documents(
                 session_id=normalized_session,
@@ -100,6 +144,7 @@ class StudyDocumentIndexer:
                 file_name=normalized_name,
                 chunks=chunks,
                 schema=schema,
+                chunk_embeddings=chunk_embeddings,
             )
         except RuntimeError as exc:
             result.errors.append(str(exc))
@@ -114,6 +159,21 @@ class StudyDocumentIndexer:
         if indexing_errors:
             result.errors.extend(indexing_errors)
         return result
+
+    def _extract_document_text(
+        self,
+        *,
+        file_name: str,
+        file_bytes: bytes,
+        content_type: str | None = None,
+    ) -> str:
+        if self.is_supported_pdf(file_name=file_name, content_type=content_type):
+            return self._extract_pdf_text(file_bytes)
+        if self.is_supported_text(file_name=file_name, content_type=content_type):
+            return self._extract_text_document(file_bytes)
+        raise RuntimeError(
+            "Unsupported study file type. Supported files: PDF, TXT, MD, CSV, JSON, XML, HTML, YAML, LOG."
+        )
 
     def _extract_pdf_text(self, file_bytes: bytes) -> str:
         if PdfReader is None:
@@ -130,6 +190,17 @@ class StudyDocumentIndexer:
             if cleaned:
                 parts.append(cleaned)
         return "\n\n".join(parts)
+
+    def _extract_text_document(self, file_bytes: bytes) -> str:
+        for encoding in ("utf-8", "utf-8-sig", "utf-16", "latin-1"):
+            try:
+                text = file_bytes.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise RuntimeError("Could not decode the uploaded text document.")
+        return text
 
     def _chunk_text(self, text: str) -> list[str]:
         normalized = " ".join((text or "").split()).strip()
@@ -159,6 +230,7 @@ class StudyDocumentIndexer:
         file_name: str,
         chunks: list[str],
         schema: dict[str, dict[str, Any]],
+        chunk_embeddings: list[list[float]] | None = None,
     ) -> list[dict[str, object]]:
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -242,6 +314,7 @@ class StudyDocumentIndexer:
                 "uploaded_at",
             ],
         )
+        vector_field = self._choose_vector_field(schema)
         published_date_field = self._choose_field(schema, ["published_date"])
 
         docs: list[dict[str, object]] = []
@@ -263,6 +336,8 @@ class StudyDocumentIndexer:
                 doc[chunk_index_field] = idx
             if uploaded_at_field:
                 doc[uploaded_at_field] = now_iso
+            if vector_field and chunk_embeddings and idx - 1 < len(chunk_embeddings):
+                doc[vector_field] = chunk_embeddings[idx - 1]
             if published_date_field:
                 doc[published_date_field] = now_iso
             docs.append(doc)
@@ -386,6 +461,48 @@ class StudyDocumentIndexer:
             if bool(meta.get("key")):
                 return name
         return None
+
+    def _choose_vector_field(self, schema: dict[str, dict[str, Any]]) -> str | None:
+        candidates = [
+            (self._settings.azure_search_study_vector_field or "").strip(),
+            "content_vector",
+        ]
+        for candidate in candidates:
+            name = (candidate or "").strip()
+            if not name:
+                continue
+            meta = schema.get(name)
+            if not isinstance(meta, dict):
+                continue
+            field_type = str(meta.get("type") or "").strip()
+            dimensions = meta.get("dimensions")
+            if field_type == "Collection(Edm.Single)" and dimensions:
+                return name
+        return None
+
+    @classmethod
+    def is_supported_pdf(cls, *, file_name: str, content_type: str | None = None) -> bool:
+        lowered_name = (file_name or "").strip().lower()
+        normalized_type = (content_type or "").strip().lower()
+        return lowered_name.endswith(".pdf") or normalized_type in {
+            "application/pdf",
+            "application/x-pdf",
+        }
+
+    @classmethod
+    def is_supported_text(cls, *, file_name: str, content_type: str | None = None) -> bool:
+        lowered_name = (file_name or "").strip().lower()
+        normalized_type = (content_type or "").strip().lower()
+        return any(lowered_name.endswith(ext) for ext in cls._TEXT_EXTENSIONS) or (
+            normalized_type in cls._TEXT_CONTENT_TYPES
+        )
+
+    @classmethod
+    def is_supported_upload(cls, *, file_name: str, content_type: str | None = None) -> bool:
+        return cls.is_supported_pdf(file_name=file_name, content_type=content_type) or cls.is_supported_text(
+            file_name=file_name,
+            content_type=content_type,
+        )
 
     async def _apply_auth(self, headers: dict[str, str]) -> str | None:
         if self._settings.azure_search_use_managed_identity:

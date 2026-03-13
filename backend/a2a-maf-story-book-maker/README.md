@@ -11,6 +11,16 @@ A multi-agent storybook engine that generates illustrated storybooks with a fixe
 - `openai/gpt-image-1.5` (Replicate) — cover + 10 scene illustration rendering
 - `gpt-4o-mini-tts` (OpenAI audio) — MP3 narration for each right-side story page
 
+## Why This Microsoft Setup Matters
+
+The storybook service is a strong example of why Dream uses Microsoft Agent Framework. Story generation is a staged workflow with planning, writing, prompt generation, and backend coordination, so a proper agent-based service is easier to reason about than a single long prompt.
+
+| Microsoft product | Why Dream uses it here | How Dream uses it here |
+|---|---|---|
+| Microsoft Agent Framework | Storybook generation is a multi-step content workflow, not one direct completion call. MAF gives Dream structured agents for planning and generation so the pipeline can be explained, debugged, and extended cleanly. | The storybook service uses MAF agents for story blueprint generation, chapter writing, and scene-prompt creation before handing off image rendering and other downstream work. |
+| Azure Container Apps | Storybook creation is a heavier backend workload than standard chat and should scale independently. Keeping it separate also protects the website and orchestrator from large story-generation jobs. | `dream-storybook-a2a` runs as its own Container App in `dream-env` and is called by the orchestrator over A2A without coupling deployments. |
+| Azure Container Registry | The storybook backend is deployed as a containerized service and needs a clean image-based release path. | Storybook images are built into `dreamacr64808802c.azurecr.io`, and the `dream-storybook-a2a` Container App is updated to the desired image tag. |
+
 ### Architecture
 
 <p align="center">
@@ -265,6 +275,72 @@ curl -X POST http://127.0.0.1:8020/a2a \
 cd backend/a2a-maf-story-book-maker
 python -m pytest -q
 ```
+
+## Current Live Deployment
+
+| Resource | Value |
+|---|---|
+| Resource Group | `dream-rg` |
+| Region | `East US` |
+| Container Apps Env | `dream-env` |
+| ACR | `dreamacr64808802c.azurecr.io` |
+| App Name | `dream-storybook-a2a` |
+| App URL | `https://dream-storybook-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io` |
+| Health | `https://dream-storybook-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/health` |
+| A2A RPC | `https://dream-storybook-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/a2a` |
+| Latest Revision | `dream-storybook-a2a--0000005` |
+| Current Image | `dreamacr64808802c.azurecr.io/dream-storybook-a2a:no-chapter-text-20260306-144021` |
+| Scale | `minReplicas=1`, `maxReplicas=3` |
+
+## Deploy to Azure
+
+Build and deploy the storybook service to Azure Container Apps with:
+
+```bash
+cd backend/a2a-maf-story-book-maker
+./scripts/deploy_azure.sh
+```
+
+Required deployment environment variables:
+
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_LOCATION`
+- `AZURE_CONTAINERAPP_ENV`
+- `AZURE_ACR_NAME`
+- `AZURE_CONTAINERAPP_NAME`
+- `OPENAI_API_KEY`
+- `REPLICATE_API_TOKEN`
+
+Typical live Azure values:
+
+- `AZURE_RESOURCE_GROUP=dream-rg`
+- `AZURE_LOCATION=eastus`
+- `AZURE_CONTAINERAPP_ENV=dream-env`
+- `AZURE_ACR_NAME=dreamacr64808802c`
+- `AZURE_CONTAINERAPP_NAME=dream-storybook-a2a`
+- `CHARACTER_BACKEND_BASE_URL=https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io`
+
+Important optional deployment settings:
+
+- `CHARACTER_BACKEND_BASE_URL` defaults to the live character app URL
+- `AZURE_MIN_REPLICAS` defaults to `1`
+- `AZURE_MAX_REPLICAS` defaults to `3`
+- `AZURE_CONTAINER_CPU` defaults to `1.0`
+- `AZURE_CONTAINER_MEMORY` defaults to `2Gi`
+
+What the deploy script does:
+
+1. Builds and tags the storybook image in ACR.
+2. Creates or updates the Azure Container App.
+3. Injects the required OpenAI and Replicate secrets.
+4. Sets the storybook runtime env vars, including the character-backend A2A connection.
+5. Keeps the app warm with `minReplicas=1` so the service does not scale to zero.
+
+Important deployment note:
+
+- If `az acr build` fails with `TasksOperationsNotAllowed`, the subscription is blocking ACR Tasks.
+- In that case, build locally for `linux/amd64`, push the image to `dreamacr64808802c.azurecr.io`, and update the Container App image manually.
 
 ## Troubleshooting
 

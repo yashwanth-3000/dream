@@ -26,6 +26,8 @@ class AzureSearchHybridRetriever:
         inherited_errors: list[str] | None = None,
         filter_expression: str | None = None,
         index_name: str | None = None,
+        vector_fields_override: list[str] | None = None,
+        query_vector: list[float] | None = None,
         provider_label: str = "azure_search_hybrid",
         source_label: str = "azure_search_hybrid",
     ) -> RetrievalResult:
@@ -77,7 +79,12 @@ class AzureSearchHybridRetriever:
                 ),
             )
 
-        payload = self._build_search_payload(query=query, filter_expression=filter_expression)
+        payload = self._build_search_payload(
+            query=query,
+            filter_expression=filter_expression,
+            vector_fields_override=vector_fields_override,
+            query_vector=query_vector,
+        )
         raw_data: dict[str, Any] | None = None
         errors = [*inherited_errors]
 
@@ -116,6 +123,22 @@ class AzureSearchHybridRetriever:
 
                 response.raise_for_status()
                 raw_data = response.json() if response.content else {}
+                if payload.get("queryType") == "semantic" and not self._has_results(raw_data):
+                    errors.append("Semantic query returned no matches; retrying with lexical query.")
+                    lexical_payload = dict(payload)
+                    lexical_payload.pop("queryType", None)
+                    lexical_payload.pop("captions", None)
+                    lexical_payload.pop("answers", None)
+                    lexical_payload.pop("semanticConfiguration", None)
+                    lexical_payload.pop("vectorQueries", None)
+                    response = await client.post(
+                        url,
+                        params=params,
+                        headers=headers,
+                        json=lexical_payload,
+                    )
+                    response.raise_for_status()
+                    raw_data = response.json() if response.content else {}
         except BaseException as exc:
             if isinstance(exc, asyncio.CancelledError):
                 task = asyncio.current_task()
@@ -154,7 +177,14 @@ class AzureSearchHybridRetriever:
             ),
         )
 
-    def _build_search_payload(self, *, query: str, filter_expression: str | None = None) -> dict[str, Any]:
+    def _build_search_payload(
+        self,
+        *,
+        query: str,
+        filter_expression: str | None = None,
+        vector_fields_override: list[str] | None = None,
+        query_vector: list[float] | None = None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "search": query,
             "top": self._settings.azure_search_top_k,
@@ -172,16 +202,27 @@ class AzureSearchHybridRetriever:
         if self._settings.azure_search_select_fields:
             payload["select"] = ",".join(self._settings.azure_search_select_fields)
 
-        vector_fields = self._settings.azure_search_vector_fields
+        if vector_fields_override is None:
+            vector_fields = self._settings.azure_search_vector_fields
+        else:
+            vector_fields = [field.strip() for field in vector_fields_override if field and field.strip()]
         if vector_fields:
-            payload["vectorQueries"] = [
-                {
+            vector_query: dict[str, Any]
+            if query_vector:
+                vector_query = {
+                    "kind": "vector",
+                    "vector": query_vector,
+                    "fields": ",".join(vector_fields),
+                    "k": self._settings.azure_search_vector_k,
+                }
+            else:
+                vector_query = {
                     "kind": "text",
                     "text": query,
                     "fields": ",".join(vector_fields),
                     "k": self._settings.azure_search_vector_k,
                 }
-            ]
+            payload["vectorQueries"] = [vector_query]
 
         return payload
 
@@ -259,6 +300,13 @@ class AzureSearchHybridRetriever:
                 break
 
         return citations
+
+    @staticmethod
+    def _has_results(payload: dict[str, Any] | None) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        values = payload.get("value")
+        return isinstance(values, list) and len(values) > 0
 
     def _pick_field(self, doc: dict[str, Any], keys: list[str]) -> str:
         lowered = {str(k).lower(): k for k in doc.keys()}

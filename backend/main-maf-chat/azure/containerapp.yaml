@@ -17,11 +17,16 @@ properties:
         value: ${EXA_API_KEY}
       - name: azure-search-api-key
         value: ${AZURE_SEARCH_API_KEY}
+      - name: azure-openai-embedding-api-key
+        value: ${AZURE_OPENAI_EMBEDDING_API_KEY}
       - name: azure-content-safety-api-key
         value: ${AZURE_CONTENT_SAFETY_API_KEY}
       - name: appinsights-connection-string
         value: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
   template:
+    scale:
+      minReplicas: ${AZURE_MIN_REPLICAS}
+      maxReplicas: ${AZURE_MAX_REPLICAS}
     containers:
       - name: maf-orchestrator
         image: ${IMAGE_NAME}
@@ -106,12 +111,24 @@ properties:
             value: ${AZURE_SEARCH_STUDY_CHUNK_INDEX_FIELD}
           - name: AZURE_SEARCH_STUDY_UPLOADED_AT_FIELD
             value: ${AZURE_SEARCH_STUDY_UPLOADED_AT_FIELD}
+          - name: AZURE_SEARCH_STUDY_VECTOR_FIELD
+            value: ${AZURE_SEARCH_STUDY_VECTOR_FIELD}
+          - name: AZURE_SEARCH_STUDY_VECTOR_DIMENSIONS
+            value: ${AZURE_SEARCH_STUDY_VECTOR_DIMENSIONS}
           - name: AZURE_SEARCH_STUDY_CHUNK_SIZE_CHARS
             value: ${AZURE_SEARCH_STUDY_CHUNK_SIZE_CHARS}
           - name: AZURE_SEARCH_STUDY_CHUNK_OVERLAP_CHARS
             value: ${AZURE_SEARCH_STUDY_CHUNK_OVERLAP_CHARS}
           - name: AZURE_SEARCH_STUDY_MAX_FILE_BYTES
             value: ${AZURE_SEARCH_STUDY_MAX_FILE_BYTES}
+          - name: AZURE_OPENAI_EMBEDDING_ENDPOINT
+            value: ${AZURE_OPENAI_EMBEDDING_ENDPOINT}
+          - name: AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
+            value: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME}
+          - name: AZURE_OPENAI_EMBEDDING_API_VERSION
+            value: ${AZURE_OPENAI_EMBEDDING_API_VERSION}
+          - name: AZURE_OPENAI_EMBEDDING_API_KEY
+            secretRef: azure-openai-embedding-api-key
 
           - name: AZURE_CONTENT_SAFETY_ENABLED
             value: ${AZURE_CONTENT_SAFETY_ENABLED}

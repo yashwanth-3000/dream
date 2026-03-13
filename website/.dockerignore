@@ -1,5 +1,10 @@
 node_modules
 .next
+.next.stale*
+.playwright-cli
+output
+*.log
+tsconfig.tsbuildinfo
 .env
 .env.*
 .git

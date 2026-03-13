@@ -20,6 +20,10 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
+AZURE_CONTAINER_CPU="${AZURE_CONTAINER_CPU:-1.0}"
+AZURE_CONTAINER_MEMORY="${AZURE_CONTAINER_MEMORY:-2Gi}"
+AZURE_MIN_REPLICAS="${AZURE_MIN_REPLICAS:-1}"
+AZURE_MAX_REPLICAS="${AZURE_MAX_REPLICAS:-3}"
 IMAGE_TAG="dream-quiz-a2a:$(date +%Y%m%d%H%M%S)"
 
 az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
@@ -48,6 +52,10 @@ if az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-group "${
     --name "${AZURE_CONTAINERAPP_NAME}" \
     --resource-group "${AZURE_RESOURCE_GROUP}" \
     --image "${IMAGE_NAME}" \
+    --cpu "${AZURE_CONTAINER_CPU}" \
+    --memory "${AZURE_CONTAINER_MEMORY}" \
+    --min-replicas "${AZURE_MIN_REPLICAS}" \
+    --max-replicas "${AZURE_MAX_REPLICAS}" \
     --set-env-vars \
       OPENAI_API_KEY=secretref:openai-api-key \
       OPENAI_MODEL=gpt-4o-mini \
@@ -64,10 +72,10 @@ else
     --registry-server "${ACR_LOGIN_SERVER}" \
     --registry-username "${ACR_USER}" \
     --registry-password "${ACR_PASS}" \
-    --cpu 1.0 \
-    --memory 2Gi \
-    --min-replicas 1 \
-    --max-replicas 3 \
+    --cpu "${AZURE_CONTAINER_CPU}" \
+    --memory "${AZURE_CONTAINER_MEMORY}" \
+    --min-replicas "${AZURE_MIN_REPLICAS}" \
+    --max-replicas "${AZURE_MAX_REPLICAS}" \
     --secrets openai-api-key="${OPENAI_API_KEY}" \
     --env-vars \
       OPENAI_API_KEY=secretref:openai-api-key \

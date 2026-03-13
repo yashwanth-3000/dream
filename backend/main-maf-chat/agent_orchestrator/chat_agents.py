@@ -317,9 +317,13 @@ class MAFKidsChatOrchestrator:
             mcp_server: str | None = None
             mcp_output: dict[str, Any] | None = None
             if study_mode_requested:
+                retrieval_query = self._build_study_retrieval_query(
+                    message=message,
+                    history=history,
+                )
                 with self._start_span("chat.retrieve_study_context") as rag_span:
                     retrieval = await self._study_rag.retrieve(
-                        query=message,
+                        query=retrieval_query,
                         session_id=study_session_id,
                     )
                     self._set_span_attr(rag_span, "chat.retrieval_provider", retrieval.provider)
@@ -342,6 +346,15 @@ class MAFKidsChatOrchestrator:
                     "errors": retrieval.diagnostics.errors,
                     "output": retrieval.diagnostics.raw,
                 }
+                if not citations:
+                    return (
+                        self._missing_study_evidence_answer(),
+                        mcp_used,
+                        mcp_server,
+                        mcp_output,
+                        citations,
+                        retrieval,
+                    )
 
             prompt = (
                 "Answer the child using the provided classification and policy.\n"
@@ -354,8 +367,9 @@ class MAFKidsChatOrchestrator:
                 )
             elif study_mode_requested:
                 prompt += (
-                    "\nStudy mode is enabled. Use study_context.sources as the primary evidence base from uploaded files. "
-                    "If evidence is missing, explicitly say which detail was not found in the uploaded documents."
+                    "\nStudy mode is enabled. Answer only from study_context.sources for this study chat. "
+                    "Do not use outside knowledge. "
+                    "If the uploaded sources do not clearly support the answer, explicitly say that the detail was not found in the uploaded file."
                 )
             temporal_query = self._is_current_datetime_query(message)
             if temporal_query:
@@ -498,6 +512,38 @@ class MAFKidsChatOrchestrator:
             clipped.append({"role": role, "content": content[:1000]})
         return clipped
 
+    def _build_study_retrieval_query(self, *, message: str, history: list[dict[str, str]]) -> str:
+        latest = " ".join((message or "").split()).strip()
+        if not latest:
+            return ""
+
+        snippets: list[str] = [latest]
+        total_chars = len(latest)
+        max_chars = 420
+
+        for item in reversed(history):
+            role = str(item.get("role") or "").strip().lower()
+            if role not in {"user", "assistant"}:
+                continue
+
+            content = " ".join(str(item.get("content") or "").split()).strip()
+            if not content:
+                continue
+
+            shortened = content[:160]
+            candidate = f"{role}: {shortened}"
+            if candidate in snippets:
+                continue
+            if total_chars + len(candidate) + 3 > max_chars:
+                continue
+
+            snippets.append(candidate)
+            total_chars += len(candidate) + 3
+            if len(snippets) >= 4:
+                break
+
+        return " | ".join(snippets)
+
     def _server_time_context(self) -> dict[str, str]:
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone()
@@ -538,6 +584,12 @@ class MAFKidsChatOrchestrator:
         return (
             f"Today is {server_time['weekday_local']}, {server_time['human_local_date']} "
             f"({server_time['date_local_iso']})."
+        )
+
+    def _missing_study_evidence_answer(self) -> str:
+        return (
+            "I could not find that in the file you uploaded for this study chat. "
+            "Ask about something that appears in that file, or upload a file that covers that topic."
         )
 
     def _is_web_search_query(self, message: str) -> bool:

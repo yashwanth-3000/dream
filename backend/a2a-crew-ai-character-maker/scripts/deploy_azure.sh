@@ -107,6 +107,10 @@ if az containerapp show --name "${AZURE_CONTAINERAPP_NAME}" --resource-group "${
     --name "${AZURE_CONTAINERAPP_NAME}" \
     --resource-group "${AZURE_RESOURCE_GROUP}" \
     --image "${IMAGE_NAME}" \
+    --cpu "${AZURE_CONTAINER_CPU}" \
+    --memory "${AZURE_CONTAINER_MEMORY}" \
+    --min-replicas "${AZURE_MIN_REPLICAS}" \
+    --max-replicas "${AZURE_MAX_REPLICAS}" \
     --set-env-vars \
       OPENAI_API_KEY=secretref:openai-api-key \
       OPENAI_MODEL="${OPENAI_MODEL}" \
@@ -175,6 +179,8 @@ PUBLIC_BASE_URL="https://${FQDN}"
 az containerapp update \
   --name "${AZURE_CONTAINERAPP_NAME}" \
   --resource-group "${AZURE_RESOURCE_GROUP}" \
+  --min-replicas "${AZURE_MIN_REPLICAS}" \
+  --max-replicas "${AZURE_MAX_REPLICAS}" \
   --set-env-vars A2A_PUBLIC_BASE_URL="${PUBLIC_BASE_URL}" \
   --output none
 

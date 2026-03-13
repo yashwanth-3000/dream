@@ -9,6 +9,15 @@ A self-contained multi-agent character engine that generates story-ready charact
 - `gpt-4.1-mini`: vision analysis of uploaded drawings/references
 - `openai/gpt-image-1.5` (Replicate): final character image rendering
 
+## Why This Microsoft Setup Matters
+
+The character service is not where most of the Microsoft AI stack lives, but it still matters in the deployment architecture. Dream keeps character generation as a separate backend so it can evolve and scale without changing the orchestrator or website.
+
+| Microsoft product | Why Dream uses it here | How Dream uses it here |
+|---|---|---|
+| Azure Container Apps | Character generation is a heavier specialist workload than a normal API proxy. It should stay independently deployable and scalable so image-generation work does not interfere with chat or website latency. | `dream-character-a2a` runs as its own Container App in `dream-env` and exposes `/health`, `/a2a`, and character-generation endpoints that the orchestrator can call over HTTPS. |
+| Azure Container Registry | This service is shipped as a container and needs a predictable registry-backed release flow. That keeps revisions reproducible and makes updates consistent with the rest of the platform. | Character-service images are pushed to `dreamacr64808802c.azurecr.io`, and the `dream-character-a2a` Container App is updated to the selected image tag. |
+
 ### Architecture
 
 <p align="center">
@@ -101,6 +110,9 @@ curl http://127.0.0.1:8000/health
 | App URL | `https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io` |
 | Health | `https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/health` |
 | A2A RPC | `https://dream-character-a2a.greenplant-2d9bb135.eastus.azurecontainerapps.io/a2a` |
+| Latest Revision | `dream-character-a2a--0000001` |
+| Current Image | `dreamacr64808802c.azurecr.io/dream-character-a2a:latest` |
+| Scale | `minReplicas=1`, `maxReplicas=3` |
 
 ### Subscription Limitations and Workarounds
 
@@ -116,6 +128,52 @@ If your subscription supports ACR Tasks, you can use:
 ```bash
 ./scripts/deploy_azure.sh
 ```
+
+## Deploy to Azure
+
+Build and deploy the character service with:
+
+```bash
+cd backend/a2a-crew-ai-character-maker
+./scripts/deploy_azure.sh
+```
+
+Required deployment environment variables:
+
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_LOCATION`
+- `AZURE_CONTAINERAPP_ENV`
+- `AZURE_ACR_NAME`
+- `AZURE_CONTAINERAPP_NAME`
+- `OPENAI_API_KEY`
+- `REPLICATE_API_TOKEN`
+
+Typical live Azure values:
+
+- `AZURE_RESOURCE_GROUP=dream-rg`
+- `AZURE_LOCATION=eastus`
+- `AZURE_CONTAINERAPP_ENV=dream-env`
+- `AZURE_ACR_NAME=dreamacr64808802c`
+- `AZURE_CONTAINERAPP_NAME=dream-character-a2a`
+
+Important optional deployment settings:
+
+- `OPENAI_MODEL` defaults to `openai/gpt-4o-mini`
+- `OPENAI_VISION_MODEL` defaults to `gpt-4.1-mini`
+- `A2A_RPC_PATH` defaults to `/a2a`
+- `AZURE_MIN_REPLICAS` defaults to `1`
+- `AZURE_MAX_REPLICAS` defaults to `3`
+- `AZURE_CONTAINER_CPU` defaults to `1.0`
+- `AZURE_CONTAINER_MEMORY` defaults to `2Gi`
+
+What the deploy script does:
+
+1. Builds the character image in ACR.
+2. Creates or updates the `dream-character-a2a` Container App.
+3. Injects the OpenAI and Replicate secrets.
+4. Sets the A2A runtime env vars for the public agent endpoint.
+5. Keeps the app warm with `minReplicas=1`.
 
 ## API Reference
 

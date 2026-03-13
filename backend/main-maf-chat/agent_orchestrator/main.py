@@ -431,7 +431,7 @@ async def orchestrate_chat(
 
 
 # ---------------------------------------------------------------------------
-# Study-mode PDF ingestion
+# Study-mode document ingestion
 # ---------------------------------------------------------------------------
 
 @app.post("/api/v1/orchestrate/study/upload", response_model=StudyUploadResponse)
@@ -442,25 +442,31 @@ async def upload_study_pdf(
 ) -> StudyUploadResponse:
     filename = (file.filename or "study-document.pdf").strip() or "study-document.pdf"
     content_type = (file.content_type or "").strip().lower()
-    if not filename.lower().endswith(".pdf") and content_type not in {"application/pdf", "application/x-pdf"}:
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported in study mode.")
+    if not StudyDocumentIndexer.is_supported_upload(file_name=filename, content_type=content_type):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported study file type. Supported files: PDF, TXT, MD, CSV, JSON, XML, HTML, YAML, LOG."
+            ),
+        )
 
     payload = await file.read()
     if not payload:
-        raise HTTPException(status_code=400, detail="Uploaded PDF is empty.")
+        raise HTTPException(status_code=400, detail="Uploaded study file is empty.")
 
     max_size = settings.azure_search_study_max_file_bytes
     if len(payload) > max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"Uploaded PDF exceeds size limit ({max_size} bytes).",
+            detail=f"Uploaded study file exceeds size limit ({max_size} bytes).",
         )
 
     indexer = StudyDocumentIndexer(settings)
     try:
-        result = await indexer.upload_pdf(
+        result = await indexer.upload_document(
             file_name=filename,
             file_bytes=payload,
+            content_type=content_type,
             session_id=session_id,
         )
     except RuntimeError as exc:
@@ -471,7 +477,7 @@ async def upload_study_pdf(
         raise HTTPException(status_code=502, detail=f"Study upload failed: {exc}") from exc
 
     if result.chunks_indexed <= 0:
-        detail = "; ".join(result.errors) if result.errors else "No chunks were indexed for this PDF."
+        detail = "; ".join(result.errors) if result.errors else "No chunks were indexed for this study file."
         raise HTTPException(status_code=502, detail=detail)
 
     return StudyUploadResponse(

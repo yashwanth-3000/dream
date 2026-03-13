@@ -78,3 +78,5 @@ __pycache__/
 # typescript
 *.tsbuildinfo
 /website/next-env.d.ts
+
+.playwright-cli
