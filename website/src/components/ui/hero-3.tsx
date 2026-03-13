@@ -228,24 +228,34 @@ export const AnimatedMarqueeHero: React.FC<AnimatedMarqueeHeroProps> = ({
             },
           }}
         >
-          {duplicatedImages.map((src, index) => (
-            <div
-              key={index}
-              className="relative aspect-[3/4] h-48 shrink-0 md:h-64"
-              style={{
-                rotate: `${index % 2 === 0 ? -2 : 5}deg`,
-              }}
-            >
-              <Image
-                src={src}
-                alt={`Showcase image ${index + 1}`}
-                fill
-                unoptimized
-                sizes="(max-width: 768px) 192px, 256px"
-                className="h-full w-full rounded-2xl object-cover shadow-md"
-              />
-            </div>
-          ))}
+          {duplicatedImages.map((src, index) => {
+            const cardIndex = index % images.length;
+            return (
+              <motion.div
+                key={index}
+                className="relative aspect-[3/4] h-48 shrink-0 md:h-64"
+                style={{ rotate: `${index % 2 === 0 ? -2 : 5}deg` }}
+                initial={{ opacity: 0, y: 90, scale: 0.82 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 62,
+                  damping: 18,
+                  mass: 1.1,
+                  delay: 0.55 + cardIndex * 0.08,
+                }}
+              >
+                <Image
+                  src={src}
+                  alt={`Showcase image ${index + 1}`}
+                  fill
+                  unoptimized
+                  sizes="(max-width: 768px) 192px, 256px"
+                  className="h-full w-full rounded-2xl object-cover shadow-md"
+                />
+              </motion.div>
+            );
+          })}
         </motion.div>
       </div>
     </section>

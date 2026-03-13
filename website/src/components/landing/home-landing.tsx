@@ -287,15 +287,27 @@ export default function HomeLanding() {
               animate={{ x: ["0%", "-50%"] }}
               transition={{ ease: "linear", duration: 36, repeat: Infinity }}
             >
-              {duplicatedMarqueeImages.map((src, idx) => (
-                <div
-                  key={idx}
-                  className={styles.heroMarqueeCard}
-                  style={{ transform: `rotate(${idx % 2 === 0 ? "-2deg" : "5deg"})` }}
-                >
-                  <img src={src} alt="" loading="lazy" className={styles.heroMarqueeImg} />
-                </div>
-              ))}
+              {duplicatedMarqueeImages.map((src, idx) => {
+                const cardIndex = idx % heroMarqueeImages.length;
+                const rotate = idx % 2 === 0 ? -2 : 5;
+                return (
+                  <motion.div
+                    key={idx}
+                    className={styles.heroMarqueeCard}
+                    initial={{ opacity: 0, y: 88, scale: 0.82, rotate }}
+                    animate={{ opacity: 1, y: 0, scale: 1, rotate }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 58,
+                      damping: 17,
+                      mass: 1.1,
+                      delay: 0.5 + cardIndex * 0.075,
+                    }}
+                  >
+                    <img src={src} alt="" loading="lazy" className={styles.heroMarqueeImg} />
+                  </motion.div>
+                );
+              })}
             </motion.div>
           </div>
         </section>
@@ -663,50 +675,6 @@ export default function HomeLanding() {
           </div>
         </section>
 
-        <section className={styles.section}>
-          <div className={styles.caseGrid}>
-            <motion.article
-              className={styles.caseCopy}
-              variants={blockMotion}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, amount: 0.35 }}
-              custom={0.03}
-            >
-              <p className={styles.sectionKicker}>Dream in production</p>
-              <AnimatedSubheading text="One orchestrator coordinating the full creation loop." />
-              <p className={styles.sectionCopy}>
-                Dream handles more than one output type in a single system.
-                A request can trigger character creation, storybook generation,
-                or quiz generation, then store results as tracked jobs with
-                timelines, assets, and reusable outputs for future runs.
-              </p>
-              <div className={styles.caseStats}>
-                <div>
-                  <h3>12</h3>
-                  <p>Storybook spreads generated per run (cover + scene pages)</p>
-                </div>
-                <div>
-                  <h3>2 Streams</h3>
-                  <p>Live run updates in chat (NDJSON) and job details (SSE)</p>
-                </div>
-              </div>
-            </motion.article>
-
-            <motion.div
-              className={styles.caseVisual}
-              variants={blockMotion}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, amount: 0.35 }}
-              custom={0.13}
-              aria-hidden
-            >
-              <div className={styles.bloomTall} />
-            </motion.div>
-          </div>
-        </section>
-
         <section className={styles.section} id="faq">
           <motion.div
             className={styles.introBlock}
@@ -786,7 +754,7 @@ export default function HomeLanding() {
               Agent-orchestrated<br />story generation.
             </p>
             <a
-              href="https://github.com/yashwanth-3000/Dream"
+              href="https://github.com/yashwanth-3000/dream"
               target="_blank"
               rel="noopener noreferrer"
               className={styles.footerGithub}
@@ -824,7 +792,7 @@ export default function HomeLanding() {
             <p className={styles.colTitle}>Company</p>
             <Link href="/about" className={styles.footerLink}>About Dream</Link>
             <a
-              href="https://github.com/yashwanth-3000/Dream"
+              href="https://github.com/yashwanth-3000/dream"
               target="_blank"
               rel="noopener noreferrer"
               className={styles.footerLink}

@@ -101,7 +101,7 @@ export default function DreamNavbar({ collapsed = false, collapsedAlign = "cente
               })}
 
               <a
-                href="https://github.com/yashwanth-3000/Dream"
+                href="https://github.com/yashwanth-3000/dream"
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => setMenuOpen(false)}
@@ -157,7 +157,7 @@ export default function DreamNavbar({ collapsed = false, collapsedAlign = "cente
 
         {/* GitHub */}
         <a
-          href="https://github.com/yashwanth-3000/Dream"
+          href="https://github.com/yashwanth-3000/dream"
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center rounded-full p-1.5 text-[#c4b5a8] transition-all duration-200 hover:text-[#f2e7dc]"
